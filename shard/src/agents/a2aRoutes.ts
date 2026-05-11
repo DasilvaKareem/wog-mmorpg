@@ -13,7 +13,10 @@ import { getErc8004ChainName, getOfficialErc8004Addresses } from "../erc8004/off
 import { sendInboxMessage } from "./agentInbox.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { SKALE_BASE_CHAIN_ID } from "../blockchain/biteChain.js";
-import { getCharacterProjectionByAgentId } from "../character/characterProjectionStore.js";
+import {
+  getCharacterProjectionByAgentId,
+  listCharacterProjectionsForWallets,
+} from "../character/characterProjectionStore.js";
 
 const BASE_URL = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
 const A2A_CHAIN_NAME = getErc8004ChainName(SKALE_BASE_CHAIN_ID);
@@ -81,14 +84,39 @@ function buildAgentCard(walletAddress: string, entity?: { name: string; classId?
 /** Find an entity by wallet address across all zones */
 function findEntityByWallet(wallet: string) {
   const lower = wallet.toLowerCase();
-  for (const [, entities] of getAllEntities()) {
-    for (const entity of Object.values(entities)) {
-      if (entity.walletAddress?.toLowerCase() === lower) {
-        return entity;
-      }
+  for (const entity of getAllEntities().values()) {
+    if (entity.walletAddress?.toLowerCase() === lower) {
+      return entity;
     }
   }
   return undefined;
+}
+
+async function findProjectionByWallet(wallet: string) {
+  const projections = await listCharacterProjectionsForWallets([wallet]).catch(() => []);
+  if (projections.length === 0) return null;
+  return projections.find((projection) => projection.chainRegistrationStatus === "registered") ?? projections[0] ?? null;
+}
+
+async function resolveAgentCardEntity(wallet: string) {
+  const liveEntity = findEntityByWallet(wallet);
+  if (liveEntity) {
+    return {
+      name: liveEntity.name,
+      classId: liveEntity.classId,
+      level: liveEntity.level,
+      zoneId: liveEntity.region,
+    };
+  }
+
+  const projection = await findProjectionByWallet(wallet);
+  if (!projection) return undefined;
+  return {
+    name: projection.characterName,
+    classId: projection.classId,
+    level: projection.level,
+    zoneId: projection.zoneId,
+  };
 }
 
 export function registerA2ARoutes(server: FastifyInstance): void {
@@ -103,8 +131,8 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       return reply.status(400).send({ error: "Invalid wallet address" });
     }
 
-    const entity = findEntityByWallet(wallet);
-    const card = buildAgentCard(wallet, entity as any);
+    const entity = await resolveAgentCardEntity(wallet);
+    const card = buildAgentCard(wallet, entity);
 
     reply.header("content-type", "application/json");
     return card;
@@ -167,10 +195,10 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       }
 
       case "agent/card": {
-        const entity = findEntityByWallet(wallet);
+        const entity = await resolveAgentCardEntity(wallet);
         return {
           jsonrpc: "2.0",
-          result: buildAgentCard(wallet, entity as any),
+          result: buildAgentCard(wallet, entity),
           id,
         };
       }
