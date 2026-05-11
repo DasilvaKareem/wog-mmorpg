@@ -2895,4 +2895,41 @@ Strategy options: aggressive, balanced, defensive`;
       return reply.send({ ok: true, objectives });
     }
   );
+
+  // POST /admin/agents/wakeup — bulk-reset stuck idle agents to focus=questing.
+  // Free-tier circuit-breaker (agentRunner.ts:1357) pins focus=idle on repeated
+  // block; without a supervisor those bots never recover. Token-gated.
+  server.post<{
+    Body: { token: string; toFocus?: "questing" | "combat" | "gathering" };
+  }>("/admin/agents/wakeup", async (request, reply) => {
+    const { token, toFocus = "questing" } = request.body;
+    const expected = process.env.ADMIN_WAKEUP_TOKEN;
+    if (!expected || token !== expected) {
+      return reply.code(403).send({ error: "Forbidden" });
+    }
+
+    const { listEnabledAgentWallets, getAgentConfig, patchAgentConfig, clearAgentRuntimeState } =
+      await import("./agentConfigStore.js");
+
+    const wallets = await listEnabledAgentWallets();
+    let woken = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const wallet of wallets) {
+      try {
+        const cfg = await getAgentConfig(wallet);
+        if (!cfg || cfg.focus !== "idle") { skipped++; continue; }
+        await patchAgentConfig(wallet, { focus: toFocus, targetZone: undefined });
+        await clearAgentRuntimeState(wallet);
+        const runner = agentManager.getRunner(wallet);
+        if (runner) await runner.clearScript();
+        woken++;
+      } catch (err: any) {
+        errors.push(`${wallet.slice(0, 8)}: ${err.message?.slice(0, 80)}`);
+      }
+    }
+
+    return reply.send({ ok: true, total: wallets.length, woken, skipped, errors });
+  });
 }
