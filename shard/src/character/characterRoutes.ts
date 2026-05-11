@@ -288,11 +288,15 @@ function buildCharacterEntryFromProjection(
   const xp = liveMatches ? liveEntity!.xp : projection.xp;
   const classDef = CLASS_DEFINITIONS.find((entry) => entry.id === projection.classId);
   const fullName = classDef ? `${projection.characterName} the ${classDef.name}` : projection.characterName;
+  const resolvedCharacterTokenId = saved?.characterTokenId ?? projection.characterTokenId ?? liveEntity?.characterTokenId ?? null;
+  const resolvedAgentId = liveMatches
+    ? (liveEntity?.agentId ?? saved?.agentId ?? projection.agentId)
+    : (saved?.agentId ?? projection.agentId);
 
   return {
-    tokenId: saved?.characterTokenId ?? projection.characterTokenId ?? `projection-${projection.walletAddress}-${projection.normalizedName}-${projection.classId}`,
-    characterTokenId: saved?.characterTokenId ?? projection.characterTokenId ?? null,
-    agentId: liveMatches ? liveEntity!.agentId : (saved?.agentId ?? projection.agentId),
+    tokenId: resolvedCharacterTokenId ?? `projection-${projection.walletAddress}-${projection.normalizedName}-${projection.classId}`,
+    characterTokenId: resolvedCharacterTokenId,
+    agentId: resolvedAgentId,
     agentRegistrationTxHash: saved?.agentRegistrationTxHash ?? projection.agentRegistrationTxHash,
     chainRegistrationStatus: resolveBootstrapChainRegistrationStatus(
       bootstrapStatus,
