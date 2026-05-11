@@ -29,6 +29,7 @@ import {
   markChainIntentRetryable,
   markChainIntentSubmitted,
   updateChainTxAttempt,
+  updateLatestChainTxAttemptForIntent,
   upsertAggregatedChainIntent,
   type ChainTxAttemptRecord,
   type ChainWriteIntentRecord,
@@ -535,6 +536,10 @@ async function flushItemIntent(intent: ChainWriteIntentRecord): Promise<void> {
   if (claimed.txHash && claimed.lastSubmittedAt && (Date.now() - claimed.lastSubmittedAt) >= CHAIN_BATCHER_SUBMITTED_RECOVERY_MS) {
     const receipt = await getChainReceiptStatus(claimed.txHash);
     if (receipt.found && receipt.success) {
+      await updateLatestChainTxAttemptForIntent(
+        claimed.intentId,
+        await buildConfirmedAttemptPatch(claimed.txHash)
+      );
       await markChainIntentConfirmed(claimed.intentId, claimed.txHash);
       return;
     }
@@ -591,6 +596,10 @@ async function flushGoldIntent(intent: ChainWriteIntentRecord): Promise<void> {
   if (claimed.txHash && claimed.lastSubmittedAt && (Date.now() - claimed.lastSubmittedAt) >= CHAIN_BATCHER_SUBMITTED_RECOVERY_MS) {
     const receipt = await getChainReceiptStatus(claimed.txHash);
     if (receipt.found && receipt.success) {
+      await updateLatestChainTxAttemptForIntent(
+        claimed.intentId,
+        await buildConfirmedAttemptPatch(claimed.txHash)
+      );
       await markChainIntentConfirmed(claimed.intentId, claimed.txHash);
       return;
     }

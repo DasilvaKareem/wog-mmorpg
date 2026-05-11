@@ -1136,3 +1136,13 @@ export async function listChainTxAttempts(filters?: {
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(offset, offset + limit);
 }
+
+export async function updateLatestChainTxAttemptForIntent(
+  intentId: string,
+  patch: Partial<ChainTxAttemptRecord>
+): Promise<ChainTxAttemptRecord | null> {
+  const latest = await listChainTxAttempts({ intentId, limit: 1, offset: 0 });
+  const attempt = latest[0];
+  if (!attempt) return null;
+  return await updateChainTxAttempt(attempt.attemptId, patch);
+}

@@ -15,6 +15,7 @@ import {
   markChainIntentSubmitted,
   updateChainIntent,
   updateChainTxAttempt,
+  updateLatestChainTxAttemptForIntent,
 } from "./chainIntentStore.js";
 
 async function buildConfirmedAttemptPatch(
@@ -861,6 +862,12 @@ async function recoverSubmittedChainOperation(
   if (record.txHash) {
     const receipt = await getChainReceiptStatus(record.txHash);
     if (receipt.found && receipt.success) {
+      if (record.intentId) {
+        await updateLatestChainTxAttemptForIntent(
+          record.intentId,
+          await buildConfirmedAttemptPatch(record.txHash)
+        );
+      }
       await updateChainOperation(record.operationId, {
         status: "completed",
         completedAt: now,
