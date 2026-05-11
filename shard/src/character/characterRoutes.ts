@@ -173,6 +173,32 @@ function serializeLiveCharacterEntity(
 }
 
 function compareCharacterEntries(left: CharacterListEntry, right: CharacterListEntry): number {
+  const registrationRank = (entry: CharacterListEntry): number => {
+    const status = entry.chainRegistrationStatus ?? "";
+    const hasAgent = Boolean(entry.agentId);
+    const hasTx = Boolean(entry.agentRegistrationTxHash);
+    if (status === "registered" && hasAgent) return 5;
+    if (status === "registered") return 4;
+    if (status === "identity_pending") return 3;
+    if (status === "mint_confirmed") return 2;
+    if (status === "pending_mint") return 1;
+    return 0;
+  };
+
+  const leftRegistrationRank = registrationRank(left);
+  const rightRegistrationRank = registrationRank(right);
+  if (leftRegistrationRank !== rightRegistrationRank) {
+    return leftRegistrationRank - rightRegistrationRank;
+  }
+
+  if (hasAgentIdentity(left) !== hasAgentIdentity(right)) {
+    return Number(hasAgentIdentity(left)) - Number(hasAgentIdentity(right));
+  }
+
+  if (hasTxEvidence(left) !== hasTxEvidence(right)) {
+    return Number(hasTxEvidence(left)) - Number(hasTxEvidence(right));
+  }
+
   const leftLevel = Number(left.properties.level ?? 1);
   const rightLevel = Number(right.properties.level ?? 1);
   if (leftLevel !== rightLevel) return leftLevel - rightLevel;
@@ -186,6 +212,14 @@ function compareCharacterEntries(left: CharacterListEntry, right: CharacterListE
   if (leftToken !== rightToken) return rightToken - leftToken;
 
   return 0;
+}
+
+function hasAgentIdentity(entry: CharacterListEntry): boolean {
+  return typeof entry.agentId === "string" && /^\d+$/.test(entry.agentId.trim());
+}
+
+function hasTxEvidence(entry: CharacterListEntry): boolean {
+  return typeof entry.agentRegistrationTxHash === "string" && entry.agentRegistrationTxHash.trim().length > 0;
 }
 
 function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterListEntry[] {
