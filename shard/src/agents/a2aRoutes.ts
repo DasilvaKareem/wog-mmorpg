@@ -20,7 +20,11 @@ import {
 
 const BASE_URL = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
 const A2A_CHAIN_NAME = getErc8004ChainName(SKALE_BASE_CHAIN_ID);
-const ERC8004_MODE = getOfficialErc8004Addresses(SKALE_BASE_CHAIN_ID) ? "official" : "local-mock";
+const OFFICIAL_ERC8004 = getOfficialErc8004Addresses(SKALE_BASE_CHAIN_ID);
+const ERC8004_MODE = OFFICIAL_ERC8004 ? "official" : "local-mock";
+const ERC8004_REGISTRY = OFFICIAL_ERC8004?.identity ?? process.env.IDENTITY_REGISTRY_ADDRESS ?? null;
+const ERC8004_TYPE = "https://eips.ethereum.org/EIPS/eip-8004#registration-v1";
+const A2A_VERSION = "0.3.0";
 
 /** Supported A2A JSON-RPC methods */
 const A2A_METHODS = ["message/send", "message/read", "agent/card"] as const;
@@ -29,8 +33,69 @@ const A2A_METHODS = ["message/send", "message/read", "agent/card"] as const;
  * Build an A2A Agent Card for a WoG agent.
  * Follows the Google A2A protocol spec.
  */
-function buildAgentCard(walletAddress: string, entity?: { name: string; classId?: string; level?: number; zoneId?: string }) {
+function buildAgentImageDataUri(name: string, classId?: string): string {
+  const safeName = (name || "WoG Agent").trim();
+  const title = safeName.slice(0, 24);
+  const initials = safeName
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "WG";
+  const subtitle = (classId || "adventurer").slice(0, 18);
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f4d3a" />
+      <stop offset="100%" stop-color="#c08b2f" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="48" fill="url(#bg)" />
+  <circle cx="256" cy="190" r="92" fill="rgba(255,255,255,0.18)" />
+  <text x="256" y="220" text-anchor="middle" font-family="Georgia, serif" font-size="88" font-weight="700" fill="#fff">${initials}</text>
+  <text x="256" y="360" text-anchor="middle" font-family="Georgia, serif" font-size="28" fill="#fff">${title}</text>
+  <text x="256" y="400" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#f7e6b5">${subtitle}</text>
+</svg>`.trim();
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function buildRegistrations(agentId?: string | null) {
+  if (!agentId || !ERC8004_REGISTRY) return [];
+  return [
+    {
+      agentId: Number(agentId),
+      agentRegistry: `eip155:${SKALE_BASE_CHAIN_ID}:${ERC8004_REGISTRY}`,
+    },
+  ];
+}
+
+function buildServices(walletAddress: string) {
+  const a2aEndpoint = `${BASE_URL}/a2a/${walletAddress}`;
+  return [
+    {
+      name: "web",
+      endpoint: BASE_URL,
+    },
+    {
+      name: "A2A",
+      endpoint: a2aEndpoint,
+      version: A2A_VERSION,
+    },
+  ];
+}
+
+function buildAgentCard(walletAddress: string, entity?: {
+  name: string;
+  classId?: string;
+  level?: number;
+  zoneId?: string;
+  agentId?: string | null;
+}) {
+  const resolvedName = entity?.name ?? `WoG Agent ${walletAddress.slice(0, 8)}`;
   return {
+    type: ERC8004_TYPE,
+    image: buildAgentImageDataUri(resolvedName, entity?.classId),
     name: entity?.name ?? `WoG Agent ${walletAddress.slice(0, 8)}`,
     description: entity
       ? `Level ${entity.level ?? 1} ${entity.classId ?? "adventurer"} in World of Geneva${entity.zoneId ? `, currently in ${entity.zoneId}` : ""}`
@@ -50,6 +115,8 @@ function buildAgentCard(walletAddress: string, entity?: { name: string; classId?
     },
     defaultInputModes: ["text"],
     defaultOutputModes: ["text"],
+    services: buildServices(walletAddress),
+    registrations: buildRegistrations(entity?.agentId),
     skills: [
       {
         id: "trade",
@@ -75,7 +142,7 @@ function buildAgentCard(walletAddress: string, entity?: { name: string; classId?
       chain: A2A_CHAIN_NAME,
       chainId: SKALE_BASE_CHAIN_ID,
       mode: ERC8004_MODE,
-      registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
+      registry: ERC8004_REGISTRY,
       walletAddress,
     },
   };
@@ -100,22 +167,24 @@ async function findProjectionByWallet(wallet: string) {
 
 async function resolveAgentCardEntity(wallet: string) {
   const liveEntity = findEntityByWallet(wallet);
+  const projection = await findProjectionByWallet(wallet);
   if (liveEntity) {
     return {
       name: liveEntity.name,
       classId: liveEntity.classId,
       level: liveEntity.level,
       zoneId: liveEntity.region,
+      agentId: liveEntity.agentId?.toString() ?? projection?.agentId ?? null,
     };
   }
 
-  const projection = await findProjectionByWallet(wallet);
   if (!projection) return undefined;
   return {
     name: projection.characterName,
     classId: projection.classId,
     level: projection.level,
     zoneId: projection.zoneId,
+    agentId: projection.agentId,
   };
 }
 
@@ -247,6 +316,8 @@ export function registerA2ARoutes(server: FastifyInstance): void {
   server.get("/.well-known/agent.json", async (_req, reply) => {
     reply.header("content-type", "application/json");
     return {
+      type: ERC8004_TYPE,
+      image: buildAgentImageDataUri("World of Geneva Shard", "mmorpg-shard"),
       name: "World of Geneva Shard",
       description: "On-chain MMORPG game shard. AI agents are the players — deploy one with POST /x402/deploy, then explore, fight, quest, craft, and trade via the REST API.",
       url: `${BASE_URL}/a2a`,
@@ -264,6 +335,17 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       },
       defaultInputModes: ["text"],
       defaultOutputModes: ["text"],
+      services: [
+        {
+          name: "web",
+          endpoint: BASE_URL,
+        },
+        {
+          name: "A2A",
+          endpoint: `${BASE_URL}/.well-known/agent.json`,
+          version: A2A_VERSION,
+        },
+      ],
       skills: [
         {
           id: "deploy",
@@ -283,7 +365,7 @@ export function registerA2ARoutes(server: FastifyInstance): void {
         chain: A2A_CHAIN_NAME,
         chainId: SKALE_BASE_CHAIN_ID,
         mode: ERC8004_MODE,
-        registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
+        registry: ERC8004_REGISTRY,
       },
     };
   });
