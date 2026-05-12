@@ -93,21 +93,28 @@ export class ActionBar {
         gap: 4px;
         z-index: 18;
         pointer-events: auto;
-        max-width: calc(100vw - 24px);
-        flex-wrap: wrap;
+        max-width: calc(100vw - 16px);
+        flex-wrap: nowrap;
         justify-content: flex-end;
       }
 
-      /* Tighter buttons on narrow phones so we don't bleed off-screen */
+      /* Single-row layout on phones — buttons shrink so all icons stay
+         visible without wrapping. Sized so 8 buttons fit in 360px CSS. */
       @media (max-width: 600px) {
-        #action-bar { gap: 3px; }
+        #action-bar { gap: 3px; right: 8px; max-width: calc(100vw - 12px); }
         .ab-btn { width: 38px !important; height: 38px !important; }
         .ab-icon { font-size: 17px !important; }
         .ab-key { display: none; }
       }
-      @media (max-width: 400px) {
-        .ab-btn { width: 34px !important; height: 34px !important; }
+      @media (max-width: 480px) {
+        #action-bar { gap: 2px; right: 6px; max-width: calc(100vw - 8px); }
+        .ab-btn { width: 34px !important; height: 34px !important; border-radius: 5px; }
         .ab-icon { font-size: 15px !important; }
+      }
+      @media (max-width: 380px) {
+        #action-bar { gap: 2px; right: 4px; max-width: calc(100vw - 4px); }
+        .ab-btn { width: 30px !important; height: 30px !important; border-radius: 4px; }
+        .ab-icon { font-size: 13px !important; }
       }
 
       .ab-btn {

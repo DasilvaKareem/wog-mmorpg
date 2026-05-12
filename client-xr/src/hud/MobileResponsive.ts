@@ -43,8 +43,8 @@ export function installMobileResponsiveStyles(): void {
         right: 8px !important;
         left: auto !important;
       }
-      /* The action bar may wrap to two rows on narrow viewports — give
-         panels a little extra room to clear it. */
+      /* Single-row action bar (~38-44px tall + 12px bottom inset) — give
+         the panels a little headroom so they don't sit on top of icons. */
       #notifications-panel,
       #inbox-panel,
       #outgoing-trades-panel,
@@ -55,8 +55,8 @@ export function installMobileResponsiveStyles(): void {
       #player-panel,
       #settings-panel,
       #world-map {
-        bottom: 100px !important;
-        max-height: calc(100vh - 140px) !important;
+        bottom: 60px !important;
+        max-height: calc(100vh - 80px) !important;
       }
     }
     @media (max-width: 400px) {
