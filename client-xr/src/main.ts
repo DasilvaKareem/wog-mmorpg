@@ -46,6 +46,7 @@ import { NotificationsPanel } from "./hud/NotificationsPanel.js";
 import { installMobileResponsiveStyles } from "./hud/MobileResponsive.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
+import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
@@ -1141,6 +1142,7 @@ const skillsPanel = new SkillsPanel({
   },
 });
 const vitalsPanel = new VitalsPanel();
+const buffBar = new BuffBar();
 let lastInventoryPollTime = 0;
 let lastProfessionPollTime = 0;
 let lastLearnedTechPollTime = 0;
@@ -1985,6 +1987,7 @@ async function pollNearbyZones() {
     updateRunPanelFromEntity(ownEntityId ? merged[ownEntityId] : null);
     latestEntities = merged;
     vitalsPanel.update(ownEntityId ? merged[ownEntityId] : null, merged);
+    buffBar.update(ownEntityId ? merged[ownEntityId] : null);
 
     // Minimap — pass camera in server coords
     const cameraSX = target.x / COORD_SCALE;

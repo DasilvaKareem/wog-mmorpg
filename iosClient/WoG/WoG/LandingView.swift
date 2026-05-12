@@ -38,7 +38,7 @@ struct LandingView: View {
             .ignoresSafeArea()
         case .game:
             GameWebView(
-                url: URL(string: "https://worldofgeneva.com/world")!,
+                url: URL(string: "https://worldofgeneva.com/app/world")!,
                 wallet: wallet,
                 token: token
             )
@@ -49,7 +49,7 @@ struct LandingView: View {
 
 // MARK: - Login WebView
 
-private let loginURL = "https://worldofgeneva.com/mobile"
+private let loginURL = "https://worldofgeneva.com/app/mobile"
 private let callbackURL = "wog://auth/callback"
 
 /// SwiftUI view that hosts the login WKWebView with a loading overlay.
