@@ -734,6 +734,92 @@ export async function joinPvpQueue(
   return postJsonWithFallback("/api/pvp/queue/join", token, body);
 }
 
+export async function cancelPvpBattle(
+  token: string,
+  battleId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback(`/api/pvp/battle/${battleId}/cancel`, token, {});
+}
+
+// ── Duels ────────────────────────────────────────────────────────
+
+export async function challengeDuel(
+  token: string,
+  body: { targetWallet: string; format?: string },
+): Promise<{ ok: boolean; challengeId?: string; expiresAtMs?: number; error?: string }> {
+  return postJsonWithFallback("/api/pvp/duel/challenge", token, body);
+}
+
+export async function acceptDuel(
+  token: string,
+  challengeId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/api/pvp/duel/accept", token, { challengeId });
+}
+
+export async function declineDuel(
+  token: string,
+  challengeId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/api/pvp/duel/decline", token, { challengeId });
+}
+
+// ── Prediction markets ────────────────────────────────────────────
+
+export interface PredictionPoolStats {
+  poolId: string;
+  battleId: string;
+  status: string;
+  totalStaked: string;
+  participantCount: number;
+  lockTimestamp: number;
+  timeUntilLock?: number;
+}
+
+export interface BetHistoryRecord {
+  positionId: string;
+  poolId: string;
+  battleId: string;
+  choice: "RED" | "BLUE";
+  amount: string;
+  timestamp: number;
+  result?: "win" | "loss";
+  payout?: string;
+  profit?: string;
+  claimed: boolean;
+}
+
+export async function fetchActivePools(): Promise<PredictionPoolStats[]> {
+  const data = await fetchJsonWithFallback<{ pools: PredictionPoolStats[] }>(
+    "/api/prediction/pools/active",
+  );
+  return data?.pools ?? [];
+}
+
+export async function placeBet(
+  token: string,
+  body: { poolId: string; choice: "RED" | "BLUE"; amount: number; walletAddress: string },
+): Promise<{ ok: boolean; position?: { positionId: string }; error?: string }> {
+  return postJsonWithFallback("/api/prediction/bet", token, body);
+}
+
+export async function claimWinnings(
+  token: string,
+  poolId: string,
+  walletAddress: string,
+): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  return postJsonWithFallback(`/api/prediction/pool/${poolId}/claim`, token, { walletAddress });
+}
+
+export async function fetchBettingHistory(
+  walletAddress: string,
+): Promise<{ bets: BetHistoryRecord[]; totalStaked: string; netProfit: string } | null> {
+  const data = await fetchJsonWithFallback<{
+    history: { bets: BetHistoryRecord[]; totalStaked: string; netProfit: string };
+  }>(`/api/prediction/history/${walletAddress}`);
+  return data?.history ?? null;
+}
+
 export async function fetchPvpLeaderboard(): Promise<PvpLeaderboardEntry[]> {
   const data = await fetchJsonWithFallback<{ leaderboard: PvpLeaderboardEntry[] }>("/api/pvp/leaderboard");
   return data?.leaderboard ?? [];

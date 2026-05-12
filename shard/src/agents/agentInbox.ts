@@ -27,6 +27,9 @@ export type InboxMessageType =
   | "trade-request"    // "I want to buy/sell X" (notification only)
   | "trade-offer"      // actionable targeted P2P trade offer carrying { tradeId, askPrice, ... }
   | "trade-result"     // outcome notification (accepted / declined / expired) for the SELLER
+  | "match-found"      // your PvP queue just paired — carries { battleId, format, team, arenaName }
+  | "duel-request"     // someone challenged you to a 1v1; carries { challengeId, challengerName, format, expiresAtMs }
+  | "duel-result"      // your duel was accepted/declined/expired
   | "party-invite"     // "Join my party"
   | "broadcast"        // zone-wide announcement
   | "system";          // game event notification (level-up, death, quest complete)

@@ -21,6 +21,7 @@ type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
 import { ZoneNameBadge } from "./hud/IntentModeBadge.js";
 import { ZoneBanner } from "./hud/ZoneBanner.js";
+import { EventBanner } from "./hud/EventBanner.js";
 import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
 import { WorldMap } from "./hud/WorldMap.js";
@@ -40,11 +41,12 @@ import type { Edict } from "./hud/EdictEditor.js";
 import { InboxPanel } from "./hud/InboxPanel.js";
 import { TradeOfferDialog } from "./hud/TradeOfferDialog.js";
 import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
+import { BetsPanel } from "./hud/BetsPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -401,23 +403,23 @@ const inspector = new EntityInspector({
     return `Trade dialog opened for ${entity.name}`;
   },
   onDuel: async (entity) => {
-    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Duel request unavailable");
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Duel unavailable for that player");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
+    if (entity.walletAddress.toLowerCase() === ownWalletAddress.toLowerCase()) {
+      throw new Error("You can't duel yourself");
+    }
     const token = await getAuthToken(ownWalletAddress);
     if (!token) throw new Error("You need to sign in first");
-    const ownName = entities.getEntity(ownEntityId ?? "")?.name ?? ownWalletAddress.slice(0, 8);
-    const result = await sendInboxMessage(token, {
-      to: entity.walletAddress,
-      type: "direct",
-      body: `${ownName} challenged you to a duel. Meet at the coliseum and queue 1v1.`,
-      data: {
-        kind: "duel-request",
-        challengerEntityId: ownEntityId,
-        challengerName: ownName,
-        targetEntityId: entity.id,
-        targetName: entity.name,
-      },
-    });
-    if (!result.ok) throw new Error(result.error ?? "Failed to send duel request");
+    agentChat.addSystemMessage(`Issuing duel challenge to ${entity.name}...`, "progress");
+    const result = await challengeDuel(token, { targetWallet: entity.walletAddress, format: "1v1" });
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Duel failed: ${result.error ?? "unknown error"}`, "error");
+      throw new Error(result.error ?? "Failed to issue duel");
+    }
+    agentChat.addSystemMessage(
+      `Duel challenge sent. Reserved 1v1 slot — waiting for ${entity.name} to accept.`,
+      "success",
+    );
     return `Duel challenge sent to ${entity.name}`;
   },
   canCommandAgent: () => !!ownWalletAddress && !!ownEntityId,
@@ -436,6 +438,7 @@ const inspector = new EntityInspector({
 });
 const zoneNameBadge = new ZoneNameBadge();
 const zoneBanner = new ZoneBanner();
+const eventBanner = new EventBanner();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const worldMap = new WorldMap();
@@ -571,6 +574,7 @@ let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
 let ownCustodialWallet: string | null = null;
 let ownEntityId: string | null = null;
+let ownCharacterInfo: { level: number; characterTokenId: string | null; agentId: string | null } | null = null;
 let latestActivePlayers: ActivePlayer[] = [];
 let desiredRunMode: boolean | null = null;
 let autoLockEnabled = isDisplayMode;
@@ -804,6 +808,11 @@ async function findOwnCharacter() {
 
     console.log("[autolock] Found entity:", liveEntity.id, "zone:", liveEntity.zoneId, "name:", liveEntity.name);
     ownEntityId = liveEntity.id;
+    ownCharacterInfo = {
+      level: liveEntity.level ?? 1,
+      characterTokenId: liveEntity.characterTokenId ?? null,
+      agentId: liveEntity.agentId ?? null,
+    };
     agentChat.setEntityId(liveEntity.id);
     hudLock.textContent = `FINDING: ${liveEntity.name ?? "character"}`;
     hudLock.style.display = "block";
@@ -983,6 +992,7 @@ const questPanel = new QuestPanel({
     const result = await completeQuest(ctx.token, ownEntityId!, questId, npcEntityId);
     if (result.ok) {
       agentChat.addSystemMessage(`Quest complete: "${questTitle}". Rewards granted.`, "success");
+      eventBanner.show("quest-complete", questTitle);
       lastQuestPollTime = 0;
       void pollQuests();
       return;
@@ -1047,6 +1057,7 @@ const questPanel = new QuestPanel({
     const result = await abandonQuest(token, ownEntityId, questId);
     if (result.ok) {
       agentChat.addSystemMessage(`Quest abandoned: "${questTitle}".`, "info");
+      eventBanner.show("quest-abandoned", questTitle);
       lastQuestPollTime = 0;
       void pollQuests();
     } else {
@@ -1218,6 +1229,54 @@ const inboxPanel = new InboxPanel({
       );
     }
   },
+  onMatchFound: (data) => {
+    const arena = data.arenaName ?? "the coliseum";
+    const team = data.team ? data.team.toUpperCase() : "";
+    agentChat.addSystemMessage(
+      `Match found in ${arena} — you're on team ${team}. Entering arena!`,
+      "success",
+    );
+    playSoundEffect("ui_notification");
+    if (data.battleId) npcDialog.setCurrentBattleId(data.battleId);
+  },
+  onOpenBattle: (battleId) => {
+    npcDialog.setCurrentBattleId(battleId);
+    agentChat.addSystemMessage(
+      `Battle ${battleId} active — visit any Arena Master to spectate.`,
+      "info",
+    );
+  },
+  onAcceptDuel: async (challengeId) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Accept duel: deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Accept duel: auth failed.", "error");
+      return { ok: false };
+    }
+    agentChat.addSystemMessage("Accepting duel — queueing now.", "progress");
+    const result = await acceptDuel(token, challengeId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Duel accept failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage("Duel accepted — match will start as soon as both are queued.", "success");
+    return { ok: true };
+  },
+  onDeclineDuel: async (challengeId) => {
+    if (!ownWalletAddress) return { ok: false };
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false };
+    const result = await declineDuel(token, challengeId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Duel decline failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage("Duel declined.", "info");
+    return { ok: true };
+  },
 });
 const outgoingTradesPanel = new OutgoingTradesPanel({
   refresh: async () => {
@@ -1249,6 +1308,49 @@ const outgoingTradesPanel = new OutgoingTradesPanel({
   },
 });
 
+const betsPanel = new BetsPanel({
+  refreshPools: () => fetchActivePools(),
+  refreshHistory: async () => {
+    if (!ownWalletAddress) return [];
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    const history = await fetchBettingHistory(wallet);
+    return history?.bets ?? [];
+  },
+  onPlaceBet: async (poolId, choice, amount) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Bet failed: deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false };
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    agentChat.addSystemMessage(`Placing ${amount}g on ${choice}...`, "progress");
+    const result = await placeBet(token, { poolId, choice, amount, walletAddress: wallet });
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Bet failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage(`Bet placed: ${amount}g on ${choice}.`, "success");
+    return { ok: true };
+  },
+  onClaim: async (poolId) => {
+    if (!ownWalletAddress) return { ok: false };
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false };
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    agentChat.addSystemMessage(`Claiming winnings...`, "progress");
+    const result = await claimWinnings(token, poolId, wallet);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Claim failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage(`Winnings claimed.`, "success");
+    lastInventoryPollTime = 0;
+    void pollInventory();
+    return { ok: true };
+  },
+});
+
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => togglePanel("bag") });
 actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => togglePanel("skills") });
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => togglePanel("quests") });
@@ -1262,6 +1364,7 @@ actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", on
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => togglePanel("players") });
 actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => togglePanel("inbox") });
 actionBar.addButton({ id: "trades", icon: "\u{1F4B8}", label: "Trades", key: "", onClick: () => togglePanel("trades") });
+actionBar.addButton({ id: "bets", icon: "\u{1F3B2}", label: "Bets", key: "", onClick: () => togglePanel("bets") });
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
   if (ownEntityId) {
     const ent = entities.getEntity(ownEntityId);
@@ -1270,7 +1373,7 @@ actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "
 }});
 actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => togglePanel("settings") });
 
-type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "trades" | "settings";
+type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "trades" | "bets" | "settings";
 type ManagedPanel = {
   show: () => void;
   hide: () => void;
@@ -1317,6 +1420,11 @@ const managedPanels: Record<ManagedPanelId, ManagedPanel> = {
     show: () => outgoingTradesPanel.show(),
     hide: () => outgoingTradesPanel.hide(),
     isVisible: () => outgoingTradesPanel.isVisible(),
+  },
+  bets: {
+    show: () => betsPanel.show(),
+    hide: () => betsPanel.hide(),
+    isVisible: () => betsPanel.isVisible(),
   },
   settings: {
     show: () => settingsPanel.show(),
@@ -1369,6 +1477,7 @@ function initDesktopPanelDragging() {
     { id: "player-panel", handleSelector: ".pp-tabs" },
     { id: "inbox-panel", handleSelector: ".ibx-header" },
     { id: "outgoing-trades-panel", handleSelector: ".otp-header" },
+    { id: "bets-panel", handleSelector: ".bp-header" },
     { id: "settings-panel", handleSelector: ".settings-header" },
     { id: "agent-chat", handleSelector: ".agent-chat-tabs" },
   ];
@@ -1535,6 +1644,7 @@ function initPanelVisibilitySync() {
     players: "player-panel",
     inbox: "inbox-panel",
     trades: "outgoing-trades-panel",
+    bets: "bets-panel",
     settings: "settings-panel",
   };
   for (const panelId of Object.values(panelIds)) {
@@ -1552,6 +1662,22 @@ const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
   getOwnEntityId: () => ownEntityId,
   getOwnWalletAddress: () => ownWalletAddress,
+  getOwnCharacterInfo: () => {
+    if (!ownCharacterInfo) return null;
+    // Prefer the live in-world entity's level (it ticks up on level-up) over
+    // the cached liveEntity snapshot taken at autolock time.
+    const ent = ownEntityId ? entities.getEntity(ownEntityId) : null;
+    const currentLevel = ent?.level ?? ownCharacterInfo.level;
+    if (currentLevel > ownCharacterInfo.level) {
+      eventBanner.show("level-up", `${ent?.name ?? "You"} reached level ${currentLevel}`);
+      ownCharacterInfo.level = currentLevel;
+    }
+    return {
+      level: currentLevel,
+      characterTokenId: ownCharacterInfo.characterTokenId,
+      agentId: ownCharacterInfo.agentId,
+    };
+  },
   notify: (text, kind) => agentChat.addSystemMessage(text, kind),
   onShowQuests: () => {
     openPanel("quests");
@@ -1805,6 +1931,12 @@ async function pollInventory() {
   }
 }
 
+const prevProfessionLevels = new Map<string, number>();
+
+function professionDisplayName(id: string): string {
+  return id.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 async function pollProfessions() {
   // Same as inventory: agents learn professions under the custodial wallet.
   const addr = ownCustodialWallet ?? ownWalletAddress;
@@ -1815,9 +1947,22 @@ async function pollProfessions() {
 
   const data = await fetchProfessionStatus(addr);
   if (data) {
+    // Detect profession level-ups before updating the panel. First sample
+    // primes the map and stays silent so users don't get spammed on login.
+    const primed = prevProfessionLevels.size > 0;
+    for (const [profId, summary] of Object.entries(data.skills)) {
+      const prev = prevProfessionLevels.get(profId);
+      if (primed && prev !== undefined && summary.level > prev) {
+        eventBanner.show("profession-level-up", `${professionDisplayName(profId)} → Lv ${summary.level}`);
+      }
+      prevProfessionLevels.set(profId, summary.level);
+    }
     skillsPanel.updateProfessions(data);
   }
 }
+
+const prevLearnedTechniqueIds = new Set<string>();
+let prevLearnedTechniquesPrimed = false;
 
 async function pollLearnedTechniques() {
   if (!ownEntityId) return;
@@ -1829,7 +1974,23 @@ async function pollLearnedTechniques() {
       const res = await fetch(toUrl(base, `/techniques/learned/${ownEntityId}`));
       if (!res.ok) continue;
       const data = await res.json() as { techniques?: LearnedTechnique[] };
-      skillsPanel.updateTechniques(data.techniques ?? []);
+      const techniques = data.techniques ?? [];
+      if (prevLearnedTechniquesPrimed) {
+        for (const t of techniques) {
+          const id = String((t as any).techniqueId ?? (t as any).id ?? (t as any).name ?? "");
+          if (id && !prevLearnedTechniqueIds.has(id)) {
+            const name = String((t as any).name ?? id);
+            eventBanner.show("skill-learned", name);
+          }
+        }
+      }
+      prevLearnedTechniqueIds.clear();
+      for (const t of techniques) {
+        const id = String((t as any).techniqueId ?? (t as any).id ?? (t as any).name ?? "");
+        if (id) prevLearnedTechniqueIds.add(id);
+      }
+      prevLearnedTechniquesPrimed = true;
+      skillsPanel.updateTechniques(techniques);
       return;
     } catch {
       // Try the next candidate base.

@@ -8,7 +8,13 @@ import { authenticateRequest } from "../auth/auth.js";
 import { pvpBattleManager } from "./pvpBattleManager.js";
 import type { PvPFormat, MatchmakingEntry } from "../types/pvp.js";
 import type { BattleAction } from "../types/battle.js";
-import { getEntity } from "../world/zoneRuntime.js";
+import { getEntity, isWalletSpawned } from "../world/zoneRuntime.js";
+import {
+  createDuelChallenge,
+  getDuelChallenge,
+  setDuelChallengeStatus,
+} from "./duelManager.js";
+import { sendInboxMessage } from "../agents/agentInbox.js";
 import { COLISEUM_MAPS } from "./coliseumMaps.js";
 import { getPartyMembers } from "../social/partySystem.js";
 
@@ -475,7 +481,8 @@ export async function registerPvPRoutes(app: FastifyInstance) {
 
   /**
    * POST /api/pvp/battle/:battleId/cancel
-   * Cancel a battle (admin only - should add auth)
+   * Forfeit / cancel a battle. The auth'd wallet must be either a participant
+   * in the battle or in the admin allowlist (PVP_ADMIN_WALLETS env).
    */
   app.post<{
     Params: {
@@ -485,9 +492,35 @@ export async function registerPvPRoutes(app: FastifyInstance) {
     preHandler: authenticateRequest,
   }, async (req, reply) => {
     const { battleId } = req.params;
+    const authenticatedWallet = ((req as any).walletAddress as string | undefined)?.toLowerCase();
+    if (!authenticatedWallet) {
+      return reply.code(401).send({ error: "Authentication required" });
+    }
+
+    const battle = pvpBattleManager.getBattleState(battleId);
+    if (!battle) {
+      return reply.code(404).send({ error: "Battle not found" });
+    }
+
+    // Resolve auth wallet → entityId via the spawned-wallets registry.
+    const spawned = isWalletSpawned(authenticatedWallet);
+    const isParticipant = spawned
+      ? [...battle.config.teamRed, ...battle.config.teamBlue].some(
+          (c) => c.id === spawned.entityId || c.agentId === spawned.entityId,
+        )
+      : false;
+
+    const adminAllowlist = (process.env.PVP_ADMIN_WALLETS ?? "")
+      .split(/[\s,]+/)
+      .map((w) => w.toLowerCase())
+      .filter(Boolean);
+    const isAdmin = adminAllowlist.includes(authenticatedWallet);
+
+    if (!isParticipant && !isAdmin) {
+      return reply.code(403).send({ error: "Only battle participants can cancel" });
+    }
 
     const cancelled = pvpBattleManager.cancelBattle(battleId);
-
     if (!cancelled) {
       return reply.code(404).send({
         error: "Battle not found or already completed",
@@ -499,4 +532,205 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       message: "Battle cancelled",
     });
   });
+
+  // ── Duel routes ────────────────────────────────────────────────────────
+  //
+  // Duels are 1v1 challenges with a guaranteed pairing: both wallets queue
+  // with `reservedOpponentWallet` pointing at each other, and the matchmaker
+  // pairs them ahead of normal ELO matching.
+
+  /**
+   * POST /api/pvp/duel/challenge
+   * Issue a duel challenge to another wallet. Auto-queues the challenger.
+   */
+  app.post<{
+    Body: { targetWallet: string; format?: PvPFormat };
+  }>("/api/pvp/duel/challenge", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
+    const { targetWallet } = req.body;
+    const format: PvPFormat = req.body.format ?? "1v1";
+    const authenticatedWallet = ((req as any).walletAddress as string | undefined)?.toLowerCase();
+    if (!authenticatedWallet) {
+      return reply.code(401).send({ error: "Authentication required" });
+    }
+    if (!targetWallet || !/^0x[a-fA-F0-9]{40}$/.test(targetWallet)) {
+      return reply.code(400).send({ error: "Invalid targetWallet" });
+    }
+    if (targetWallet.toLowerCase() === authenticatedWallet) {
+      return reply.code(400).send({ error: "Cannot duel yourself" });
+    }
+    if (format !== "1v1") {
+      return reply.code(400).send({ error: "Duels are 1v1 only for now" });
+    }
+
+    const spawned = isWalletSpawned(authenticatedWallet);
+    if (!spawned) {
+      return reply.code(400).send({ error: "Deploy your agent before challenging" });
+    }
+    const challengerEntity = getEntity(spawned.entityId);
+    if (!challengerEntity) {
+      return reply.code(400).send({ error: "Challenger entity not found" });
+    }
+
+    // Verify challenger has the data the queue requires.
+    const characterTokenId = (challengerEntity as any).characterTokenId as string | undefined;
+    if (!characterTokenId) {
+      return reply.code(400).send({ error: "Your character isn't fully registered on-chain yet" });
+    }
+
+    // Auto-queue the challenger with the reservation.
+    const elo = pvpBattleManager.getPlayerStats(authenticatedWallet)?.elo ?? 1000;
+    await pvpBattleManager.joinQueue({
+      agentId: spawned.entityId,
+      entityId: spawned.entityId,
+      walletAddress: authenticatedWallet,
+      characterTokenId: BigInt(characterTokenId),
+      level: challengerEntity.level ?? 1,
+      elo,
+      format,
+      queuedAt: Date.now(),
+      reservedOpponentWallet: targetWallet.toLowerCase(),
+    });
+
+    const challenge = createDuelChallenge({
+      challengerWallet: authenticatedWallet,
+      challengerEntityId: spawned.entityId,
+      challengerName: challengerEntity.name,
+      targetWallet,
+      format,
+    });
+
+    await sendInboxMessage({
+      from: authenticatedWallet,
+      fromName: challengerEntity.name,
+      to: targetWallet.toLowerCase(),
+      type: "duel-request",
+      body: `${challengerEntity.name} challenges you to a ${format.toUpperCase()} duel!`,
+      data: {
+        kind: "duel-request",
+        challengeId: challenge.challengeId,
+        challengerName: challengerEntity.name,
+        challengerWallet: authenticatedWallet,
+        format,
+        expiresAtMs: challenge.expiresAtMs,
+      },
+    }).catch((err) =>
+      console.warn(`[duel] failed to deliver challenge inbox: ${(err as Error).message}`),
+    );
+
+    return reply.send({ ok: true, challengeId: challenge.challengeId, expiresAtMs: challenge.expiresAtMs });
+  });
+
+  /**
+   * POST /api/pvp/duel/accept
+   * Recipient accepts a duel — auto-queues them with the matching reservation.
+   */
+  app.post<{ Body: { challengeId: string } }>(
+    "/api/pvp/duel/accept",
+    { preHandler: authenticateRequest },
+    async (req, reply) => {
+      const { challengeId } = req.body;
+      const authenticatedWallet = ((req as any).walletAddress as string | undefined)?.toLowerCase();
+      if (!authenticatedWallet) {
+        return reply.code(401).send({ error: "Authentication required" });
+      }
+      const challenge = getDuelChallenge(challengeId);
+      if (!challenge) {
+        return reply.code(404).send({ error: "Challenge not found" });
+      }
+      if (challenge.targetWallet !== authenticatedWallet) {
+        return reply.code(403).send({ error: "This challenge is for another wallet" });
+      }
+      if (challenge.status !== "pending" || challenge.expiresAtMs <= Date.now()) {
+        return reply.code(410).send({ error: "Challenge no longer active" });
+      }
+
+      const spawned = isWalletSpawned(authenticatedWallet);
+      if (!spawned) {
+        return reply.code(400).send({ error: "Deploy your agent before accepting a duel" });
+      }
+      const entity = getEntity(spawned.entityId);
+      if (!entity) {
+        return reply.code(400).send({ error: "Your entity is not in the world" });
+      }
+      const characterTokenId = (entity as any).characterTokenId as string | undefined;
+      if (!characterTokenId) {
+        return reply.code(400).send({ error: "Your character isn't fully registered on-chain yet" });
+      }
+
+      const elo = pvpBattleManager.getPlayerStats(authenticatedWallet)?.elo ?? 1000;
+      await pvpBattleManager.joinQueue({
+        agentId: spawned.entityId,
+        entityId: spawned.entityId,
+        walletAddress: authenticatedWallet,
+        characterTokenId: BigInt(characterTokenId),
+        level: entity.level ?? 1,
+        elo,
+        format: challenge.format,
+        queuedAt: Date.now(),
+        reservedOpponentWallet: challenge.challengerWallet,
+      });
+      setDuelChallengeStatus(challengeId, "accepted");
+
+      // Notify the challenger via inbox so they know their opponent showed up.
+      await sendInboxMessage({
+        from: authenticatedWallet,
+        fromName: entity.name,
+        to: challenge.challengerWallet,
+        type: "duel-result",
+        body: `${entity.name} accepted your duel challenge — entering the queue.`,
+        data: {
+          kind: "duel-accepted",
+          challengeId,
+          opponentName: entity.name,
+          opponentWallet: authenticatedWallet,
+        },
+      }).catch(() => {});
+
+      return reply.send({ ok: true, challengeId });
+    }
+  );
+
+  /**
+   * POST /api/pvp/duel/decline
+   * Recipient declines — challenger is removed from queue.
+   */
+  app.post<{ Body: { challengeId: string } }>(
+    "/api/pvp/duel/decline",
+    { preHandler: authenticateRequest },
+    async (req, reply) => {
+      const { challengeId } = req.body;
+      const authenticatedWallet = ((req as any).walletAddress as string | undefined)?.toLowerCase();
+      if (!authenticatedWallet) {
+        return reply.code(401).send({ error: "Authentication required" });
+      }
+      const challenge = getDuelChallenge(challengeId);
+      if (!challenge) {
+        return reply.code(404).send({ error: "Challenge not found" });
+      }
+      if (challenge.targetWallet !== authenticatedWallet) {
+        return reply.code(403).send({ error: "This challenge is for another wallet" });
+      }
+
+      setDuelChallengeStatus(challengeId, "declined");
+
+      // Remove challenger from their reserved queue slot so they aren't stuck.
+      await pvpBattleManager.leaveQueue(challenge.challengerEntityId, challenge.format).catch(() => {});
+
+      await sendInboxMessage({
+        from: authenticatedWallet,
+        fromName: "Arena Master",
+        to: challenge.challengerWallet,
+        type: "duel-result",
+        body: `Your duel challenge was declined.`,
+        data: {
+          kind: "duel-declined",
+          challengeId,
+        },
+      }).catch(() => {});
+
+      return reply.send({ ok: true, challengeId });
+    }
+  );
 }

@@ -398,9 +398,11 @@ export class TerrainRenderer {
               // Track for animations if needed
               if (BUSH_TILES.has(ov)) {
                 obj.traverse((c) => { if (c instanceof THREE.Mesh) this.bushMeshes.push(c); });
-              } else if (ov === 56 || ov === 57) {
-                obj.traverse((c) => { if (c instanceof THREE.Mesh) this.portalMeshes.push(c); });
               }
+              // Portal GLBs (ov 56/57) are static stone archways — do NOT push
+              // their sub-meshes into portalMeshes. The spin+pulse animation
+              // below was tuned for the primitive torus fallback and rotating
+              // the whole arch on Z makes it cartwheel through the air.
               continue; // GLB placed, skip primitive fallback
             }
           }

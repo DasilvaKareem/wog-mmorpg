@@ -8,7 +8,7 @@ import {
   fetchAvailableTechniques, learnTechnique,
   fetchRecipes, craftAtStation,
   fetchGuilds, createGuild,
-  fetchAuctions, bidAuction, buyoutAuction, fetchWalletBalance,
+  fetchAuctions, bidAuction, buyoutAuction, fetchWalletBalance, cancelPvpBattle,
   fetchColiseumInfo, joinPvpQueue, fetchPvpLeaderboard,
   fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
   fetchProfessionCatalog, learnProfession,
@@ -53,6 +53,12 @@ interface NpcDialogCallbacks {
   getAuthToken: () => Promise<string | null>;
   getOwnEntityId: () => string | null;
   getOwnWalletAddress: () => string | null;
+  /**
+   * Returns the local player's current character info — used to build PvP
+   * queue payloads that the backend requires (level, characterTokenId, agentId).
+   * Returning null means the character isn't fully registered yet.
+   */
+  getOwnCharacterInfo?: () => { level: number; characterTokenId: string | null; agentId: string | null } | null;
   onShowQuests: () => void;
   /** Optional channel for transient user feedback (toasts in the agent chat). */
   notify?: (text: string, kind?: "info" | "progress" | "success" | "error") => void;
@@ -105,6 +111,8 @@ export class NpcDialog {
   private matchPollTimer: ReturnType<typeof setInterval> | null = null;
   private viewingBattle: BattleDetails | null = null;
   private viewingBattleId: string | null = null;
+  /** Set when the player's own current-battle poll reports inBattle === true. */
+  private currentBattleId: string | null = null;
   // Professions
   private professions: ProfessionEntry[] = [];
   private professionsLoading = false;
@@ -174,6 +182,7 @@ export class NpcDialog {
       if (action === "queue-leave") void this.handleQueueLeave();
       if (action === "select-format" && btn.dataset.format) { this.selectedFormat = btn.dataset.format; if (this.activeTab === "arena") this.renderArena(); }
       if (action === "view-battle" && btn.dataset.battleId) void this.handleViewBattle(btn.dataset.battleId);
+      if (action === "forfeit" && btn.dataset.battleId) void this.handleForfeit(btn.dataset.battleId);
       if (action === "arena-back") this.handleArenaBack();
       if (action === "learn-prof" && btn.dataset.profId) void this.handleLearnProfession(btn.dataset.profId);
       if (action === "enchant" && btn.dataset.elixirId) void this.handleEnchant(btn.dataset.elixirId);
@@ -820,6 +829,22 @@ export class NpcDialog {
     const hasChar = !!this.callbacks.getOwnEntityId();
     let html = "";
 
+    // ── Already in battle ──
+    // If the player is currently fighting, hide queue controls and surface a
+    // return/forfeit card so they aren't confused by "Join queue" while in a match.
+    if (this.currentBattleId) {
+      html += `<div class="nd-shop-item" style="border-left:2px solid #54f28b">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#54f28b">You're in battle</span>`;
+      html += `<span class="nd-shop-item-slot">${esc(this.currentBattleId)}</span></div>`;
+      html += `<div class="nd-shop-item-desc" style="opacity:0.8">The arena master will teleport you to your match. Use Return to spectate or Forfeit to give up.</div>`;
+      html += `<div class="nd-shop-item-footer" style="display:flex;gap:6px">`;
+      html += `<button class="nd-btn" data-action="view-battle" data-battle-id="${esc(this.currentBattleId)}" style="flex:1;color:#54f28b;background:rgba(84,242,139,0.12);border-color:rgba(84,242,139,0.4)">Return to battle</button>`;
+      html += `<button class="nd-btn" data-action="forfeit" data-battle-id="${esc(this.currentBattleId)}" style="flex:1;color:#ff8866;background:rgba(255,136,102,0.12);border-color:rgba(255,136,102,0.4)">Forfeit</button>`;
+      html += `</div></div>`;
+      this.contentEl.innerHTML = html;
+      return;
+    }
+
     // ── Active Battles ──
     html += `<div class="nd-shop-item" style="border-bottom:1px solid rgba(255,68,102,0.2)">`;
     html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ff4466">Active Battles</span>`;
@@ -1003,6 +1028,7 @@ export class NpcDialog {
       if (result?.inBattle && result.battleId) {
         this.inQueue = false;
         this.queuedFormats = [];
+        this.currentBattleId = result.battleId;
         this.stopMatchPolling();
         // Auto-open battle viewer
         const details = await fetchBattleDetails(result.battleId);
@@ -1013,6 +1039,35 @@ export class NpcDialog {
         if (this.activeTab === "arena") this.renderArena();
       }
     }, 2000);
+  }
+
+  /** Public hook so external pollers (main.ts) can drive the in-battle state. */
+  setCurrentBattleId(battleId: string | null) {
+    this.currentBattleId = battleId;
+    if (battleId) {
+      this.inQueue = false;
+      this.queuedFormats = [];
+    }
+    if (this.activeTab === "arena" && this.isOpen()) this.renderArena();
+  }
+
+  private async handleForfeit(battleId: string) {
+    const token = await this.callbacks.getAuthToken();
+    if (!token) {
+      this.callbacks.notify?.("Forfeit failed: deploy your agent first.", "error");
+      return;
+    }
+    this.callbacks.notify?.("Forfeiting battle...", "progress");
+    const result = await cancelPvpBattle(token, battleId);
+    if (result.ok) {
+      this.callbacks.notify?.("Battle forfeit.", "info");
+      this.currentBattleId = null;
+      this.viewingBattle = null;
+      this.viewingBattleId = null;
+      if (this.activeTab === "arena") this.renderArena();
+    } else {
+      this.callbacks.notify?.(`Forfeit failed: ${result.error ?? "unknown error"}`, "error");
+    }
   }
 
   private stopMatchPolling() {
@@ -1028,15 +1083,35 @@ export class NpcDialog {
     const token = await this.callbacks.getAuthToken();
     const addr = this.callbacks.getOwnWalletAddress();
     const entityId = this.callbacks.getOwnEntityId();
-    if (!token || !addr || !entityId) return;
+    if (!token || !addr || !entityId) {
+      this.callbacks.notify?.("Queue failed: deploy your agent first.", "error");
+      return;
+    }
+    const info = this.callbacks.getOwnCharacterInfo?.();
+    if (!info?.characterTokenId) {
+      this.callbacks.notify?.(
+        "Queue failed: your character isn't fully registered on-chain yet. Wait a moment and try again.",
+        "error",
+      );
+      return;
+    }
     const btn = this.contentEl.querySelector("[data-action='queue-join']") as HTMLButtonElement;
     if (btn) { btn.textContent = "Joining..."; btn.disabled = true; }
-    const result = await joinPvpQueue(token, { agentId: entityId, walletAddress: addr, level: 1, format: this.selectedFormat });
+    this.callbacks.notify?.(`Joining ${this.selectedFormat.toUpperCase()} queue...`, "progress");
+    const result = await joinPvpQueue(token, {
+      agentId: info.agentId ?? entityId,
+      walletAddress: addr,
+      characterTokenId: info.characterTokenId,
+      level: info.level,
+      format: this.selectedFormat,
+    });
     if (result.ok) {
       this.inQueue = true;
       this.queuedFormats = [this.selectedFormat];
       this.startMatchPolling();
+      this.callbacks.notify?.(`Queued for ${this.selectedFormat.toUpperCase()}. Waiting for opponents…`, "success");
     } else {
+      this.callbacks.notify?.(`Queue failed: ${result.error ?? "unknown error"}`, "error");
       if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = `Join ${this.selectedFormat.toUpperCase()} Queue`; }, 2000); return; }
     }
     if (this.activeTab === "arena") this.renderArena();

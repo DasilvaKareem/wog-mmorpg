@@ -147,7 +147,19 @@ export class MatchmakingSystem {
       console.log(`[pvp-debug] ${format} queue pruned: ${before} → ${queue.entries.length}`);
     }
 
-    // Not enough players
+    // Duel reservations: if any two entries point at each other via
+    // `reservedOpponentWallet`, pair them ahead of the normal ELO loop.
+    const reservation = this.findReservationMatch(queue);
+    if (reservation) {
+      reservation.forEach((entry) => {
+        const idx = queue.entries.findIndex((e) => e.agentId === entry.agentId);
+        if (idx !== -1) queue.entries.splice(idx, 1);
+      });
+      console.log(`[pvp-debug] reservation match formed: ${reservation.map((p) => p.agentId).join(" vs ")}`);
+      return this.createBattleConfig(format, reservation);
+    }
+
+    // Not enough players (after excluding reserved entries that didn't pair)
     if (queue.entries.length < queue.minPlayers) {
       return null;
     }
@@ -169,11 +181,37 @@ export class MatchmakingSystem {
   }
 
   /**
+   * Look for two entries in this queue that have set each other as
+   * `reservedOpponentWallet`. Returns the pair if found, else null.
+   * Reservations bypass ELO/level/range checks — duelists explicitly opted into
+   * each other.
+   */
+  private findReservationMatch(queue: MatchmakingQueue): MatchmakingEntry[] | null {
+    if (queue.format !== "1v1") return null; // duels are 1v1 only
+    const reserved = queue.entries.filter((e) => !!e.reservedOpponentWallet);
+    if (reserved.length < 2) return null;
+    const byWallet = new Map<string, MatchmakingEntry>();
+    for (const e of reserved) byWallet.set(e.walletAddress.toLowerCase(), e);
+    for (const a of reserved) {
+      const target = a.reservedOpponentWallet!.toLowerCase();
+      const b = byWallet.get(target);
+      if (!b) continue;
+      if (b.reservedOpponentWallet?.toLowerCase() === a.walletAddress.toLowerCase()) {
+        return [a, b];
+      }
+    }
+    return null;
+  }
+
+  /**
    * Find a balanced match from queue entries
    */
   private findBalancedMatch(queue: MatchmakingQueue): MatchmakingEntry[] | null {
     const now = Date.now();
-    const entries = [...queue.entries];
+    // Exclude entries with an active opponent reservation — those are duelists
+    // waiting for their specific counterpart and shouldn't get pulled into a
+    // random ELO match.
+    const entries = queue.entries.filter((e) => !e.reservedOpponentWallet);
 
     // Sort by queue time (oldest first for fairness)
     entries.sort((a, b) => a.queuedAt - b.queuedAt);

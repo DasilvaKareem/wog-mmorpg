@@ -6,7 +6,7 @@ interface InboxMessage {
   from: string;
   fromName: string;
   to: string;
-  type: "direct" | "trade-request" | "trade-offer" | "trade-result" | "party-invite" | "broadcast" | "system";
+  type: "direct" | "trade-request" | "trade-offer" | "trade-result" | "match-found" | "duel-request" | "duel-result" | "party-invite" | "broadcast" | "system";
   body: string;
   data?: Record<string, unknown>;
   ts: number;
@@ -31,6 +31,9 @@ const TYPE_ICONS: Record<string, string> = {
   "trade-request": "\u{1F4B0}",
   "trade-offer": "\u{1F381}",
   "trade-result": "\u{1F4DC}",
+  "match-found": "\u{1F3DB}",
+  "duel-request": "\u2694",
+  "duel-result": "\u{1F4DC}",
   "party-invite": "\u{1F465}",
   broadcast: "\u{1F4E2}",
 };
@@ -41,6 +44,9 @@ const TYPE_COLORS: Record<string, string> = {
   "trade-request": "#f0c05a",
   "trade-offer": "#5dff9a",
   "trade-result": "#ffc850",
+  "match-found": "#ff4466",
+  "duel-request": "#ff4466",
+  "duel-result": "#ffc850",
   "party-invite": "#b48cff",
   broadcast: "#ff88aa",
 };
@@ -59,6 +65,17 @@ export interface InboxPanelCallbacks {
    * the next inventory poll. Fires once per new message id.
    */
   onTradeResult?: (data: { kind?: string; tradeId?: number }) => void;
+  /**
+   * A `match-found` message just arrived. Fired once per new message id so the
+   * host can play a sound, toast, and auto-open the battle viewer.
+   */
+  onMatchFound?: (data: { battleId?: string; format?: string; team?: string; arenaName?: string }) => void;
+  /** Player clicked "Enter Arena" on a match-found row. */
+  onOpenBattle?: (battleId: string) => void;
+  /** Accept a duel challenge. */
+  onAcceptDuel?: (challengeId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Decline a duel challenge. */
+  onDeclineDuel?: (challengeId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const COUNTDOWN_TICK_MS = 30_000;
@@ -77,6 +94,10 @@ export class InboxPanel {
   private tradeActionState = new Map<number, "pending" | "accepted" | "declined" | "failed">();
   /** message ids we've already surfaced — used to detect first-sight trade-result deliveries. */
   private seenTradeResultIds = new Set<string>();
+  /** First-sight tracking for match-found notifications. */
+  private seenMatchFoundIds = new Set<string>();
+  /** challengeIds whose Accept/Decline buttons are pending or settled. */
+  private duelActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
   /** Local timer that re-renders countdown chips while the panel is open. */
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -96,18 +117,36 @@ export class InboxPanel {
     this.listEl = document.createElement("div");
     this.listEl.className = "ibx-list";
     this.listEl.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement).closest("[data-trade-action]") as HTMLElement | null;
-      if (!btn) return;
-      const action = btn.dataset.tradeAction;
-      const tradeId = Number(btn.dataset.tradeId);
-      if (!Number.isFinite(tradeId)) return;
-      const msg = this.messages.find(
-        (m) => m.type === "trade-offer" && (m.data as TradeOfferPayload | undefined)?.tradeId === tradeId,
-      );
-      if (!msg) return;
-      const payload = msg.data as TradeOfferPayload | undefined;
-      if (!payload) return;
-      void this.handleTradeAction(action ?? "", payload);
+      const tradeBtn = (e.target as HTMLElement).closest("[data-trade-action]") as HTMLElement | null;
+      if (tradeBtn) {
+        const action = tradeBtn.dataset.tradeAction;
+        const tradeId = Number(tradeBtn.dataset.tradeId);
+        if (!Number.isFinite(tradeId)) return;
+        const msg = this.messages.find(
+          (m) => m.type === "trade-offer" && (m.data as TradeOfferPayload | undefined)?.tradeId === tradeId,
+        );
+        if (!msg) return;
+        const payload = msg.data as TradeOfferPayload | undefined;
+        if (!payload) return;
+        void this.handleTradeAction(action ?? "", payload);
+        return;
+      }
+
+      const matchBtn = (e.target as HTMLElement).closest("[data-match-action]") as HTMLElement | null;
+      if (matchBtn) {
+        const battleId = matchBtn.dataset.battleId;
+        if (battleId) this.callbacks.onOpenBattle?.(battleId);
+        return;
+      }
+
+      const duelBtn = (e.target as HTMLElement).closest("[data-duel-action]") as HTMLElement | null;
+      if (duelBtn) {
+        const action = duelBtn.dataset.duelAction;
+        const challengeId = duelBtn.dataset.challengeId;
+        if (!challengeId) return;
+        void this.handleDuelAction(action ?? "", challengeId);
+        return;
+      }
     });
     this.container.appendChild(this.listEl);
 
@@ -141,17 +180,21 @@ export class InboxPanel {
         const msgs: InboxMessage[] = Array.isArray(data.messages) ? data.messages : [];
         msgs.sort((a, b) => b.ts - a.ts);
 
-        // Detect newly-arrived trade-result messages so the host can refresh
-        // inventory/gold without waiting for the regular poll interval.
-        const isFirstFetch = this.messages.length === 0 && this.seenTradeResultIds.size === 0;
+        // Detect newly-arrived trade-result + match-found messages so the host
+        // can react without waiting for the regular poll interval.
+        const isFirstFetch = this.messages.length === 0 && this.seenTradeResultIds.size === 0 && this.seenMatchFoundIds.size === 0;
         const freshTradeResults: InboxMessage[] = [];
+        const freshMatchFound: InboxMessage[] = [];
         for (const m of msgs) {
-          if (m.type !== "trade-result") continue;
-          if (this.seenTradeResultIds.has(m.id)) continue;
-          this.seenTradeResultIds.add(m.id);
-          // Skip the very first fetch — those are historical messages from
-          // prior sessions, not fresh notifications.
-          if (!isFirstFetch) freshTradeResults.push(m);
+          if (m.type === "trade-result") {
+            if (this.seenTradeResultIds.has(m.id)) continue;
+            this.seenTradeResultIds.add(m.id);
+            if (!isFirstFetch) freshTradeResults.push(m);
+          } else if (m.type === "match-found") {
+            if (this.seenMatchFoundIds.has(m.id)) continue;
+            this.seenMatchFoundIds.add(m.id);
+            if (!isFirstFetch) freshMatchFound.push(m);
+          }
         }
 
         this.messages = msgs;
@@ -167,6 +210,10 @@ export class InboxPanel {
         for (const m of freshTradeResults) {
           const data = (m.data ?? {}) as { kind?: string; tradeId?: number };
           this.callbacks.onTradeResult?.(data);
+        }
+        for (const m of freshMatchFound) {
+          const data = (m.data ?? {}) as { battleId?: string; format?: string; team?: string; arenaName?: string };
+          this.callbacks.onMatchFound?.(data);
         }
         return;
       } catch {
@@ -216,7 +263,10 @@ export class InboxPanel {
       const hasLiveOffer = this.messages.some(
         (m) => m.type === "trade-offer" && this.tradeActionState.get((m.data as TradeOfferPayload | undefined)?.tradeId ?? -1) === undefined,
       );
-      if (hasLiveOffer) this.render();
+      const hasLiveDuel = this.messages.some(
+        (m) => m.type === "duel-request" && this.duelActionState.get(((m.data ?? {}) as { challengeId?: string }).challengeId ?? "") === undefined,
+      );
+      if (hasLiveOffer || hasLiveDuel) this.render();
     }, COUNTDOWN_TICK_MS);
   }
 
@@ -289,6 +339,10 @@ export class InboxPanel {
       html += `<div class="ibx-body">${esc(m.body)}</div>`;
       if (m.type === "trade-offer") {
         html += this.renderTradeOfferControls(m);
+      } else if (m.type === "match-found") {
+        html += this.renderMatchFoundControls(m);
+      } else if (m.type === "duel-request") {
+        html += this.renderDuelRequestControls(m);
       }
       html += `</div>`;
       html += `</div>`;
@@ -364,6 +418,66 @@ export class InboxPanel {
     // If failed, re-enable the buttons for retry by clearing the entry.
     if (this.tradeActionState.get(payload.tradeId) === "failed") {
       this.tradeActionState.delete(payload.tradeId);
+    }
+    this.render();
+  }
+
+  private renderMatchFoundControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { battleId?: string; format?: string; team?: string; arenaName?: string };
+    if (!data.battleId) return "";
+    const team = data.team ? data.team.toUpperCase() : "";
+    const teamColor = data.team === "red" ? "#ff4466" : data.team === "blue" ? "#66bbff" : "#cce";
+    return `<div class="ibx-trade-actions">
+      <div class="ibx-trade-summary">${esc(data.format?.toUpperCase() ?? "PVP")} · <span style="color:${teamColor}">Team ${esc(team)}</span> · ${esc(data.arenaName ?? "Arena")}</div>
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-match-action="enter" data-battle-id="${esc(data.battleId)}">Enter Arena</button>
+      </div>
+    </div>`;
+  }
+
+  private renderDuelRequestControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { challengeId?: string; challengerName?: string; format?: string; expiresAtMs?: number };
+    if (!data.challengeId) return "";
+    const state = this.duelActionState.get(data.challengeId);
+    const expired = typeof data.expiresAtMs === "number" && data.expiresAtMs <= Date.now();
+
+    if (state === "accepted") return `<div class="ibx-trade-result ibx-trade-success">Duel accepted — queueing now.</div>`;
+    if (state === "declined") return `<div class="ibx-trade-result ibx-trade-muted">Duel declined.</div>`;
+    if (expired) return `<div class="ibx-trade-result ibx-trade-muted">Challenge expired.</div>`;
+
+    const disabled = state === "pending";
+    const busy = state === "pending" ? ` <span class="ibx-trade-busy">working…</span>` : "";
+    const countdown = typeof data.expiresAtMs === "number"
+      ? `<span class="ibx-trade-countdown">expires in ${esc(formatTimeUntil(data.expiresAtMs))}</span>`
+      : "";
+    return `<div class="ibx-trade-actions">
+      <div class="ibx-trade-summary">Duel: ${esc(data.format?.toUpperCase() ?? "1V1")}${countdown ? " · " + countdown : ""}</div>
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-duel-action="accept" data-challenge-id="${esc(data.challengeId)}"${disabled ? " disabled" : ""}>Accept</button>
+        <button class="ibx-trade-btn ibx-trade-decline" data-duel-action="decline" data-challenge-id="${esc(data.challengeId)}"${disabled ? " disabled" : ""}>Decline</button>${busy}
+      </div>
+    </div>`;
+  }
+
+  private async handleDuelAction(action: string, challengeId: string) {
+    if (this.duelActionState.get(challengeId) === "pending") return;
+    this.duelActionState.set(challengeId, "pending");
+    this.render();
+
+    try {
+      if (action === "accept") {
+        const result = await this.callbacks.onAcceptDuel?.(challengeId);
+        this.duelActionState.set(challengeId, result?.ok ? "accepted" : "failed");
+      } else if (action === "decline") {
+        const result = await this.callbacks.onDeclineDuel?.(challengeId);
+        this.duelActionState.set(challengeId, result?.ok ? "declined" : "failed");
+      }
+    } catch {
+      this.duelActionState.set(challengeId, "failed");
+    }
+
+    if (this.duelActionState.get(challengeId) === "failed") {
+      this.duelActionState.delete(challengeId);
     }
     this.render();
   }
