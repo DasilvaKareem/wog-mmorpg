@@ -1571,14 +1571,12 @@ export async function doSkinning(ctx: AgentContext, strategy: AgentStrategy): Pr
 
 export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
-    // Auto-learn cooking profession
+    // Auto-learn cooking profession. If learnProfession returns false it has
+    // already queued a trainer-detour chain — setting focus=idle here would
+    // pin the script and block the queue from draining. Return progressed
+    // so the queue gets to run on the next tick.
     const learned = await ctx.learnProfession("cooking");
-    if (!learned) {
-      const reason = "Stuck on cooking: no cooking trainer nearby; not auto-gathering";
-      void ctx.logActivity(reason);
-      ctx.setScript({ type: "idle", reason });
-      return actionIdle(reason);
-    }
+    if (!learned) return actionProgressed("Working toward cooking access");
 
     const zs = await ctx.getZoneState();
     if (!zs) return actionIdle("Zone state unavailable");

@@ -1482,9 +1482,38 @@ function initDesktopPanelDragging() {
     { id: "agent-chat", handleSelector: ".agent-chat-tabs" },
   ];
 
+  // Storage version. Bump when validator rules change so stale positions get
+  // discarded automatically (no need for the user to run wogResetPanels()).
+  const PANEL_DRAG_STORAGE_VERSION = 2;
+
+  // One-time migration: wipe pre-v2 keys. The loose validator accepted
+  // positions like (5, 10) that get pinned behind AgentChat / chat log /
+  // status HUD in the upper-left corner, leaving the panel's drag handle
+  // obscured. Bumping the version forces a clean default for everyone.
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("wog:panel-pos:") && !k.startsWith(`wog:panel-pos:v${PANEL_DRAG_STORAGE_VERSION}:`)) {
+        stale.push(k);
+      }
+    }
+    for (const k of stale) localStorage.removeItem(k);
+    if (stale.length > 0) console.log(`[panel-drag] migrated ${stale.length} legacy panel-position key(s) to v${PANEL_DRAG_STORAGE_VERSION}`);
+  } catch {
+    // localStorage unavailable — ignore.
+  }
+
   // Minimum visible area of the drag handle that must stay on-screen so the
   // user can always grab the panel and pull it back.
   const MIN_VISIBLE_PX = 32;
+
+  // Upper-left HUD overlap zone. AgentChat (collapsed), ChatLog, and status
+  // indicators live here and intercept pointer events — a panel restored
+  // into this rectangle has its drag handle obscured. We refuse positions
+  // here even though they pass the on-screen reachability check.
+  const HUD_ZONE_LEFT = 80;
+  const HUD_ZONE_TOP = 60;
 
   const isPanelRendered = (el: HTMLElement): boolean => {
     // offsetParent is null for display:none, but null also for fixed-position
@@ -1492,7 +1521,10 @@ function initDesktopPanelDragging() {
     return el.offsetWidth > 0 && el.offsetHeight > 0;
   };
 
-  const reachable = (left: number, top: number): boolean => {
+  const reachable = (left: number, top: number, panelId: string): boolean => {
+    // AgentChat's default home is the lower-left; don't reject its own corner.
+    const isAgentChat = panelId === "agent-chat";
+    if (!isAgentChat && left < HUD_ZONE_LEFT && top < HUD_ZONE_TOP) return false;
     return (
       left + MIN_VISIBLE_PX >= 0 &&
       top >= 0 &&
@@ -1507,7 +1539,7 @@ function initDesktopPanelDragging() {
     const el = document.getElementById(def.id) as HTMLDivElement | null;
     if (!el) continue;
     const handle = (def.handleSelector ? el.querySelector(def.handleSelector) : null) as HTMLElement | null ?? el;
-    const key = `wog:panel-pos:${def.id}`;
+    const key = `wog:panel-pos:v${PANEL_DRAG_STORAGE_VERSION}:${def.id}`;
 
     const clamp = (left: number, top: number) => {
       const maxLeft = Math.max(0, window.innerWidth - el.offsetWidth);
@@ -1521,7 +1553,16 @@ function initDesktopPanelDragging() {
       el.style.bottom = "auto";
     };
     const saveCurrent = () => {
-      localStorage.setItem(key, JSON.stringify({ left: el.offsetLeft, top: el.offsetTop }));
+      const left = el.offsetLeft;
+      const top = el.offsetTop;
+      // Don't persist positions that would re-trigger the upper-left HUD-trap
+      // bug on next reload. The user can still drop the panel there for the
+      // current session, but on reload CSS defaults restore a usable spot.
+      if (!reachable(left, top, def.id)) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(key, JSON.stringify({ left, top }));
     };
     const clearSaved = () => {
       localStorage.removeItem(key);
@@ -1538,10 +1579,11 @@ function initDesktopPanelDragging() {
       try {
         const pos = JSON.parse(raw) as { left?: number; top?: number };
         if (typeof pos.left !== "number" || typeof pos.top !== "number") return null;
-        if (!reachable(pos.left, pos.top)) {
-          // Saved position is unreachable in this viewport (corner, off-screen,
-          // or from a different monitor). Discard so CSS default takes over.
-          console.warn(`[panel-drag] discarding unreachable saved position for ${def.id}:`, pos);
+        if (!reachable(pos.left, pos.top, def.id)) {
+          // Position is unreachable in this viewport OR sits behind the HUD
+          // overlap zone in the upper-left. Discard so CSS default kicks in
+          // and the panel returns to a known-good corner.
+          console.warn(`[panel-drag] discarding bad saved position for ${def.id}:`, pos);
           localStorage.removeItem(key);
           return null;
         }

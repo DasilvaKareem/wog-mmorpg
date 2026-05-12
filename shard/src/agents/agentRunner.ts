@@ -518,7 +518,15 @@ export class AgentRunner {
   /** Push one or more scripts to the back of the queue */
   public enqueueActions(scripts: BotScript[], clearExisting = false): Promise<void> {
     return this.withGate(async () => {
-      if (clearExisting) this.actionQueue = [];
+      if (clearExisting) {
+        this.actionQueue = [];
+        // Clear currentScript too. Otherwise the next tick re-runs the same
+        // handler that just enqueued these actions (e.g. doQuesting →
+        // doCraftQuest → learnProfession), and it re-enqueues the chain
+        // forever. The queue only drains when currentScript is null.
+        this.currentScript = null;
+        this.ticksOnCurrentScript = 0;
+      }
       this.actionQueue.push(...scripts);
       if (this.actionQueue.length > 10) this.actionQueue = this.actionQueue.slice(0, 10);
       await setActionQueue(this.userWallet, this.actionQueue);
@@ -614,26 +622,18 @@ export class AgentRunner {
       if (!trainer) {
         const targetHub = getTrainerZone(professionId);
         if (this.currentRegion !== targetHub) {
-          // Don't yank high-level agents back to hubs for a profession
-          // they might not actually need. Skip gracefully; caller falls back.
-          const myLevel = zs.me.level ?? 1;
-          if (myLevel >= 10) {
-            console.log(`[agent:${this.walletTag}] No ${professionId} trainer here and Lv${myLevel} — skipping hub detour`);
-            void this.logActivity(`Skipping ${professionId} — no trainer nearby, continuing grinding`);
-            return false;
-          }
-
-          // Low-level agents: enqueue a round-trip so they come back to homeZone
-          // instead of stranding in the hub.
+          // Caller explicitly invoked learnProfession() — the agent has decided
+          // it needs this profession (skinning quest, cooking recipe, etc.).
+          // Enqueue a round-trip to the trainer hub at any level; previous
+          // Lv10+ skip stranded high-level agents on quests that required a
+          // trainer they hadn't found yet.
           const config = await getAgentConfig(this.userWallet);
           const homeZone = config?.homeZone ?? this.currentRegion;
           const chain = buildProfessionLearnChain(professionId, homeZone);
-          // Chain builder defaults to PROFESSION_HUB_ZONE, override it here
           if (chain[0].type === "travel") {
             chain[0].targetZone = targetHub;
             chain[0].reason = `Detour: learn ${professionId} in ${targetHub}`;
           }
-
           await this.enqueueActions(chain, true);
           void this.logActivity(`Detour: learn ${professionId} in ${targetHub} → return to ${homeZone}`);
           console.log(`[agent:${this.walletTag}] Enqueued profession-learn chain for ${professionId}, hub=${targetHub}, home=${homeZone}`);
