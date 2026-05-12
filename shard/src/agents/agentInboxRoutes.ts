@@ -20,6 +20,7 @@ import {
   getMessageHistory,
   markHistoryRead,
   markAllHistoryRead,
+  clearAllMessages,
   type InboxMessageType,
 } from "./agentInbox.js";
 import { getAgentEntityRef } from "./agentConfigStore.js";
@@ -220,6 +221,23 @@ export function registerAgentInboxRoutes(server: FastifyInstance): void {
     }
     const marked = await markHistoryRead(wallet, messageIds);
     return { ok: true, marked };
+  });
+
+  // ── Clear inbox (hard-delete everything for a wallet) ──────────────────────
+  // Unauthenticated like /history and /read — wallet scoping is the only access
+  // control. Wipes Postgres history + inbox tables AND Redis history LIST +
+  // Redis Stream so orphaned pre-Postgres messages disappear too.
+
+  server.post<{
+    Params: { wallet: string };
+  }>("/inbox/:wallet/clear", async (request, reply) => {
+    const { wallet } = request.params;
+    if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+      reply.code(400);
+      return { error: "Invalid wallet address" };
+    }
+    const result = await clearAllMessages(wallet);
+    return { ok: true, ...result };
   });
 
 }

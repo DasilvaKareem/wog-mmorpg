@@ -356,9 +356,40 @@ export class InboxPanel {
     this.listEl.innerHTML = html;
     const total = this.messages.length;
     const unread = this.getUnreadCount();
-    this.footerEl.textContent = unread > 0
+    const summary = unread > 0
       ? `${unread} unread of ${total}`
       : `${total} message${total === 1 ? "" : "s"}`;
+    this.footerEl.innerHTML = `<span class="ibx-summary">${summary}</span><button type="button" class="ibx-clear-btn" data-action="clear-inbox">Clear all</button>`;
+    const clearBtn = this.footerEl.querySelector("[data-action='clear-inbox']") as HTMLButtonElement | null;
+    clearBtn?.addEventListener("click", () => void this.clearInbox());
+  }
+
+  /**
+   * Hard-delete every message for this wallet on the server (Postgres + Redis)
+   * and locally. Used when the "Clear all" button is clicked. No confirmation
+   * dialog — the user asked for a button that just works.
+   */
+  private async clearInbox(): Promise<void> {
+    if (!this.custodialWallet) return;
+    const bases = this.apiBase != null ? [this.apiBase, ...CANDIDATE_BASES.filter((b) => b !== this.apiBase)] : CANDIDATE_BASES;
+    const path = `/inbox/${this.custodialWallet}/clear`;
+    for (const base of bases) {
+      try {
+        const res = await fetch(toUrl(base, path), { method: "POST" });
+        if (!res.ok) continue;
+        this.messages = [];
+        this.serverUnread = 0;
+        this.seenTradeResultIds.clear();
+        this.seenMatchFoundIds.clear();
+        this.tradeActionState.clear();
+        this.duelActionState.clear();
+        this.render();
+        this.onUnreadChange(0);
+        return;
+      } catch {
+        // try next base
+      }
+    }
   }
 
   private renderTradeOfferControls(m: InboxMessage): string {
@@ -618,8 +649,24 @@ export class InboxPanel {
         font-size: 10px;
         color: #556;
         border-top: 1px solid rgba(255, 194, 79, 0.1);
-        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
+      .ibx-footer .ibx-summary { flex: 1; text-align: left; }
+      .ibx-clear-btn {
+        background: transparent;
+        border: 1px solid rgba(255, 100, 100, 0.4);
+        color: #d88;
+        padding: 3px 8px;
+        font-size: 10px;
+        font-family: inherit;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .ibx-clear-btn:hover { background: rgba(255, 100, 100, 0.15); color: #fbb; }
     `;
     document.head.appendChild(style);
   }

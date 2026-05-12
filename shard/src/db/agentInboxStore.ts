@@ -140,3 +140,29 @@ export async function markAllHistoryRead(wallet: string): Promise<number> {
   );
   return rowCount ?? 0;
 }
+
+/**
+ * Hard-delete every history row for a wallet. Used by the "Clear inbox"
+ * button — the user wanted them gone, not just marked read.
+ */
+export async function deleteAllInboxHistory(wallet: string): Promise<number> {
+  if (!isPostgresConfigured()) return 0;
+  const { rowCount } = await postgresQuery(
+    `delete from game.agent_inbox_history where wallet_address = $1`,
+    [wallet.toLowerCase()]
+  );
+  return rowCount ?? 0;
+}
+
+/**
+ * Hard-delete every unacked inbox message for a wallet. Paired with
+ * deleteAllInboxHistory so "Clear inbox" wipes both surfaces.
+ */
+export async function deleteAllInboxMessages(wallet: string): Promise<number> {
+  if (!isPostgresConfigured()) return 0;
+  const { rowCount } = await postgresQuery(
+    `delete from game.agent_inbox_messages where wallet_address = $1`,
+    [wallet.toLowerCase()]
+  );
+  return rowCount ?? 0;
+}

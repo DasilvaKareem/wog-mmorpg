@@ -14,6 +14,8 @@ import {
   appendInboxHistory,
   countInboxMessages,
   countNewInboxMessages,
+  deleteAllInboxHistory,
+  deleteAllInboxMessages,
   listInboxHistory,
   listInboxMessages,
   upsertInboxMessage,
@@ -443,6 +445,39 @@ export async function getMessageHistory(
 
 /** Re-export store helpers so routes can mark history messages read. */
 export { markHistoryRead, markAllHistoryRead } from "../db/agentInboxStore.js";
+
+/**
+ * Wipe every message for a wallet across all backends — Postgres history +
+ * Postgres inbox + Redis history LIST + Redis inbox Stream + in-memory maps.
+ * Returns counts per backend so callers can show what was actually cleared.
+ */
+export async function clearAllMessages(wallet: string): Promise<{
+  pgHistory: number;
+  pgInbox: number;
+  redisKeysDeleted: number;
+}> {
+  const lower = wallet.toLowerCase();
+  let pgHistory = 0;
+  let pgInbox = 0;
+  if (isPostgresConfigured()) {
+    [pgHistory, pgInbox] = await Promise.all([
+      deleteAllInboxHistory(wallet),
+      deleteAllInboxMessages(wallet),
+    ]);
+  }
+  let redisKeysDeleted = 0;
+  const redis = getRedis();
+  if (redis) {
+    try {
+      redisKeysDeleted = await redis.del(historyKey(wallet), inboxKey(wallet));
+    } catch (err: any) {
+      console.warn(`[inbox] Redis clear failed: ${err.message}`);
+    }
+  }
+  memHistory.delete(lower);
+  memInbox.delete(lower);
+  return { pgHistory, pgInbox, redisKeysDeleted };
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
