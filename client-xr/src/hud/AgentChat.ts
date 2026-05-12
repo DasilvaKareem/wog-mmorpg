@@ -606,12 +606,20 @@ export class AgentChat {
       const el = document.createElement("div");
       el.className = `agent-chat-msg agent-chat-${msg.role}`;
 
-      if (msg.role === "user") {
-        el.textContent = `> ${msg.text}`;
-        el.style.color = "#efc97f";
-      } else if (msg.role === "agent") {
-        el.textContent = msg.text;
-        el.style.color = "#7fd6be";
+      if (msg.role === "user" || msg.role === "agent") {
+        // Private channel — bubble UI with violet tint so the player can
+        // distinguish their own/agent's chatter from broadcast world events.
+        el.classList.add("agent-chat-bubble", `agent-chat-bubble-${msg.role}`);
+        if (msg.role === "agent") {
+          const tag = document.createElement("span");
+          tag.className = "agent-chat-private-tag";
+          tag.textContent = "\u{1F512} private \u00b7 only you see this";
+          el.appendChild(tag);
+        }
+        const bubble = document.createElement("div");
+        bubble.className = "agent-chat-bubble-inner";
+        bubble.textContent = msg.text;
+        el.appendChild(bubble);
       } else if (msg.role === "system") {
         el.textContent = msg.text;
         el.style.color = msg.color || "#ff8866";
@@ -1158,6 +1166,49 @@ export class AgentChat {
 
       .agent-chat-user {
         font-weight: bold;
+      }
+
+      /* Private channel bubbles — violet/lilac to signal "only you + your
+         agent see this", distinct from broadcast world events. */
+      .agent-chat-bubble {
+        display: flex;
+        flex-direction: column;
+        margin: 4px 0;
+        text-shadow: none;
+      }
+      .agent-chat-bubble-user { align-items: flex-end; }
+      .agent-chat-bubble-agent { align-items: flex-start; }
+
+      .agent-chat-bubble-inner {
+        display: inline-block;
+        max-width: 82%;
+        padding: 6px 10px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.38;
+        word-wrap: break-word;
+        white-space: pre-wrap;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+      }
+      .agent-chat-bubble-user .agent-chat-bubble-inner {
+        background: linear-gradient(135deg, rgba(180, 138, 250, 0.32), rgba(140, 96, 220, 0.40));
+        color: #ecd9ff;
+        border: 1px solid rgba(180, 138, 250, 0.55);
+        border-bottom-right-radius: 4px;
+      }
+      .agent-chat-bubble-agent .agent-chat-bubble-inner {
+        background: linear-gradient(135deg, rgba(180, 138, 250, 0.18), rgba(127, 214, 190, 0.15));
+        color: #d9e9ff;
+        border: 1px solid rgba(180, 138, 250, 0.42);
+        border-bottom-left-radius: 4px;
+      }
+      .agent-chat-private-tag {
+        font: bold 9px/1 "Courier New", monospace;
+        letter-spacing: 0.08em;
+        color: #b48cff;
+        margin: 0 4px 3px;
+        opacity: 0.85;
+        text-transform: uppercase;
       }
 
       .agent-chat-autocomplete {
