@@ -119,6 +119,8 @@ export class LandingPage {
       <header class="xr-landing-topbar">
         <div class="xr-landing-top-left">
           <img class="xr-landing-duel" src="${HERO_DUEL_SRC}" alt="Game icon" />
+        </div>
+        <div class="xr-landing-top-right">
           <nav class="xr-landing-nav" aria-label="Primary">
             ${NAV_MENUS.map((menu, index) => renderNavMenuHtml(menu, index)).join("")}
           </nav>
@@ -536,14 +538,20 @@ export class LandingPage {
         z-index: 43;
         pointer-events: none;
         padding: 14px 20px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
       }
 
-      .xr-landing-top-left {
+      .xr-landing-top-left,
+      .xr-landing-top-right {
         display: inline-flex;
         align-items: flex-start;
         gap: 12px;
         pointer-events: auto;
       }
+
 
       .xr-landing-duel {
         width: 48px;
@@ -602,7 +610,8 @@ export class LandingPage {
       .xr-landing-nav-menu {
         position: absolute;
         top: calc(100% + 12px);
-        left: 0;
+        right: 0;
+        left: auto;
         min-width: 220px;
         padding: 6px 0;
         background: rgba(8, 14, 28, 0.96);
@@ -663,7 +672,7 @@ export class LandingPage {
       .xr-landing-panel {
         position: relative;
         width: min(760px, calc(100vw - 32px));
-        padding: 140px 24px 18px;
+        padding: 24px 24px 24px;
         border-radius: 20px;
         background: transparent;
         border: none;
@@ -1057,7 +1066,7 @@ export class LandingPage {
 
         .xr-landing-panel {
           width: calc(100vw - 20px);
-          padding: 92px 10px 16px;
+          padding: 16px 10px 16px;
           border-radius: 24px;
         }
 
