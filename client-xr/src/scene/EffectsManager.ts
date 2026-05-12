@@ -399,6 +399,31 @@ export class EffectsManager {
       const radius = (d.radius as number) ?? 3;
 
       this.spawnAbility(ev.id, animStyle as AbilityAnim["style"], casterPos, targetPos, color, classId, radius);
+
+      if (classId === "warrior" && techniqueId) {
+        this.applyWarriorFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
+      if (classId === "rogue" && techniqueId) {
+        this.applyRogueFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
+      if (classId === "mage" && techniqueId) {
+        this.applyMageFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
+      if (classId === "warlock" && techniqueId) {
+        this.applyWarlockFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
+      if (classId === "paladin" && techniqueId) {
+        this.applyPaladinFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
+      if (classId === "ranger" && techniqueId) {
+        this.applyRangerFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
+      if (classId === "cleric" && techniqueId) {
+        this.applyClericFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
+      if (classId === "monk" && techniqueId) {
+        this.applyMonkFlair(techniqueId, casterPos, targetPos, ev.id);
+      }
     }
 
     // Prune old event IDs (keep last 200)
@@ -439,6 +464,1473 @@ export class EffectsManager {
     }
 
     this.anims.push(anim);
+  }
+
+  /**
+   * Spawn a one-shot expanding ring on the ground at `pos`. Reuses the same
+   * pool/lifecycle as a normal `area` ability by enqueuing a synthetic
+   * AbilityAnim. Returns silently if the ring pool is exhausted.
+   */
+  private spawnGroundRing(pos: THREE.Vector3, color: number, radius: number, duration = 0.7): void {
+    const anim: AbilityAnim = {
+      id: `flair-${Math.random().toString(36).slice(2)}`,
+      style: "area",
+      elapsed: 0,
+      duration,
+      color,
+      classId: "",
+      casterPos: pos.clone(),
+      targetPos: pos.clone(),
+      radius,
+      channelNextBurst: 0,
+    };
+    this.startArea(anim);
+    this.anims.push(anim);
+  }
+
+  /**
+   * Per-technique VFX flair for warrior abilities. Layered on top of the
+   * default `spawnAbility` visuals so each technique reads as visually
+   * distinct without authoring new clips. Strips _r2/_r3/_r4 ranks first
+   * so all ranks of the same technique share the same flair.
+   */
+  private applyWarriorFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtHead = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterHead = casterPos.clone().setY(casterPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+
+    switch (id) {
+      case "warrior_heroic_strike": {
+        // Single bright white-gold impact + small ground ring beneath target.
+        this.emitBurst(tgtHead, 0xfff2b0, 22, 5.5, 0.28, 0.4);
+        this.spawnGroundRing(targetPos.clone().setY(targetPos.y + 0.05), 0xffd060, 2.5, 0.45);
+        break;
+      }
+      case "warrior_rending_strike": {
+        // Three crimson claw streaks tearing horizontally through the target,
+        // plus a lingering blood-mist below.
+        const up = new THREE.Vector3(0, 1, 0);
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos).normalize();
+        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+        for (let line = 0; line < 3; line++) {
+          const yOff = 0.6 + line * 0.35;
+          for (let i = 0; i < 8; i++) {
+            const u = (i / 7) - 0.5; // -0.5..+0.5
+            const pos = targetPos.clone()
+              .addScaledVector(right, u * 1.6)
+              .add(new THREE.Vector3(0, yOff, 0));
+            const vel = right.clone().multiplyScalar(u > 0 ? 2.5 : -2.5)
+              .add(new THREE.Vector3(0, -0.3, 0));
+            this.emitParticle(pos, vel, 0xb01020, 0.22, 0.55);
+          }
+        }
+        for (let i = 0; i < 10; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.3 + Math.random() * 0.6;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.15 + Math.random() * 0.3, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, -0.4, 0), 0x551018, 0.18, 0.9);
+        }
+        break;
+      }
+      case "warrior_cleave": {
+        // 360° fan of sparks at waist height around the CASTER, swept along
+        // a quick arc — sells "I am spinning a blade around me".
+        const waist = casterPos.clone().setY(casterPos.y + 0.9);
+        const count = 24;
+        for (let i = 0; i < count; i++) {
+          const a = (i / count) * Math.PI * 2;
+          const r = 1.6;
+          const pos = waist.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.5, 0.3, Math.sin(a) * 3.5);
+          this.emitParticle(pos, vel, 0xffcc66, 0.16, 0.35);
+        }
+        this.spawnGroundRing(casterFeet, 0xffaa44, 3.0, 0.5);
+        break;
+      }
+      case "warrior_shield_wall": {
+        // Brief blue ring "snap" at caster + a ring of upward-rising motes
+        // that read as a wall of shields locking into place. The persistent
+        // glow is handled by the active-effect aura system separately.
+        this.spawnGroundRing(casterFeet, 0x5dadec, 2.2, 0.55);
+        for (let i = 0; i < 14; i++) {
+          const a = (i / 14) * Math.PI * 2;
+          const r = 1.1;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.2, Math.sin(a) * r));
+          const vel = new THREE.Vector3(0, 2.2, 0);
+          this.emitParticle(pos, vel, 0x9fd1ff, 0.22, 0.7);
+        }
+        break;
+      }
+      case "warrior_battle_rage": {
+        // Red flame wisps boiling up from caster's shoulders + a brief
+        // crimson ground flash. Cast-time only; the buff glow lasts.
+        this.spawnGroundRing(casterFeet, 0xff3322, 1.6, 0.4);
+        for (let i = 0; i < 20; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.4 + Math.random() * 0.4;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 1.0 + Math.random() * 0.6, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.4, 1.8 + Math.random() * 0.8, (Math.random() - 0.5) * 0.4);
+          this.emitParticle(pos, vel, Math.random() < 0.4 ? 0xffaa22 : 0xcc2211, 0.22, 0.7);
+        }
+        break;
+      }
+      case "warrior_intimidating_shout": {
+        // Dark-red shockwave ring radiating from caster + scattered black
+        // motes falling outward (the sound made visible).
+        this.spawnGroundRing(casterFeet, 0x661a1a, 4.5, 0.6);
+        for (let i = 0; i < 22; i++) {
+          const a = (i / 22) * Math.PI * 2 + Math.random() * 0.15;
+          const r = 0.6 + Math.random() * 0.6;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 1.1 + Math.random() * 0.4, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.5, 0.4, Math.sin(a) * 3.5);
+          this.emitParticle(pos, vel, 0x331010, 0.2, 0.55);
+        }
+        break;
+      }
+      case "warrior_rallying_cry": {
+        // Bright golden upward pillar + small gold ring at caster's feet —
+        // the "banner being raised" feel.
+        this.spawnGroundRing(casterFeet, 0xffd860, 2.6, 0.5);
+        for (let i = 0; i < 18; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 0.7;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.2 + Math.random() * 0.4, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.4, 3.5 + Math.random() * 1.5, (Math.random() - 0.5) * 0.4);
+          this.emitParticle(pos, vel, 0xfff0a0, 0.24, 0.9);
+        }
+        break;
+      }
+      case "warrior_titans_charge": {
+        // Motion-line trail from caster to target — particles laid along the
+        // path so it reads as a streaking dash, then a heavy impact dust.
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        dir.normalize();
+        const steps = Math.min(20, Math.max(6, Math.floor(dist * 1.2)));
+        for (let i = 0; i < steps; i++) {
+          const u = i / (steps - 1);
+          const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 0.6 + Math.random() * 0.4, 0));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4);
+          this.emitParticle(pos, vel, 0xdddddd, 0.22, 0.45);
+        }
+        // Impact dust at target
+        this.emitBurst(targetPos.clone().setY(targetPos.y + 0.2), 0xaa9966, 24, 4.2, 0.3, 0.6);
+        break;
+      }
+      case "warrior_earthquake_slam": {
+        // Massive ground ring + brown debris erupting upward at the impact.
+        this.spawnGroundRing(targetPos.clone().setY(targetPos.y + 0.05), 0x885522, 7.5, 0.85);
+        for (let i = 0; i < 28; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.3 + Math.random() * 1.1;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.05, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 1.4, 3.5 + Math.random() * 1.8, Math.sin(a) * 1.4);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0x6b4022 : 0x402815, 0.26, 0.85);
+        }
+        break;
+      }
+      case "warrior_undying_rage": {
+        // Twin red/gold spiraling columns of motes around the caster — the
+        // berserker "aura ignition" frame. Persistent glow comes from the buff.
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 4; // double spiral
+          const r = 0.7;
+          const y = (i / 24) * 1.8;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a + Math.PI / 2) * 0.8, 0.8, Math.sin(a + Math.PI / 2) * 0.8);
+          this.emitParticle(pos, vel, i % 2 === 0 ? 0xff2222 : 0xffcc44, 0.24, 0.8);
+        }
+        this.spawnGroundRing(casterFeet, 0xff5522, 2.4, 0.6);
+        break;
+      }
+      default:
+        // No flair for ranks/aliases we don't recognise — fall through silently.
+        void eventId;
+    }
+  }
+
+  /**
+   * Per-technique VFX flair for rogue abilities. The rig has no spell, throw
+   * or teleport clip — so blinks, smoke bombs and cloaks are sold entirely by
+   * particle bursts and ground rings rather than character motion.
+   */
+  private applyRogueFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtCore = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterCore = casterPos.clone().setY(casterPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+    const targetFeet = targetPos.clone().setY(targetPos.y + 0.05);
+
+    switch (id) {
+      case "rogue_backstab": {
+        // Crimson surgical pinpoint at the back of the target + a short
+        // arc of dark-red sparks fanning behind impact.
+        this.emitBurst(tgtCore, 0xcc1428, 18, 4.0, 0.22, 0.4);
+        for (let i = 0; i < 10; i++) {
+          const a = -Math.PI / 2 + (i / 9) * Math.PI; // upper hemisphere
+          const r = 0.6;
+          const pos = tgtCore.clone().add(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0));
+          this.emitParticle(pos, new THREE.Vector3(0, -1.0, 0), 0x550810, 0.18, 0.55);
+        }
+        break;
+      }
+      case "rogue_stealth": {
+        // Inky purple smoke swirling upward — the "I'm gone" frame. No
+        // mesh swap; just particles that read as dissolve.
+        for (let i = 0; i < 28; i++) {
+          const a = (i / 28) * Math.PI * 2 + Math.random() * 0.2;
+          const r = 0.5 + Math.random() * 0.4;
+          const y = 0.2 + Math.random() * 1.6;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 0.5, 1.8 + Math.random() * 0.8, Math.sin(a) * 0.5);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0x281238 : 0x4a2070, 0.28, 1.0);
+        }
+        this.spawnGroundRing(casterFeet, 0x2a1438, 1.8, 0.45);
+        break;
+      }
+      case "rogue_poison_blade": {
+        // Green venom drip falling from the target + a sickly cloud
+        // hovering low at their feet.
+        for (let i = 0; i < 22; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.2 + Math.random() * 0.7;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 1.1, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.4, -0.4 - Math.random() * 0.4, (Math.random() - 0.5) * 0.4);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0x2bd246 : 0x115522, 0.20, 1.1);
+        }
+        this.spawnGroundRing(targetFeet, 0x1b8a2a, 1.6, 0.6);
+        break;
+      }
+      case "rogue_evasion": {
+        // Three faint white afterimages radiating around the caster — the
+        // "you can't hit what you can't catch" frame.
+        for (let ring = 0; ring < 3; ring++) {
+          const phase = ring * (Math.PI * 2 / 3);
+          const r = 0.8 + ring * 0.2;
+          for (let i = 0; i < 10; i++) {
+            const a = phase + (i / 10) * Math.PI * 2;
+            const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.6 + ring * 0.3, Math.sin(a) * r));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.4, 0), 0xddddff, 0.18, 0.55);
+          }
+        }
+        break;
+      }
+      case "rogue_shadow_strike": {
+        // Dark puff at the caster + violet streak across to the target,
+        // then a black/violet strike burst at impact.
+        this.emitBurst(casterCore, 0x180820, 16, 3.0, 0.28, 0.35);
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        dir.normalize();
+        const steps = Math.min(14, Math.max(5, Math.floor(dist)));
+        for (let i = 0; i < steps; i++) {
+          const u = i / (steps - 1);
+          const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 0.9, 0));
+          this.emitParticle(pos, new THREE.Vector3(0, 0.2, 0), 0x5a1e96, 0.22, 0.35);
+        }
+        this.emitBurst(tgtCore, 0x6c1ab0, 18, 4.0, 0.24, 0.45);
+        break;
+      }
+      case "rogue_smoke_bomb": {
+        // Wide gray fog ring + curling smoke columns hanging in the air.
+        this.spawnGroundRing(casterFeet, 0x666666, 5.0, 0.8);
+        for (let i = 0; i < 30; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.3 + Math.random() * 1.8;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3 + Math.random() * 1.2, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.5, 0.5 + Math.random() * 0.7, (Math.random() - 0.5) * 0.5);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0x8a8a8a : 0x4a4a4a, 0.34, 1.4);
+        }
+        break;
+      }
+      case "rogue_blade_flurry": {
+        // Three quick fanned silver slashes in front of the caster. Each
+        // slash = an arc of particles offset by 30° clockwise.
+        const up = new THREE.Vector3(0, 1, 0);
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos).normalize();
+        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+        for (let blade = 0; blade < 3; blade++) {
+          const tilt = (blade - 1) * 0.4; // -0.4, 0, +0.4 radians
+          for (let i = 0; i < 9; i++) {
+            const t = (i / 8) - 0.5;
+            const offset = new THREE.Vector3()
+              .addScaledVector(right, t * 1.2 + tilt * 0.3)
+              .addScaledVector(up, Math.cos(t * Math.PI) * 0.6 + 1.0);
+            const pos = targetPos.clone().add(offset);
+            const vel = right.clone().multiplyScalar(t > 0 ? 2.0 : -2.0);
+            this.emitParticle(pos, vel, 0xdde6ff, 0.18, 0.35);
+          }
+        }
+        break;
+      }
+      case "rogue_shadowstep_ambush": {
+        // Caster dissolves into shadow → reforms behind target. Two puffs +
+        // a violet streak connecting them, then a strike burst.
+        this.emitBurst(casterCore, 0x180828, 22, 4.2, 0.3, 0.45);
+        this.emitBurst(tgtCore, 0x180828, 18, 3.5, 0.28, 0.4);
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        dir.normalize();
+        const steps = Math.min(18, Math.max(6, Math.floor(dist * 1.2)));
+        for (let i = 0; i < steps; i++) {
+          const u = i / (steps - 1);
+          const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.0, 0));
+          this.emitParticle(pos, new THREE.Vector3(0, 0.3, 0), 0x6020c0, 0.24, 0.3);
+        }
+        this.spawnGroundRing(targetFeet, 0x4015a0, 2.0, 0.4);
+        break;
+      }
+      case "rogue_death_mark": {
+        // Crimson rune ring rotates at the target's feet + falling motes
+        // forming the silhouette of a skull above them.
+        this.spawnGroundRing(targetFeet, 0xa00010, 3.2, 0.9);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const r = 0.7;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 1.4 + Math.random() * 0.6, Math.sin(a) * r));
+          const vel = new THREE.Vector3(0, -0.5, 0);
+          this.emitParticle(pos, vel, 0xff2030, 0.22, 1.0);
+        }
+        break;
+      }
+      case "rogue_phantom_strike": {
+        // Pale-blue ghost streak across — long-distance phase lunge. The
+        // strike burst is desaturated to read as "ethereal".
+        this.emitBurst(casterCore, 0xa0d0ff, 18, 3.0, 0.26, 0.4);
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        dir.normalize();
+        const steps = Math.min(28, Math.max(10, Math.floor(dist * 0.9)));
+        for (let i = 0; i < steps; i++) {
+          const u = i / (steps - 1);
+          const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 0.9, 0));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.3, (Math.random() - 0.5) * 0.2);
+          this.emitParticle(pos, vel, 0xc8e0ff, 0.22, 0.4);
+        }
+        this.emitBurst(tgtCore, 0xb0d4ff, 22, 4.0, 0.28, 0.5);
+        break;
+      }
+      case "rogue_deathblow": {
+        // The killing blow — a single, oversized black-red impact + ground
+        // crack ring. Reserved for the heaviest hit in the kit.
+        this.emitBurst(tgtCore, 0x18000a, 40, 5.5, 0.42, 0.7);
+        this.emitBurst(tgtCore, 0xa00020, 24, 3.5, 0.34, 0.55);
+        this.spawnGroundRing(targetFeet, 0x600810, 4.2, 0.85);
+        // Crack-line debris around the target
+        for (let i = 0; i < 18; i++) {
+          const a = (i / 18) * Math.PI * 2;
+          const r = 0.4 + Math.random() * 0.8;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 1.0, 1.6 + Math.random() * 0.8, Math.sin(a) * 1.0);
+          this.emitParticle(pos, vel, 0x2a0a0a, 0.26, 0.8);
+        }
+        break;
+      }
+      case "rogue_living_shadow": {
+        // Black tendrils erupt from the target — six radial streaks of
+        // dark particles climbing upward, plus a low violet pool.
+        this.spawnGroundRing(targetFeet, 0x180828, 3.6, 0.9);
+        for (let arm = 0; arm < 6; arm++) {
+          const a = (arm / 6) * Math.PI * 2;
+          for (let i = 0; i < 8; i++) {
+            const r = 0.2 + i * 0.18;
+            const y = i * 0.22;
+            const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1 + y, Math.sin(a) * r));
+            const vel = new THREE.Vector3(Math.cos(a) * 0.3, 1.2 + Math.random() * 0.4, Math.sin(a) * 0.3);
+            this.emitParticle(pos, vel, i < 3 ? 0x401466 : 0x080010, 0.24, 1.0);
+          }
+        }
+        break;
+      }
+      case "rogue_tricks_of_the_trade":
+      case "rogue_assassins_mark": {
+        // Outward burst of party-buff sparkles around caster — green for
+        // tricks, red for the mark.
+        const color = id === "rogue_assassins_mark" ? 0xd02040 : 0x40e070;
+        this.spawnGroundRing(casterFeet, color, 3.0, 0.6);
+        for (let i = 0; i < 26; i++) {
+          const a = (i / 26) * Math.PI * 2 + Math.random() * 0.15;
+          const r = 0.5;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.8, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.5, 0.8, Math.sin(a) * 3.5);
+          this.emitParticle(pos, vel, color, 0.22, 0.7);
+        }
+        break;
+      }
+      case "rogue_shadow_veil": {
+        // Falling violet motes drape over caster — a "cloak descending"
+        // read. Quiet, slow, atmospheric.
+        for (let i = 0; i < 30; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 1.2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 2.2 + Math.random() * 0.6, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.2, -0.8 - Math.random() * 0.3, (Math.random() - 0.5) * 0.2);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0x4020a0 : 0x1a0840, 0.24, 1.4);
+        }
+        break;
+      }
+      case "rogue_sharpen_blade":
+      case "rogue_shadow_infusion": {
+        // Directional stream from caster to ally target — white sparks for
+        // sharpen, violet motes for shadow infusion.
+        const color = id === "rogue_shadow_infusion" ? 0x6c1ab0 : 0xfff0c0;
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(16, Math.max(5, Math.floor(dist * 1.5)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.0, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.4, 0), color, 0.20, 0.55);
+          }
+        }
+        this.emitBurst(tgtCore, color, 14, 2.8, 0.22, 0.5);
+        break;
+      }
+      default:
+        void eventId;
+    }
+  }
+
+  /**
+   * Per-technique VFX flair for mage abilities. Wizard.glb already has
+   * Spell1/Spell2 motions, so the body language is decent — flair adds the
+   * element (fire / frost / arcane / time) the rig can't possibly show.
+   */
+  private applyMageFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtCore = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterCore = casterPos.clone().setY(casterPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+    const targetFeet = targetPos.clone().setY(targetPos.y + 0.05);
+
+    switch (id) {
+      case "mage_fireball": {
+        // Orange/red trailing embers behind the standard projectile + a
+        // bigger fiery impact burst at target.
+        for (let i = 0; i < 12; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.2 + Math.random() * 0.3;
+          const pos = casterCore.clone().add(new THREE.Vector3(Math.cos(a) * r, Math.random() * 0.4, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.6 + Math.random() * 0.5, (Math.random() - 0.5) * 0.6);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0xff7a1a : 0xffd24a, 0.24, 0.5);
+        }
+        this.emitBurst(tgtCore, 0xff5a18, 28, 5.0, 0.32, 0.55);
+        break;
+      }
+      case "mage_frost_armor": {
+        // Cyan ice shards forming around the caster — hovering, slowly drifting.
+        this.spawnGroundRing(casterFeet, 0x8fdcff, 2.0, 0.6);
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          const r = 0.7;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 1.0, Math.sin(a) * r));
+          const vel = new THREE.Vector3(0, 0.4, 0);
+          this.emitParticle(pos, vel, 0xbfeaff, 0.24, 1.0);
+        }
+        break;
+      }
+      case "mage_arcane_missiles": {
+        // Five quick purple bursts at the target, slightly offset so they
+        // read as a barrage rather than one big hit.
+        for (let m = 0; m < 5; m++) {
+          const a = (m / 5) * Math.PI * 2;
+          const off = new THREE.Vector3(Math.cos(a) * 0.4, m * 0.18, Math.sin(a) * 0.4);
+          this.emitBurst(tgtCore.clone().add(off), 0xc26aff, 10, 3.0, 0.22, 0.4);
+        }
+        break;
+      }
+      case "mage_slow": {
+        // Slow-rotating teal/purple ring of motes hovering around target.
+        for (let i = 0; i < 18; i++) {
+          const a = (i / 18) * Math.PI * 2;
+          const r = 0.9;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.8 + Math.sin(a * 2) * 0.2, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a + Math.PI / 2) * 0.3, 0.1, Math.sin(a + Math.PI / 2) * 0.3);
+          this.emitParticle(pos, vel, i % 2 === 0 ? 0x40d0ff : 0xa080ff, 0.20, 1.2);
+        }
+        break;
+      }
+      case "mage_flamestrike": {
+        // Column of fire rising from the ground at the target — vertical
+        // streaks of orange/yellow particles, plus a scorched ring.
+        this.spawnGroundRing(targetFeet, 0xff5a18, 4.5, 0.8);
+        for (let i = 0; i < 26; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 1.4;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.3, 4.0 + Math.random() * 2.0, (Math.random() - 0.5) * 0.3);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0xff8a18 : 0xffd848, 0.28, 0.9);
+        }
+        break;
+      }
+      case "mage_frost_nova": {
+        // Wide cyan expanding ring around the CASTER + radial ice shards
+        // shooting outward at ground level.
+        this.spawnGroundRing(casterFeet, 0x6cd9ff, 6.0, 0.7);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.4, 0.3, Math.sin(a) * 0.4));
+          const vel = new THREE.Vector3(Math.cos(a) * 4.5, 0.4, Math.sin(a) * 4.5);
+          this.emitParticle(pos, vel, 0xbfeaff, 0.26, 0.7);
+        }
+        break;
+      }
+      case "mage_mana_shield": {
+        // Pulsing arcane shield bubble snap (the persistent shield is on the
+        // active-effect aura system). Cast-frame: cyan ring + upward motes.
+        this.spawnGroundRing(casterFeet, 0x6c9aff, 2.4, 0.55);
+        for (let i = 0; i < 14; i++) {
+          const a = (i / 14) * Math.PI * 2;
+          const r = 1.0;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.2, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 2.0, 0), 0xa0bfff, 0.24, 0.8);
+        }
+        break;
+      }
+      case "mage_glacial_prison": {
+        // Cyan ice crystals erupting straight up around the target — the
+        // "they're locked in ice" frame. Wide ring + tall stalagmites.
+        this.spawnGroundRing(targetFeet, 0x6cd9ff, 5.5, 0.9);
+        for (let i = 0; i < 22; i++) {
+          const a = (i / 22) * Math.PI * 2;
+          const r = 0.6 + Math.random() * 1.2;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+          const vel = new THREE.Vector3(0, 4.0 + Math.random() * 1.5, 0);
+          this.emitParticle(pos, vel, 0xc0eaff, 0.28, 1.0);
+        }
+        break;
+      }
+      case "mage_meteor_strike": {
+        // Orange streak from high above falling onto target + huge ground
+        // impact (large brown+orange ring) + scorched debris.
+        const sky = targetPos.clone().add(new THREE.Vector3(0, 14, 0));
+        for (let i = 0; i < 16; i++) {
+          const u = i / 15;
+          const pos = sky.clone().lerp(targetPos.clone().setY(targetPos.y + 0.5), u);
+          this.emitParticle(pos, new THREE.Vector3(0, -2.0, 0), Math.random() < 0.5 ? 0xff6020 : 0xffaa30, 0.30, 0.4);
+        }
+        this.spawnGroundRing(targetFeet, 0xff5a18, 8.0, 1.0);
+        this.emitBurst(tgtCore, 0xff7030, 36, 6.0, 0.36, 0.7);
+        for (let i = 0; i < 20; i++) {
+          const a = (i / 20) * Math.PI * 2;
+          const r = 0.6 + Math.random() * 1.2;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.05, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 1.5, 2.0 + Math.random() * 1.2, Math.sin(a) * 1.5);
+          this.emitParticle(pos, vel, 0x6a3a18, 0.28, 0.9);
+        }
+        break;
+      }
+      case "mage_time_warp": {
+        // Golden clock-face spirals — particles arranged on a circle at
+        // multiple radii, all rotating outward. A "time bending" read.
+        for (let ring = 0; ring < 3; ring++) {
+          const r = 0.7 + ring * 0.4;
+          for (let i = 0; i < 12; i++) {
+            const a = (i / 12) * Math.PI * 2 + ring * 0.4;
+            const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.6 + ring * 0.3, Math.sin(a) * r));
+            const vel = new THREE.Vector3(Math.cos(a + Math.PI / 2) * 0.6, 0.6, Math.sin(a + Math.PI / 2) * 0.6);
+            this.emitParticle(pos, vel, 0xffd460, 0.24, 1.1);
+          }
+        }
+        break;
+      }
+      case "mage_arcane_cataclysm": {
+        // Tear-reality ultimate — massive purple ring + violent radial
+        // burst + sky-falling motes around target.
+        this.spawnGroundRing(targetFeet, 0xa040ff, 10.0, 1.1);
+        this.emitBurst(tgtCore, 0xb060ff, 50, 6.5, 0.40, 0.75);
+        for (let i = 0; i < 28; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.5 + Math.random() * 2.0;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 4.0 + Math.random() * 1.5, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.4, -2.0, (Math.random() - 0.5) * 0.4);
+          this.emitParticle(pos, vel, 0xc080ff, 0.30, 1.0);
+        }
+        break;
+      }
+      case "mage_absolute_zero": {
+        // World-freezing AoE — wide cyan ring + drifting snow-particles
+        // falling uniformly within the radius.
+        this.spawnGroundRing(targetFeet, 0xa0e8ff, 7.5, 1.0);
+        for (let i = 0; i < 40; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 3.5;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 2.5 + Math.random() * 1.2, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.1, -0.8 - Math.random() * 0.3, (Math.random() - 0.5) * 0.1);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0xeaf6ff : 0x9fd6ff, 0.24, 1.4);
+        }
+        break;
+      }
+      case "mage_arcane_brilliance":
+      case "mage_temporal_shift":
+      case "mage_arcane_empowerment": {
+        // Party-buff radiation — pale arcane motes flying outward.
+        const color = id === "mage_temporal_shift" ? 0xffd460 : 0xa080ff;
+        this.spawnGroundRing(casterFeet, color, 3.5, 0.6);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.5, 0.8, Math.sin(a) * 0.5));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.5, 1.0, Math.sin(a) * 3.5);
+          this.emitParticle(pos, vel, color, 0.22, 0.8);
+        }
+        break;
+      }
+      case "mage_arcane_infusion":
+      case "mage_chrono_blessing": {
+        // Stream from caster to ally — purple for arcane, gold for chrono.
+        const color = id === "mage_chrono_blessing" ? 0xffd460 : 0xa080ff;
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(16, Math.max(5, Math.floor(dist * 1.5)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.1, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.4, 0), color, 0.22, 0.55);
+          }
+        }
+        this.emitBurst(tgtCore, color, 14, 2.8, 0.22, 0.55);
+        break;
+      }
+      default:
+        void eventId;
+    }
+  }
+
+  /**
+   * Per-technique VFX flair for warlock abilities. Warlock shares Wizard.glb
+   * with mage (dark atlas tint), so motions are identical — the flair leans
+   * heavily on shadow/blood/soul motifs to differentiate from arcane.
+   */
+  private applyWarlockFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtCore = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterCore = casterPos.clone().setY(casterPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+    const targetFeet = targetPos.clone().setY(targetPos.y + 0.05);
+
+    switch (id) {
+      case "warlock_shadow_bolt": {
+        // Dark trailing wisps behind the projectile + heavy violet/black
+        // impact burst at the target.
+        for (let i = 0; i < 12; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const pos = casterCore.clone().add(new THREE.Vector3(Math.cos(a) * 0.3, Math.random() * 0.3, Math.sin(a) * 0.3));
+          this.emitParticle(pos, new THREE.Vector3(0, 0.4, 0), Math.random() < 0.5 ? 0x180826 : 0x4a1a80, 0.26, 0.6);
+        }
+        this.emitBurst(tgtCore, 0x6620b0, 28, 4.5, 0.32, 0.6);
+        break;
+      }
+      case "warlock_curse_of_weakness": {
+        // Sickly green motes draping the target — clinging, falling slowly.
+        this.spawnGroundRing(targetFeet, 0x346a18, 2.6, 0.7);
+        for (let i = 0; i < 22; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.3 + Math.random() * 0.7;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 1.5 + Math.random() * 0.6, Math.sin(a) * r));
+          const vel = new THREE.Vector3((Math.random() - 0.5) * 0.2, -0.6 - Math.random() * 0.3, (Math.random() - 0.5) * 0.2);
+          this.emitParticle(pos, vel, 0x6abf26, 0.24, 1.3);
+        }
+        break;
+      }
+      case "warlock_drain_life": {
+        // Green tether — particles flowing FROM target TO caster, the
+        // "siphoning life" read.
+        const dir = new THREE.Vector3().subVectors(casterPos, targetPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(18, Math.max(6, Math.floor(dist * 1.3)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = targetPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.0, 0));
+            const vel = dir.clone().multiplyScalar(0.5);
+            this.emitParticle(pos, vel, Math.random() < 0.5 ? 0x48d860 : 0x1a6020, 0.22, 0.5);
+          }
+        }
+        this.emitBurst(casterCore, 0x60ea70, 12, 2.5, 0.22, 0.5);
+        break;
+      }
+      case "warlock_corruption": {
+        // Black tendrils sprouting from target's feet — thin vertical
+        // streaks of dark + violet motes erupting upward.
+        this.spawnGroundRing(targetFeet, 0x301848, 2.4, 0.6);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const r = 0.5;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 0.3, 1.8 + Math.random() * 0.5, Math.sin(a) * 0.3);
+          this.emitParticle(pos, vel, i % 2 === 0 ? 0x0a0010 : 0x5020a0, 0.22, 1.0);
+        }
+        break;
+      }
+      case "warlock_howl_of_terror": {
+        // Dark sonic ring expanding from caster + radial black-purple motes.
+        this.spawnGroundRing(casterFeet, 0x300848, 5.5, 0.7);
+        for (let i = 0; i < 28; i++) {
+          const a = (i / 28) * Math.PI * 2 + Math.random() * 0.1;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.5, 1.2, Math.sin(a) * 0.5));
+          const vel = new THREE.Vector3(Math.cos(a) * 4.0, 0.4, Math.sin(a) * 4.0);
+          this.emitParticle(pos, vel, Math.random() < 0.5 ? 0x180828 : 0x5a1a80, 0.24, 0.6);
+        }
+        break;
+      }
+      case "warlock_soul_shield": {
+        // Dark-purple shield snap — purple ground ring + violet motes
+        // wrapping the caster. Persistent shield = active-effect aura.
+        this.spawnGroundRing(casterFeet, 0x5a1a90, 2.2, 0.5);
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          const r = 0.9;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3 + Math.random() * 1.1, Math.sin(a) * r));
+          const vel = new THREE.Vector3(0, 1.2 + Math.random() * 0.5, 0);
+          this.emitParticle(pos, vel, 0x9040d8, 0.24, 0.9);
+        }
+        break;
+      }
+      case "warlock_siphon_soul": {
+        // Bigger drain — wide green stream + heal burst returning to caster.
+        const dir = new THREE.Vector3().subVectors(casterPos, targetPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(24, Math.max(8, Math.floor(dist * 1.5)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            for (let strand = 0; strand < 2; strand++) {
+              const lateral = (strand === 0 ? 0.18 : -0.18);
+              const pos = targetPos.clone().addScaledVector(dir, dist * u)
+                .add(new THREE.Vector3(-dir.z * lateral, 1.0, dir.x * lateral));
+              const vel = dir.clone().multiplyScalar(0.6);
+              this.emitParticle(pos, vel, 0x48d860, 0.22, 0.5);
+            }
+          }
+        }
+        this.emitBurst(casterCore, 0x80ff90, 18, 3.0, 0.26, 0.6);
+        break;
+      }
+      case "warlock_demonic_grasp": {
+        // Demonic hands erupting around target — 5 finger-like streaks of
+        // dark motes converging on the target then squeezing inward.
+        this.spawnGroundRing(targetFeet, 0x2a0820, 2.8, 0.7);
+        for (let finger = 0; finger < 5; finger++) {
+          const a = (finger / 5) * Math.PI * 2;
+          for (let i = 0; i < 6; i++) {
+            const r = 1.6 - i * 0.22;
+            const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.6 + i * 0.2, Math.sin(a) * r));
+            const vel = new THREE.Vector3(-Math.cos(a) * 0.6, 0.4, -Math.sin(a) * 0.6);
+            this.emitParticle(pos, vel, 0x401050, 0.24, 0.8);
+          }
+        }
+        break;
+      }
+      case "warlock_nether_gate": {
+        // Portal-ring at the target's feet + dark beam erupting upward +
+        // streak from caster to target.
+        this.spawnGroundRing(targetFeet, 0x402080, 3.2, 0.9);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const r = 0.9;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+          const vel = new THREE.Vector3(0, 3.2 + Math.random() * 1.0, 0);
+          this.emitParticle(pos, vel, i % 2 === 0 ? 0x4020a0 : 0x180830, 0.26, 1.0);
+        }
+        break;
+      }
+      case "warlock_soul_rend": {
+        // Multi-target AoE — radial green tendrils from caster outward,
+        // representing souls being torn loose. Plus caster heal sparks.
+        for (let arm = 0; arm < 8; arm++) {
+          const a = (arm / 8) * Math.PI * 2;
+          for (let i = 0; i < 6; i++) {
+            const r = 0.4 + i * 0.4;
+            const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.8 + Math.sin(i) * 0.2, Math.sin(a) * r));
+            const vel = new THREE.Vector3(Math.cos(a) * 1.0, 0.4, Math.sin(a) * 1.0);
+            this.emitParticle(pos, vel, 0x40d040, 0.22, 0.7);
+          }
+        }
+        this.emitBurst(casterCore, 0x80ff90, 12, 2.5, 0.22, 0.45);
+        break;
+      }
+      case "warlock_doom": {
+        // Ominous red rune circle at target — slow, heavy, dread.
+        this.spawnGroundRing(targetFeet, 0xa0102a, 3.4, 1.1);
+        for (let i = 0; i < 18; i++) {
+          const a = (i / 18) * Math.PI * 2;
+          const r = 1.0;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.sin(a * 3) * 0.2, Math.sin(a) * r));
+          const vel = new THREE.Vector3(0, 0.2, 0);
+          this.emitParticle(pos, vel, 0xc02040, 0.26, 1.4);
+        }
+        break;
+      }
+      case "warlock_soul_harvest": {
+        // Multi-target reap — wide green ring + multiple souls (motes)
+        // flowing in toward the caster from all directions.
+        this.spawnGroundRing(casterFeet, 0x40a050, 6.5, 1.0);
+        for (let arm = 0; arm < 10; arm++) {
+          const a = (arm / 10) * Math.PI * 2;
+          const startR = 3.5;
+          for (let i = 0; i < 8; i++) {
+            const r = startR * (1 - i / 7);
+            const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 1.0 + i * 0.1, Math.sin(a) * r));
+            const vel = new THREE.Vector3(-Math.cos(a) * 0.6, 0.3, -Math.sin(a) * 0.6);
+            this.emitParticle(pos, vel, 0x60e070, 0.24, 0.9);
+          }
+        }
+        break;
+      }
+      case "warlock_dark_pact":
+      case "warlock_soul_link":
+      case "warlock_demonic_empowerment": {
+        // Party-buff outward sparkle — dark-purple/red depending on flavor.
+        const color = id === "warlock_demonic_empowerment" ? 0xff4040 : 0x9040c0;
+        this.spawnGroundRing(casterFeet, color, 3.5, 0.6);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.5, 0.8, Math.sin(a) * 0.5));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.5, 0.8, Math.sin(a) * 3.5);
+          this.emitParticle(pos, vel, color, 0.22, 0.8);
+        }
+        break;
+      }
+      case "warlock_dark_empowerment":
+      case "warlock_soul_covenant": {
+        // Stream from caster to ally — dark violet for empowerment, blood
+        // red for covenant.
+        const color = id === "warlock_soul_covenant" ? 0xc0204a : 0x9040c0;
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(16, Math.max(5, Math.floor(dist * 1.5)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.1, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.3, 0), color, 0.22, 0.55);
+          }
+        }
+        this.emitBurst(tgtCore, color, 14, 2.8, 0.22, 0.55);
+        break;
+      }
+      default:
+        void eventId;
+    }
+  }
+
+  /**
+   * Per-technique VFX flair for paladin abilities. Paladin shares Warrior.glb
+   * — there are NO spell clips, so every holy ability looks identical bone-
+   * wise. Flair carries the entire "holy light" identity.
+   */
+  private applyPaladinFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtCore = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterCore = casterPos.clone().setY(casterPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+    const targetFeet = targetPos.clone().setY(targetPos.y + 0.05);
+
+    switch (id) {
+      case "paladin_holy_smite": {
+        // Golden sword imbued with holy light — bright burst at impact + a
+        // sun-like vertical pillar of pale gold rising from target.
+        this.emitBurst(tgtCore, 0xfff2b0, 24, 4.5, 0.30, 0.5);
+        for (let i = 0; i < 10; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 0.4;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 3.0, 0), 0xffe87a, 0.24, 0.7);
+        }
+        break;
+      }
+      case "paladin_consecration": {
+        // Holy ground — wide golden ring at target's feet + slow rising
+        // motes filling the consecrated zone.
+        this.spawnGroundRing(targetFeet, 0xffd860, 5.0, 0.9);
+        for (let i = 0; i < 26; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 1.8;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.8 + Math.random() * 0.5, 0), 0xfff2a0, 0.22, 1.2);
+        }
+        break;
+      }
+      case "paladin_judgment": {
+        // Vertical lightning-of-light strike from sky onto target.
+        const sky = targetPos.clone().add(new THREE.Vector3(0, 10, 0));
+        for (let i = 0; i < 14; i++) {
+          const u = i / 13;
+          const pos = sky.clone().lerp(targetPos.clone().setY(targetPos.y + 0.4), u);
+          this.emitParticle(pos, new THREE.Vector3(0, -1.5, 0), 0xfff8c0, 0.30, 0.35);
+        }
+        this.spawnGroundRing(targetFeet, 0xfff060, 2.4, 0.5);
+        break;
+      }
+      case "paladin_lay_on_hands": {
+        // Cupped golden glow at the caster (self-heal) — gentle upward
+        // motes + small ring.
+        this.spawnGroundRing(casterFeet, 0xfff2a0, 2.0, 0.55);
+        for (let i = 0; i < 18; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 0.5;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 0.8, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.4, 0), 0xfff2a0, 0.22, 1.1);
+        }
+        break;
+      }
+      case "paladin_divine_shield":
+      case "paladin_divine_bulwark":
+      case "paladin_hand_of_god": {
+        // Brilliant white-gold shield snap — bigger ring for bulwark/hand
+        // since they're tier-4+ ultimates.
+        const big = id !== "paladin_divine_shield";
+        this.spawnGroundRing(casterFeet, 0xfff0b0, big ? 3.6 : 2.4, 0.7);
+        for (let i = 0; i < (big ? 26 : 16); i++) {
+          const a = (i / (big ? 26 : 16)) * Math.PI * 2;
+          const r = big ? 1.4 : 1.0;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 1.0, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.4, 0), 0xfff8c0, 0.24, 0.9);
+        }
+        break;
+      }
+      case "paladin_blessing_of_might":
+      case "paladin_aura_of_resolve":
+      case "paladin_blessing_of_kings":
+      case "paladin_aura_of_devotion":
+      case "paladin_divine_aegis": {
+        // Outward golden sparkle wave for party/aura buffs.
+        this.spawnGroundRing(casterFeet, 0xffd860, 3.5, 0.6);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.5, 0.8, Math.sin(a) * 0.5));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.0, 1.0, Math.sin(a) * 3.0);
+          this.emitParticle(pos, vel, 0xfff2a0, 0.22, 0.8);
+        }
+        break;
+      }
+      case "paladin_hammer_of_justice": {
+        // Hammer-of-light slamming onto target — bright vertical pillar +
+        // shockwave ring + radial impact.
+        const sky = targetPos.clone().add(new THREE.Vector3(0, 6, 0));
+        for (let i = 0; i < 14; i++) {
+          const u = i / 13;
+          const pos = sky.clone().lerp(targetPos.clone().setY(targetPos.y + 0.3), u);
+          this.emitParticle(pos, new THREE.Vector3(0, -2.0, 0), 0xfff0a0, 0.32, 0.35);
+        }
+        this.spawnGroundRing(targetFeet, 0xffe060, 4.5, 0.8);
+        this.emitBurst(tgtCore, 0xfff8c0, 26, 4.5, 0.34, 0.55);
+        break;
+      }
+      case "paladin_wings_of_valor": {
+        // Golden wings unfurling — two arcs of motes sweeping out laterally
+        // from the caster's back, plus an upward shaft of light.
+        const up = new THREE.Vector3(0, 1, 0);
+        for (let wing = -1; wing <= 1; wing += 2) {
+          const side = new THREE.Vector3(wing, 0, 0);
+          for (let i = 0; i < 14; i++) {
+            const u = i / 13;
+            const off = side.clone().multiplyScalar(0.4 + u * 1.6)
+              .add(up.clone().multiplyScalar(1.0 + Math.sin(u * Math.PI) * 1.2));
+            const pos = casterPos.clone().add(off);
+            this.emitParticle(pos, new THREE.Vector3(wing * 0.3, 0.6, 0), 0xfff0a0, 0.26, 1.0);
+          }
+        }
+        this.spawnGroundRing(casterFeet, 0xfff060, 3.2, 0.6);
+        break;
+      }
+      case "paladin_wrath_of_the_righteous": {
+        // Divine apocalypse — huge ground ring + radial pillars of light
+        // shooting outward.
+        this.spawnGroundRing(casterFeet, 0xfff060, 9.0, 1.0);
+        for (let pillar = 0; pillar < 8; pillar++) {
+          const a = (pillar / 8) * Math.PI * 2;
+          for (let i = 0; i < 8; i++) {
+            const r = 0.4 + i * 0.5;
+            const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+            const vel = new THREE.Vector3(0, 4.0 + Math.random() * 1.0, 0);
+            this.emitParticle(pos, vel, 0xfff8c0, 0.28, 0.8);
+          }
+        }
+        break;
+      }
+      case "paladin_blessing_of_protection":
+      case "paladin_blessing_of_sanctuary": {
+        // Golden stream to ally + small shield burst at impact.
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(16, Math.max(5, Math.floor(dist * 1.5)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.1, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.4, 0), 0xfff2a0, 0.22, 0.55);
+          }
+        }
+        this.emitBurst(tgtCore, 0xfff8c0, 16, 2.8, 0.24, 0.6);
+        break;
+      }
+      default:
+        void eventId;
+    }
+  }
+
+  /**
+   * Per-technique VFX flair for ranger abilities. Ranger has Bow_Draw and
+   * Bow_Shoot, so attack motions are good. The nature/buff side leans on
+   * Idle_Weapon (bow held) + VFX to sell "nature magic".
+   */
+  private applyRangerFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtCore = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+    const targetFeet = targetPos.clone().setY(targetPos.y + 0.05);
+
+    switch (id) {
+      case "ranger_aimed_shot": {
+        // Focus-lines snapping inward to the target right before the
+        // standard projectile + a sharp impact burst.
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          const r = 2.2;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 1.0, Math.sin(a) * r));
+          const vel = new THREE.Vector3(-Math.cos(a) * 5.5, 0, -Math.sin(a) * 5.5);
+          this.emitParticle(pos, vel, 0xeae5d4, 0.22, 0.35);
+        }
+        this.emitBurst(tgtCore, 0xeae5d4, 20, 4.5, 0.26, 0.45);
+        break;
+      }
+      case "ranger_quick_shot": {
+        // Light, fast — a streaking line of white motes from caster to
+        // target, then a tiny impact pop.
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(10, Math.max(3, Math.floor(dist * 0.8)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 0.9, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.1, 0), 0xf2efdc, 0.18, 0.3);
+          }
+        }
+        this.emitBurst(tgtCore, 0xeae5d4, 10, 2.8, 0.18, 0.35);
+        break;
+      }
+      case "ranger_multi_shot": {
+        // Fan of 4 arrows — projectile-line bursts to slightly different
+        // positions around the target.
+        for (let arrow = 0; arrow < 4; arrow++) {
+          const off = new THREE.Vector3((arrow - 1.5) * 0.6, arrow * 0.18, 0);
+          this.emitBurst(tgtCore.clone().add(off), 0xeae5d4, 8, 3.0, 0.20, 0.4);
+        }
+        break;
+      }
+      case "ranger_volley":
+      case "ranger_storm_of_arrows":
+      case "ranger_heavens_volley": {
+        // Rain of arrows — particles streaking down from the sky over a
+        // wide radius around the target. Heavens volley = biggest area.
+        const radius = id === "ranger_heavens_volley" ? 4.5 : id === "ranger_storm_of_arrows" ? 3.5 : 2.5;
+        const count = id === "ranger_heavens_volley" ? 36 : id === "ranger_storm_of_arrows" ? 28 : 22;
+        for (let i = 0; i < count; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * radius;
+          const ground = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.1, Math.sin(a) * r));
+          const high = ground.clone().setY(ground.y + 6 + Math.random() * 3);
+          this.emitParticle(high, new THREE.Vector3(0, -8.0, 0), 0xeae5d4, 0.18, 0.6);
+          this.emitParticle(ground, new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.3, (Math.random() - 0.5) * 0.4), 0x8a7050, 0.18, 0.5);
+        }
+        this.spawnGroundRing(targetFeet, 0x8a7050, radius * 1.6, 0.9);
+        break;
+      }
+      case "ranger_hunters_mark": {
+        // Red reticle ring around target — slow, persistent feel.
+        this.spawnGroundRing(targetFeet, 0xff3030, 2.4, 0.7);
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          const r = 0.8;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 1.0, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 0, 0), 0xff3030, 0.20, 1.2);
+        }
+        break;
+      }
+      case "ranger_entangling_roots": {
+        // Green vine-shaped streaks rising around target's feet — eight
+        // radial streaks twisting upward.
+        this.spawnGroundRing(targetFeet, 0x2a8a30, 2.2, 0.8);
+        for (let vine = 0; vine < 8; vine++) {
+          const a = (vine / 8) * Math.PI * 2;
+          for (let i = 0; i < 6; i++) {
+            const r = 0.5 + Math.sin(i) * 0.15;
+            const y = i * 0.25;
+            const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.05 + y, Math.sin(a) * r));
+            const vel = new THREE.Vector3(Math.cos(a) * 0.2, 0.5, Math.sin(a) * 0.2);
+            this.emitParticle(pos, vel, i % 2 === 0 ? 0x2a8a30 : 0x66c060, 0.24, 1.0);
+          }
+        }
+        break;
+      }
+      case "ranger_natures_blessing":
+      case "ranger_natures_vigil": {
+        // Soft green sparkles + small leaf-like ring at target.
+        const isParty = id === "ranger_natures_vigil";
+        const ringPos = isParty ? casterFeet : targetFeet;
+        this.spawnGroundRing(ringPos, 0x66c060, isParty ? 3.5 : 2.0, 0.7);
+        for (let i = 0; i < (isParty ? 24 : 16); i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * (isParty ? 1.4 : 0.7);
+          const base = isParty ? casterPos : targetPos;
+          const pos = base.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3 + Math.random() * 0.8, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.9, (Math.random() - 0.5) * 0.2), 0x88e878, 0.22, 1.0);
+        }
+        break;
+      }
+      case "ranger_sky_piercer":
+      case "ranger_arrow_of_judgment": {
+        // Single massive arrow — glowing trail from caster + huge impact.
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(28, Math.max(8, Math.floor(dist)));
+          const color = id === "ranger_arrow_of_judgment" ? 0xfff060 : 0xa0e0ff;
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.0, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.3, 0), color, 0.26, 0.4);
+          }
+          this.emitBurst(tgtCore, color, 30, 4.5, 0.32, 0.55);
+        }
+        break;
+      }
+      case "ranger_falcon_dive": {
+        // Falcon-dive arc — particles tracing an aerial arc from above-
+        // caster down onto target. Plus impact burst.
+        const start = casterPos.clone().add(new THREE.Vector3(0, 5, 0));
+        const ctrl = casterPos.clone().lerp(targetPos, 0.5).add(new THREE.Vector3(0, 8, 0));
+        const end = targetPos.clone().add(new THREE.Vector3(0, 0.5, 0));
+        const segs = 18;
+        for (let i = 0; i < segs; i++) {
+          const u = i / (segs - 1);
+          // quadratic Bezier on the fly
+          const oneMinusU = 1 - u;
+          const x = oneMinusU * oneMinusU * start.x + 2 * oneMinusU * u * ctrl.x + u * u * end.x;
+          const y = oneMinusU * oneMinusU * start.y + 2 * oneMinusU * u * ctrl.y + u * u * end.y;
+          const z = oneMinusU * oneMinusU * start.z + 2 * oneMinusU * u * ctrl.z + u * u * end.z;
+          this.emitParticle(new THREE.Vector3(x, y, z), new THREE.Vector3(0, 0, 0), 0xddeeff, 0.22, 0.5);
+        }
+        this.emitBurst(tgtCore, 0xa0c0e0, 20, 4.0, 0.28, 0.55);
+        break;
+      }
+      case "ranger_pack_tactics":
+      case "ranger_predators_instinct":
+      case "ranger_eagle_eye":
+      case "ranger_bond_of_the_wild": {
+        // Earthy green outward sparkle for nature buffs.
+        this.spawnGroundRing(casterFeet, 0x66c060, 3.2, 0.6);
+        for (let i = 0; i < 22; i++) {
+          const a = (i / 22) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.5, 0.8, Math.sin(a) * 0.5));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.0, 0.8, Math.sin(a) * 3.0);
+          this.emitParticle(pos, vel, 0x88e878, 0.22, 0.75);
+        }
+        break;
+      }
+      default:
+        void eventId;
+    }
+  }
+
+  /**
+   * Per-technique VFX flair for cleric abilities. Cleric.glb has only Spell1
+   * (no Spell2, no Idle_Attacking) — every cast looks identical bone-wise,
+   * so VFX is doing 100% of the work to differentiate heals / smites /
+   * shields / AoEs.
+   */
+  private applyClericFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtCore = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+    const targetFeet = targetPos.clone().setY(targetPos.y + 0.05);
+
+    switch (id) {
+      case "cleric_holy_light": {
+        // Big golden cross-glow at target — bright burst + slow upward motes.
+        this.emitBurst(tgtCore, 0xfff2b0, 22, 3.5, 0.30, 0.55);
+        for (let i = 0; i < 14; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 0.5;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.5 + Math.random() * 0.6, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.4, 0), 0xfff8d0, 0.22, 1.0);
+        }
+        break;
+      }
+      case "cleric_smite":
+      case "cleric_wrath_of_heaven":
+      case "cleric_wrath_of_the_divine": {
+        // Vertical lightning-of-light strike. Wrath variants get a much
+        // bigger ground ring and impact than basic smite.
+        const big = id !== "cleric_smite";
+        const sky = targetPos.clone().add(new THREE.Vector3(0, big ? 12 : 8, 0));
+        const steps = big ? 18 : 12;
+        for (let i = 0; i < steps; i++) {
+          const u = i / (steps - 1);
+          const pos = sky.clone().lerp(targetPos.clone().setY(targetPos.y + 0.4), u);
+          this.emitParticle(pos, new THREE.Vector3(0, -1.5, 0), 0xfffae6, 0.30, 0.35);
+        }
+        this.spawnGroundRing(targetFeet, 0xfff060, big ? 6.5 : 2.4, big ? 0.95 : 0.5);
+        this.emitBurst(tgtCore, 0xfff8c0, big ? 32 : 16, big ? 5.0 : 3.5, 0.30, 0.55);
+        break;
+      }
+      case "cleric_renew":
+      case "cleric_greater_renew": {
+        // Slow gentle green-gold heal motes rising around target.
+        this.spawnGroundRing(targetFeet, 0xa6e87a, 2.2, 0.7);
+        for (let i = 0; i < 20; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 0.7;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 0.8, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.2, 0), Math.random() < 0.5 ? 0xa6e87a : 0xfff2a0, 0.22, 1.2);
+        }
+        break;
+      }
+      case "cleric_holy_nova": {
+        // Caster-centered AoE — wide gold ring + radial outward sparkle.
+        this.spawnGroundRing(casterFeet, 0xfff060, 5.0, 0.8);
+        for (let i = 0; i < 26; i++) {
+          const a = (i / 26) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.4, 0.6, Math.sin(a) * 0.4));
+          const vel = new THREE.Vector3(Math.cos(a) * 4.0, 0.6, Math.sin(a) * 4.0);
+          this.emitParticle(pos, vel, 0xfff8c0, 0.24, 0.7);
+        }
+        break;
+      }
+      case "cleric_divine_protection":
+      case "cleric_guardian_angel":
+      case "cleric_divine_intervention": {
+        // Shield snap + protective wings of light unfurling around target.
+        // Bigger and more dramatic for the tier-4/6 variants.
+        const big = id !== "cleric_divine_protection";
+        this.spawnGroundRing(targetFeet, 0xfff0a0, big ? 3.4 : 2.2, 0.7);
+        for (let i = 0; i < (big ? 22 : 14); i++) {
+          const a = (i / (big ? 22 : 14)) * Math.PI * 2;
+          const r = big ? 1.4 : 1.0;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 1.2, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.5, 0), 0xfff8c0, 0.24, 0.9);
+        }
+        break;
+      }
+      case "cleric_prayer_of_fortitude":
+      case "cleric_spirit_of_redemption":
+      case "cleric_blessing_of_light": {
+        // Self-buff radiant ring with rising motes.
+        this.spawnGroundRing(casterFeet, 0xfff0a0, 2.6, 0.6);
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          const r = 0.7;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.8, 0), 0xfff2a0, 0.22, 1.0);
+        }
+        break;
+      }
+      case "cleric_divine_hymn": {
+        // Sustained hymn — concentric expanding waves from caster + slowly
+        // rising motes in a wide column.
+        this.spawnGroundRing(casterFeet, 0xfff060, 4.5, 1.0);
+        for (let i = 0; i < 28; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = Math.random() * 1.6;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3 + Math.random() * 1.4, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.9, (Math.random() - 0.5) * 0.2), 0xfff8c0, 0.24, 1.3);
+        }
+        break;
+      }
+      case "cleric_prayer_of_healing":
+      case "cleric_sanctuary":
+      case "cleric_divine_chorus": {
+        // Party heal/shield — wide gold ring + outward radiant sparkles.
+        this.spawnGroundRing(casterFeet, 0xfff060, 4.0, 0.7);
+        for (let i = 0; i < 26; i++) {
+          const a = (i / 26) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.5, 0.8, Math.sin(a) * 0.5));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.0, 0.9, Math.sin(a) * 3.0);
+          this.emitParticle(pos, vel, 0xfff8d0, 0.22, 0.85);
+        }
+        break;
+      }
+      default:
+        void eventId;
+    }
+  }
+
+  /**
+   * Per-technique VFX flair for monk abilities. Only Attack and Attack2
+   * exist on Monk.glb — flair has to do the heavy lifting for chi/spirit
+   * abilities.
+   */
+  private applyMonkFlair(techniqueId: string, casterPos: THREE.Vector3, targetPos: THREE.Vector3, eventId: string): void {
+    const id = techniqueId.replace(/_r[234]$/, "");
+    const tgtCore = targetPos.clone().setY(targetPos.y + 1.0);
+    const casterCore = casterPos.clone().setY(casterPos.y + 1.0);
+    const casterFeet = casterPos.clone().setY(casterPos.y + 0.05);
+    const targetFeet = targetPos.clone().setY(targetPos.y + 0.05);
+
+    switch (id) {
+      case "monk_palm_strike": {
+        // Tight cyan/teal chi pulse at impact — quick, surgical.
+        this.emitBurst(tgtCore, 0x40e0d0, 18, 3.5, 0.24, 0.4);
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          const pos = tgtCore.clone().add(new THREE.Vector3(Math.cos(a) * 0.6, Math.sin(a) * 0.6, 0));
+          this.emitParticle(pos, new THREE.Vector3(Math.cos(a) * 1.5, 0, Math.sin(a) * 1.5), 0x80f0e0, 0.20, 0.45);
+        }
+        break;
+      }
+      case "monk_disable": {
+        // Cyan ring around target's feet + slow drifting motes — restraint.
+        this.spawnGroundRing(targetFeet, 0x40b0d0, 2.0, 0.7);
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2;
+          const r = 0.8;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.4, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 0.3, 0), 0x80c8e0, 0.22, 1.1);
+        }
+        break;
+      }
+      case "monk_chi_burst": {
+        // Cyan energy ball detonating at target — bright wide burst.
+        this.emitBurst(tgtCore, 0x40e0d0, 32, 5.5, 0.32, 0.6);
+        for (let i = 0; i < 14; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 0.3 + Math.random() * 0.8;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.5 + Math.random() * 1.0, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(Math.cos(a) * 2.0, 1.2, Math.sin(a) * 2.0), 0x80f0e0, 0.26, 0.7);
+        }
+        break;
+      }
+      case "monk_flying_kick": {
+        // Streak from caster toward target + impact swoosh of teal motes.
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(14, Math.max(5, Math.floor(dist)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 0.9, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.3, 0), 0x80f0e0, 0.22, 0.4);
+          }
+        }
+        this.emitBurst(tgtCore, 0x40e0d0, 20, 4.0, 0.26, 0.5);
+        break;
+      }
+      case "monk_whirlwind_kick": {
+        // 360° sweep of teal motes around the CASTER at waist height.
+        const waist = casterPos.clone().setY(casterPos.y + 0.9);
+        const count = 28;
+        for (let i = 0; i < count; i++) {
+          const a = (i / count) * Math.PI * 2;
+          const r = 1.6;
+          const pos = waist.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.5, 0.3, Math.sin(a) * 3.5);
+          this.emitParticle(pos, vel, 0x60e8d8, 0.20, 0.45);
+        }
+        this.spawnGroundRing(casterFeet, 0x40b0d0, 3.0, 0.5);
+        break;
+      }
+      case "monk_meditation":
+      case "monk_inner_focus":
+      case "monk_inner_peace":
+      case "monk_perfect_balance": {
+        // Self-channel — slow concentric ring + glow column around caster.
+        const big = id === "monk_inner_peace" || id === "monk_perfect_balance";
+        this.spawnGroundRing(casterFeet, 0x80e8d8, big ? 3.0 : 2.0, big ? 0.9 : 0.7);
+        for (let i = 0; i < (big ? 22 : 14); i++) {
+          const a = (i / (big ? 22 : 14)) * Math.PI * 2;
+          const r = 0.6;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3 + Math.random() * 1.4, Math.sin(a) * r));
+          this.emitParticle(pos, new THREE.Vector3(0, 1.0 + Math.random() * 0.4, 0), 0xc0f8ee, 0.22, 1.2);
+        }
+        break;
+      }
+      case "monk_hundred_fists": {
+        // Rapid flurry — 6 quick small bursts in a tight cluster at target.
+        for (let i = 0; i < 6; i++) {
+          const off = new THREE.Vector3((Math.random() - 0.5) * 0.7, 0.6 + Math.random() * 0.8, (Math.random() - 0.5) * 0.7);
+          this.emitBurst(tgtCore.clone().add(off), 0x80f0e0, 8, 2.5, 0.20, 0.3);
+        }
+        break;
+      }
+      case "monk_dragon_strike": {
+        // Heaviest hit — golden-teal dragon's-fang impact + spiral motes.
+        this.emitBurst(tgtCore, 0xffd860, 30, 5.0, 0.34, 0.6);
+        for (let i = 0; i < 24; i++) {
+          const a = (i / 24) * Math.PI * 3;
+          const r = 0.4 + (i / 24) * 1.4;
+          const y = (i / 24) * 2.0;
+          const pos = targetPos.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.2 + y, Math.sin(a) * r));
+          const vel = new THREE.Vector3(Math.cos(a + Math.PI / 2) * 1.2, 0.6, Math.sin(a + Math.PI / 2) * 1.2);
+          this.emitParticle(pos, vel, i % 2 === 0 ? 0xffe080 : 0x40e0d0, 0.26, 0.9);
+        }
+        break;
+      }
+      case "monk_one_thousand_palms": {
+        // Ultimate — huge cyan/gold explosion + many small bursts in front
+        // of the caster filling a cone.
+        const up = new THREE.Vector3(0, 1, 0);
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos).normalize();
+        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+        for (let i = 0; i < 14; i++) {
+          const lateral = (Math.random() - 0.5) * 2.0;
+          const forward = 0.5 + Math.random() * 3.0;
+          const yOff = 0.3 + Math.random() * 1.4;
+          const pos = casterPos.clone().addScaledVector(dir, forward).addScaledVector(right, lateral).setY(casterPos.y + yOff);
+          this.emitBurst(pos, i % 2 === 0 ? 0xffd860 : 0x80f0e0, 6, 2.5, 0.22, 0.35);
+        }
+        this.emitBurst(tgtCore, 0xfff060, 30, 5.0, 0.36, 0.65);
+        break;
+      }
+      case "monk_windwalkers_grace":
+      case "monk_zen_meditation":
+      case "monk_transcendence": {
+        // Party buff — teal sparkle wave outward.
+        const big = id === "monk_transcendence";
+        this.spawnGroundRing(casterFeet, 0x80e8d8, big ? 4.5 : 3.5, 0.7);
+        for (let i = 0; i < (big ? 28 : 22); i++) {
+          const a = (i / (big ? 28 : 22)) * Math.PI * 2;
+          const pos = casterPos.clone().add(new THREE.Vector3(Math.cos(a) * 0.5, 0.8, Math.sin(a) * 0.5));
+          const vel = new THREE.Vector3(Math.cos(a) * 3.5, 0.9, Math.sin(a) * 3.5);
+          this.emitParticle(pos, vel, 0xc0f8ee, 0.22, 0.85);
+        }
+        // Re-anchor to silence unused warning when only the party branch runs
+        void casterCore;
+        break;
+      }
+      case "monk_chi_attunement":
+      case "monk_spirit_bond": {
+        // Stream from caster to ally — teal sparkles.
+        const dir = new THREE.Vector3().subVectors(targetPos, casterPos);
+        const dist = dir.length();
+        if (dist > 0.1) {
+          dir.normalize();
+          const steps = Math.min(16, Math.max(5, Math.floor(dist * 1.5)));
+          for (let i = 0; i < steps; i++) {
+            const u = i / (steps - 1);
+            const pos = casterPos.clone().addScaledVector(dir, dist * u).add(new THREE.Vector3(0, 1.1, 0));
+            this.emitParticle(pos, new THREE.Vector3(0, 0.4, 0), 0x80f0e0, 0.22, 0.55);
+          }
+        }
+        this.emitBurst(tgtCore, 0xa0f8e8, 14, 2.8, 0.22, 0.55);
+        break;
+      }
+      default:
+        void eventId;
+    }
   }
 
   // ── Melee start ─────────────────────────────────────────────────

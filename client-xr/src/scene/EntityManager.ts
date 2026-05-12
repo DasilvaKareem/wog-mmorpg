@@ -1153,6 +1153,7 @@ interface EntityObject {
     queuedAt: number;
     techniqueId?: string;
     animStyle?: string;
+    critical?: boolean;
   } | null;
   lifeState: EntityLifeState;
   lifeToken: number;
@@ -1786,9 +1787,9 @@ export class EntityManager {
    * Resolve the clip to use for an Action, applying GLB or procedural fallback.
    * Single source of truth — called by playAction.
    */
-  private getClipForAction(obj: EntityObject, action: Action): THREE.AnimationClip | null {
+  private getClipForAction(obj: EntityObject, action: Action, critical?: boolean): THREE.AnimationClip | null {
     if (obj.hasGlbModel) return getClipFromMap(obj.actionMap, action, obj.entity.name);
-    return getProceduralClip(action);
+    return getProceduralClip(action, critical);
   }
 
   /**
@@ -1802,9 +1803,10 @@ export class EntityManager {
     action: Action,
     techniqueId?: string,
     animStyle?: string,
+    critical?: boolean,
   ): THREE.AnimationClip | null {
     if (!obj.hasGlbModel || obj.glbClipMap.size === 0) return null;
-    return resolveTechniqueClip(obj.glbClipMap, action, techniqueId, animStyle);
+    return resolveTechniqueClip(obj.glbClipMap, action, techniqueId, animStyle, critical);
   }
 
   // ── Animation playback helpers ──────────────────────────────────────
@@ -2439,11 +2441,12 @@ export class EntityManager {
         const obj = this.entities.get(ev.entityId);
         if (obj && obj.lifeState === "alive" && (obj.rig || obj.hasGlbModel)) {
           const animStyle = ev.data?.animStyle as string | undefined;
+          const critical = ev.data?.critical === true;
           const action = resolveAction(obj.entity, "basic-attack", undefined, animStyle);
           const isMelee = animStyle !== "projectile";
-          animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"} → ${action}`);
+          animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"}${critical ? " CRIT" : ""} → ${action}`);
           this.faceTarget(obj, ev.targetId);
-          this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle);
+          this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle, critical);
         } else if (obj && isAnimDebugFor(obj.entity.name)) {
           animWarn(`${obj.entity.name}: combat event skipped (life=${obj.lifeState} rig=${!!obj.rig} glb=${obj.hasGlbModel})`);
         }
@@ -2463,10 +2466,11 @@ export class EntityManager {
         if (!obj || obj.lifeState !== "alive") continue;
         const techniqueId = ev.data?.techniqueId as string | undefined;
         const animStyle = ev.data?.animStyle as string | undefined;
+        const critical = ev.data?.critical === true;
         const isMelee = animStyle === "melee";
         const action = resolveAction(obj.entity, "technique", techniqueId, animStyle);
         this.faceTarget(obj, ev.targetId);
-        this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, techniqueId, animStyle);
+        this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, techniqueId, animStyle, critical);
       }
 
       // ── Technique windup: casting started ──
@@ -2525,6 +2529,7 @@ export class EntityManager {
     isMelee = true,
     techniqueId?: string,
     animStyle?: string,
+    critical?: boolean,
   ) {
     if (!(obj.rig || obj.hasGlbModel)) {
       if (isAnimDebugFor(obj.entity.name)) animWarn(`${obj.entity.name}: no rig (skipped ${action})`);
@@ -2539,7 +2544,7 @@ export class EntityManager {
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist > MELEE_ANIM_RANGE) {
           animLogFor(obj.entity.name, `QUEUED ${action} (dist=${dist.toFixed(1)} > ${MELEE_ANIM_RANGE})`);
-          obj.pendingMelee = { action, targetId, holdOverride, queuedAt: performance.now(), techniqueId, animStyle };
+          obj.pendingMelee = { action, targetId, holdOverride, queuedAt: performance.now(), techniqueId, animStyle, critical };
           return;
         }
       }
@@ -2547,33 +2552,33 @@ export class EntityManager {
 
     obj.pendingMelee = null;
 
-    // Tier 2 (techniqueId override) → Tier 1 (animStyle variant) → default action clip.
+    // Tier 3 (critical) → Tier 2 (techniqueId override) → Tier 1 (animStyle variant) → default action clip.
     // Resolved here so the hold timer matches the actual clip we're about to play.
-    const variantClip = this.getVariantClip(obj, action, techniqueId, animStyle);
-    const clip = variantClip ?? this.getClipForAction(obj, action);
+    const variantClip = this.getVariantClip(obj, action, techniqueId, animStyle, critical);
+    const clip = variantClip ?? this.getClipForAction(obj, action, critical);
     const clipDuration = clip?.duration ?? 0.6;
     obj.combatAnimHold = holdOverride ?? clipDuration;
 
     if (variantClip && isAnimDebugFor(obj.entity.name)) {
       animLogFor(
         obj.entity.name,
-        `variant clip for ${action} (${techniqueId ?? "?"}, ${animStyle ?? "?"}) → ${variantClip.name}`,
+        `variant clip for ${action} (${techniqueId ?? "?"}, ${animStyle ?? "?"}${critical ? ", CRIT" : ""}) → ${variantClip.name}`,
       );
     }
 
-    this.playOneShot(obj, action, undefined, variantClip ?? undefined);
+    this.playOneShot(obj, action, undefined, variantClip ?? clip ?? undefined);
     if (obj.hasGlbModel && isMelee) obj.glbAttackTimer = 0.35;
   }
 
   /** Flush pending melee animations once entity is visually in range */
   private flushPendingMelee(obj: EntityObject) {
     if (!obj.pendingMelee) return;
-    const { action, targetId, holdOverride, queuedAt, techniqueId, animStyle } = obj.pendingMelee;
+    const { action, targetId, holdOverride, queuedAt, techniqueId, animStyle, critical } = obj.pendingMelee;
 
     const elapsed = performance.now() - queuedAt;
     if (elapsed > 1000) {
       obj.pendingMelee = null;
-      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle);
+      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle, critical);
       return;
     }
 
@@ -2587,7 +2592,7 @@ export class EntityManager {
     const dz = targetObj.group.position.z - obj.group.position.z;
     if (Math.sqrt(dx * dx + dz * dz) <= MELEE_ANIM_RANGE) {
       obj.pendingMelee = null;
-      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle);
+      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle, critical);
     }
   }
 
@@ -2623,15 +2628,18 @@ export class EntityManager {
           hasGlbCharacter = true;
           actionMap = buildGlbActionMap(glbChar.clips);
           glbClipMap = glbChar.clips;
-          if (isAnimDebugFor(ent.name)) {
-            animLogOnce(
-              `${ent.name} GLB loaded: ${glbChar.clips.size} clips `
-              + `[${Array.from(glbChar.clips.keys()).join(", ")}]`,
-            );
-            animLogOnce(
-              `${ent.name} action map: ${Array.from(actionMap).map(([a, c]) => `${a}=${c.name}`).join(" | ") || "EMPTY"}`,
-            );
-          }
+          // Unconditional once-per-entity dump so we can see exactly which
+          // animation clips this character GLB exposes. Use this list to
+          // decide which clips to route per-technique in AnimationResolver.
+          const clipNames = Array.from(glbChar.clips.keys());
+          console.log(
+            `[GLB Clips] ${ent.name} (${ent.classId ?? "?"}): ${clipNames.length} clips →`,
+            clipNames,
+          );
+          console.log(
+            `[GLB Clips] ${ent.name} action map:`,
+            Object.fromEntries(Array.from(actionMap).map(([a, c]) => [a, c.name])),
+          );
           auditGlbActionMap(
             actionMap,
             Array.from(glbChar.clips.keys()),
