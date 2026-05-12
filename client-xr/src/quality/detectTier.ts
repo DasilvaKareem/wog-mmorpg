@@ -37,11 +37,14 @@ export function detectTier(): Tier {
 
   let score = 0;
 
+  // Cores are the most reliable cross-browser signal — Chrome on Android
+  // hides deviceMemory and WEBGL_debug_renderer_info from many devices.
+  // Weight cores heavily so flagship phones don't auto-fall to POTATO.
   const cores = navigator.hardwareConcurrency ?? 0;
-  if (cores >= 8) score += 2;
+  if (cores >= 8) score += 3;
+  else if (cores >= 6) score += 2;
   else if (cores >= 4) score += 1;
 
-  // deviceMemory is GB, only available on Chromium-based browsers
   const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
   if (typeof mem === "number") {
     if (mem >= 8) score += 2;
@@ -49,20 +52,18 @@ export function detectTier(): Tier {
     else if (mem <= 2) score -= 1;
   }
 
-  const dpr = window.devicePixelRatio ?? 1;
-  if (dpr <= 1.5) score += 1;
-
   const viewportArea = window.innerWidth * window.innerHeight;
   if (viewportArea >= 1920 * 1080) score += 1;
-  else if (viewportArea < 1280 * 720) score -= 1;
+  // Small viewport (phone-sized) no longer penalizes — many flagship phones
+  // hit this even though they have plenty of GPU. The cores signal carries.
 
   if (gpu) {
-    if (/apple m[1-9]|rtx|radeon rx|geforce gtx 1[6-9]|arc /.test(gpu)) score += 2;
-    else if (/adreno 7|mali-g[78]|apple a1[5-9]/.test(gpu)) score += 1;
-    else if (/adreno [56]|mali-g[5-7]|powervr|intel hd|uhd graphics 6[0-2]0/.test(gpu)) score -= 1;
+    // Flagship desktop GPUs + flagship mobile GPUs (Adreno 730/740/750+,
+    // Mali-G715/G720) get the highest bump.
+    if (/apple m[1-9]|rtx|radeon rx|geforce gtx 1[6-9]|arc |adreno 7[3-9]\d|mali-g7[12]\d/.test(gpu)) score += 2;
+    else if (/adreno [67]|mali-g[78]|apple a1[5-9]/.test(gpu)) score += 1;
+    else if (/adreno [45]|mali-g[4-6]|powervr|intel hd|uhd graphics 6[0-2]0/.test(gpu)) score -= 1;
   }
-
-  if (isMobileUserAgent() && viewportArea < 1280 * 720) score -= 1;
 
   if (score >= 5) return "high";
   if (score >= 3) return "medium";
