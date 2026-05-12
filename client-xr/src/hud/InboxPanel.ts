@@ -158,6 +158,11 @@ export class InboxPanel {
     this.injectStyles();
   }
 
+  /** Expose the container so it can be embedded inside a parent (tabs). */
+  getElement(): HTMLElement {
+    return this.container;
+  }
+
   setCustodialWallet(wallet: string | null) {
     this.custodialWallet = wallet ? wallet.toLowerCase() : null;
     this.messages = [];

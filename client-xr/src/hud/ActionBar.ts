@@ -93,6 +93,21 @@ export class ActionBar {
         gap: 4px;
         z-index: 18;
         pointer-events: auto;
+        max-width: calc(100vw - 24px);
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      /* Tighter buttons on narrow phones so we don't bleed off-screen */
+      @media (max-width: 600px) {
+        #action-bar { gap: 3px; }
+        .ab-btn { width: 38px !important; height: 38px !important; }
+        .ab-icon { font-size: 17px !important; }
+        .ab-key { display: none; }
+      }
+      @media (max-width: 400px) {
+        .ab-btn { width: 34px !important; height: 34px !important; }
+        .ab-icon { font-size: 15px !important; }
       }
 
       .ab-btn {

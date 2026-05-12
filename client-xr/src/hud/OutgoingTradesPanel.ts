@@ -80,6 +80,11 @@ export class OutgoingTradesPanel {
     return this.container.style.display !== "none";
   }
 
+  /** Expose the container so it can be embedded inside a parent (tabs). */
+  getElement(): HTMLElement {
+    return this.container;
+  }
+
   async refresh() {
     this.loading = true;
     if (this.offers.length === 0) this.render();

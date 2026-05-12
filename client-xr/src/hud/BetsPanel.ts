@@ -104,6 +104,11 @@ export class BetsPanel {
     return this.container.style.display !== "none";
   }
 
+  /** Expose the container so it can be embedded inside a parent (tabs). */
+  getElement(): HTMLElement {
+    return this.container;
+  }
+
   async refresh() {
     this.loading = this.pools.length === 0 && this.bets.length === 0;
     if (this.loading) this.render();

@@ -61,11 +61,17 @@ export interface GameTime {
 
 export interface ActiveEffect {
   id: string;
+  techniqueId?: string;
   name: string;
   type: "buff" | "debuff" | "dot" | "hot" | "shield";
+  durationTicks?: number;
   remainingTicks: number;
+  statModifiers?: Partial<Record<string, number>>;
+  dotDamage?: number;
+  hotHealPerTick?: number;
   shieldHp?: number;
   maxShieldHp?: number;
+  shieldMaxHp?: number;
 }
 
 export interface ZoneEvent {

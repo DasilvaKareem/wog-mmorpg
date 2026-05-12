@@ -42,6 +42,8 @@ import { InboxPanel } from "./hud/InboxPanel.js";
 import { TradeOfferDialog } from "./hud/TradeOfferDialog.js";
 import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
 import { BetsPanel } from "./hud/BetsPanel.js";
+import { NotificationsPanel } from "./hud/NotificationsPanel.js";
+import { installMobileResponsiveStyles } from "./hud/MobileResponsive.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
@@ -1394,6 +1396,17 @@ const betsPanel = new BetsPanel({
   },
 });
 
+// Unified notifications hub — inbox / trades / bets all live under one icon.
+const notificationsPanel = new NotificationsPanel({
+  inbox: inboxPanel,
+  trades: outgoingTradesPanel,
+  bets: betsPanel,
+});
+
+// Install responsive panel overrides AFTER all panels have injected their
+// own stylesheets so our `!important` overrides take precedence cleanly.
+installMobileResponsiveStyles();
+
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => togglePanel("bag") });
 actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => togglePanel("skills") });
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => togglePanel("quests") });
@@ -1406,8 +1419,6 @@ const clearChatUnread = () => {
 actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", onClick: () => togglePanel("chat") });
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => togglePanel("players") });
 actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => togglePanel("inbox") });
-actionBar.addButton({ id: "trades", icon: "\u{1F4B8}", label: "Trades", key: "", onClick: () => togglePanel("trades") });
-actionBar.addButton({ id: "bets", icon: "\u{1F3B2}", label: "Bets", key: "", onClick: () => togglePanel("bets") });
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
   if (ownEntityId) {
     const ent = entities.getEntity(ownEntityId);
@@ -1416,7 +1427,7 @@ actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "
 }});
 actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => togglePanel("settings") });
 
-type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "trades" | "bets" | "settings";
+type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "settings";
 type ManagedPanel = {
   show: () => void;
   hide: () => void;
@@ -1454,20 +1465,10 @@ const managedPanels: Record<ManagedPanelId, ManagedPanel> = {
     isVisible: () => playerPanel.isVisible(),
   },
   inbox: {
-    show: () => inboxPanel.show(),
-    hide: () => inboxPanel.hide(),
-    isVisible: () => inboxPanel.isVisible(),
+    show: () => notificationsPanel.show(),
+    hide: () => notificationsPanel.hide(),
+    isVisible: () => notificationsPanel.isVisible(),
     onOpen: () => { lastInboxPollTime = 0; void pollInbox(); },
-  },
-  trades: {
-    show: () => outgoingTradesPanel.show(),
-    hide: () => outgoingTradesPanel.hide(),
-    isVisible: () => outgoingTradesPanel.isVisible(),
-  },
-  bets: {
-    show: () => betsPanel.show(),
-    hide: () => betsPanel.hide(),
-    isVisible: () => betsPanel.isVisible(),
   },
   settings: {
     show: () => settingsPanel.show(),
@@ -1727,9 +1728,7 @@ function initPanelVisibilitySync() {
     quests: "quest-panel",
     chat: "agent-chat",
     players: "player-panel",
-    inbox: "inbox-panel",
-    trades: "outgoing-trades-panel",
-    bets: "bets-panel",
+    inbox: "notifications-panel",
     settings: "settings-panel",
   };
   for (const panelId of Object.values(panelIds)) {
