@@ -2,7 +2,8 @@ interface LandingPageOptions {
   onEnterWorld: (detail: { walletAddress: string | null; mode: "guest" | "authenticated" }) => void;
 }
 type AuthMode = "signup" | "login";
-type SocialStrategy = "google" | "discord";
+type AuthMethod = "email" | "sms";
+type AuthStep = "entry" | "otp";
 const PUBLIC_BASE = import.meta.env.BASE_URL;
 const HERO_LOGO_SRC = `${PUBLIC_BASE}assets/logo.png`;
 const HERO_DUEL_SRC = `${PUBLIC_BASE}assets/hero-duel.png`;
@@ -102,6 +103,9 @@ export class LandingPage {
   private walletAddress: string | null = null;
   private authExpanded = false;
   private authMode: AuthMode = "signup";
+  private authMethod: AuthMethod = "email";
+  private authStep: AuthStep = "entry";
+  private pendingContact: string = "";
   private openNavIndex: number | null = null;
   private onDocClick: ((event: MouseEvent) => void) | null = null;
 
@@ -144,11 +148,30 @@ export class LandingPage {
         </div>
         <div class="xr-landing-auth-chooser" data-auth-chooser hidden>
           <div class="xr-landing-auth-title" data-auth-title>Sign up options</div>
-          <div class="xr-landing-auth-row">
-            <button type="button" class="xr-landing-auth-btn" data-action="auth-google">Continue with Google</button>
-            <button type="button" class="xr-landing-auth-btn" data-action="auth-discord">Continue with Discord</button>
-            <button type="button" class="xr-landing-auth-btn" data-action="auth-wallet">Connect Wallet</button>
+
+          <!-- Method picker: Email | SMS -->
+          <div class="xr-landing-auth-tabs">
+            <button type="button" data-action="method-email" class="active">Email</button>
+            <button type="button" data-action="method-sms">SMS</button>
           </div>
+
+          <!-- Step 1: contact entry -->
+          <div class="xr-landing-auth-form" data-auth-form="entry">
+            <input type="email" class="xr-landing-auth-input" data-auth-input="email" placeholder="your@email.com" autocomplete="email" />
+            <input type="tel" class="xr-landing-auth-input" data-auth-input="phone" placeholder="+15551234567" autocomplete="tel" hidden />
+            <button type="button" class="xr-landing-auth-btn" data-action="auth-send">Send Code</button>
+          </div>
+
+          <!-- Step 2: OTP entry -->
+          <div class="xr-landing-auth-form" data-auth-form="otp" hidden>
+            <div class="xr-landing-auth-hint" data-auth-otp-hint></div>
+            <input type="text" inputmode="numeric" maxlength="6" class="xr-landing-auth-input xr-landing-auth-otp" data-auth-input="otp" placeholder="000000" autocomplete="one-time-code" />
+            <div class="xr-landing-auth-row-split">
+              <button type="button" class="xr-landing-auth-btn xr-landing-auth-btn-secondary" data-action="auth-back">Back</button>
+              <button type="button" class="xr-landing-auth-btn" data-action="auth-verify">Verify</button>
+            </div>
+          </div>
+
           <div class="xr-landing-auth-switch">
             <button type="button" data-action="mode-signup" class="active">Sign Up</button>
             <span>|</span>
@@ -224,15 +247,39 @@ export class LandingPage {
       this.refreshAuthChooserUI();
     });
 
-    this.panel.querySelector("[data-action='auth-google']")?.addEventListener("click", () => {
-      void this.connectSocial("google");
+    this.panel.querySelector("[data-action='method-email']")?.addEventListener("click", () => {
+      this.authMethod = "email";
+      this.authStep = "entry";
+      this.refreshAuthChooserUI();
     });
-    this.panel.querySelector("[data-action='auth-discord']")?.addEventListener("click", () => {
-      void this.connectSocial("discord");
+    this.panel.querySelector("[data-action='method-sms']")?.addEventListener("click", () => {
+      this.authMethod = "sms";
+      this.authStep = "entry";
+      this.refreshAuthChooserUI();
     });
-    this.panel.querySelector("[data-action='auth-wallet']")?.addEventListener("click", () => {
-      void this.connectWallet();
+    this.panel.querySelector("[data-action='auth-send']")?.addEventListener("click", () => {
+      void this.sendCode();
     });
+    this.panel.querySelector("[data-action='auth-back']")?.addEventListener("click", () => {
+      this.authStep = "entry";
+      this.refreshAuthChooserUI();
+    });
+    this.panel.querySelector("[data-action='auth-verify']")?.addEventListener("click", () => {
+      void this.verifyCode();
+    });
+    // Auto-submit OTP on 6 digits
+    const otpInput = this.panel.querySelector("[data-auth-input='otp']") as HTMLInputElement | null;
+    otpInput?.addEventListener("input", () => {
+      const cleaned = otpInput.value.replace(/\D/g, "").slice(0, 6);
+      if (cleaned !== otpInput.value) otpInput.value = cleaned;
+      if (cleaned.length === 6 && !this.busy) void this.verifyCode();
+    });
+    // Enter to submit
+    const emailInput = this.panel.querySelector("[data-auth-input='email']") as HTMLInputElement | null;
+    const phoneInput = this.panel.querySelector("[data-auth-input='phone']") as HTMLInputElement | null;
+    emailInput?.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") void this.sendCode(); });
+    phoneInput?.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") void this.sendCode(); });
+
     this.panel.querySelector("[data-action='mode-signup']")?.addEventListener("click", () => {
       this.authMode = "signup";
       this.refreshAuthChooserUI();
@@ -325,35 +372,88 @@ export class LandingPage {
 
   private refreshAuthChooserUI() {
     const signupMode = this.authMode === "signup";
-    this.authTitleEl.textContent = signupMode ? "Sign up options" : "Log in options";
+    this.authTitleEl.textContent = signupMode ? "Sign up" : "Log in";
     const signupBtn = this.panel.querySelector("[data-action='mode-signup']") as HTMLButtonElement | null;
     const loginBtn = this.panel.querySelector("[data-action='mode-login']") as HTMLButtonElement | null;
     signupBtn?.classList.toggle("active", signupMode);
     loginBtn?.classList.toggle("active", !signupMode);
+
+    const emailBtn = this.panel.querySelector("[data-action='method-email']") as HTMLButtonElement | null;
+    const smsBtn = this.panel.querySelector("[data-action='method-sms']") as HTMLButtonElement | null;
+    emailBtn?.classList.toggle("active", this.authMethod === "email");
+    smsBtn?.classList.toggle("active", this.authMethod === "sms");
+
+    const emailInput = this.panel.querySelector("[data-auth-input='email']") as HTMLInputElement | null;
+    const phoneInput = this.panel.querySelector("[data-auth-input='phone']") as HTMLInputElement | null;
+    if (emailInput) emailInput.hidden = this.authMethod !== "email";
+    if (phoneInput) phoneInput.hidden = this.authMethod !== "sms";
+
+    const entryForm = this.panel.querySelector("[data-auth-form='entry']") as HTMLDivElement | null;
+    const otpForm = this.panel.querySelector("[data-auth-form='otp']") as HTMLDivElement | null;
+    if (entryForm) entryForm.hidden = this.authStep !== "entry";
+    if (otpForm) otpForm.hidden = this.authStep !== "otp";
+
+    const otpHint = this.panel.querySelector("[data-auth-otp-hint]") as HTMLDivElement | null;
+    if (otpHint) otpHint.textContent = this.pendingContact ? `Sent to ${this.pendingContact}` : "";
+
+    if (this.authStep === "entry") {
+      const focusEl = this.authMethod === "email" ? emailInput : phoneInput;
+      setTimeout(() => focusEl?.focus(), 0);
+    } else {
+      const otpInput = this.panel.querySelector("[data-auth-input='otp']") as HTMLInputElement | null;
+      if (otpInput) otpInput.value = "";
+      setTimeout(() => otpInput?.focus(), 0);
+    }
   }
 
-  private async connectSocial(strategy: SocialStrategy) {
-    const label = this.authMode === "signup" ? "Creating account..." : "Logging in...";
-    await this.runBusy(label, async () => {
+  private async sendCode() {
+    if (this.busy) return;
+    const emailInput = this.panel.querySelector("[data-auth-input='email']") as HTMLInputElement | null;
+    const phoneInput = this.panel.querySelector("[data-auth-input='phone']") as HTMLInputElement | null;
+    const contact = (this.authMethod === "email" ? emailInput?.value : phoneInput?.value)?.trim() ?? "";
+    if (!contact) {
+      this.setStatus(this.authMethod === "email" ? "Enter your email." : "Enter your phone number (e.g. +15551234567).");
+      return;
+    }
+    if (this.authMethod === "sms" && !/^\+\d{7,15}$/.test(contact.replace(/[\s\-()]/g, ""))) {
+      this.setStatus("Use international format, e.g. +15551234567.");
+      return;
+    }
+    const normalized = this.authMethod === "sms" ? contact.replace(/[\s\-()]/g, "") : contact;
+    await this.runBusy("Sending code...", async () => {
       const { xrAuth } = await this.loadAuthModule();
-      const address = await xrAuth.connectSocial(strategy);
-      this.walletAddress = address;
-      this.authExpanded = false;
-      this.refreshActionState();
-      const verb = this.authMode === "signup" ? "Signed up" : "Logged in";
-      this.setStatus(`${verb} as ${this.truncateAddress(address)}.`);
+      if (this.authMethod === "email") {
+        await xrAuth.sendEmailCode(normalized);
+      } else {
+        await xrAuth.sendSmsCode(normalized);
+      }
+      this.pendingContact = normalized;
+      this.authStep = "otp";
+      this.refreshAuthChooserUI();
+      this.setStatus("Code sent. Check your messages.");
     });
   }
 
-  private async connectWallet() {
-    const label = this.authMode === "signup" ? "Connecting wallet..." : "Logging in with wallet...";
+  private async verifyCode() {
+    if (this.busy) return;
+    const otpInput = this.panel.querySelector("[data-auth-input='otp']") as HTMLInputElement | null;
+    const otp = otpInput?.value.trim() ?? "";
+    if (otp.length !== 6) {
+      this.setStatus("Enter the 6-digit code.");
+      return;
+    }
+    const label = this.authMode === "signup" ? "Creating account..." : "Logging in...";
     await this.runBusy(label, async () => {
       const { xrAuth } = await this.loadAuthModule();
-      const address = await xrAuth.connectWallet();
+      const address = this.authMethod === "email"
+        ? await xrAuth.verifyEmailCode(this.pendingContact, otp)
+        : await xrAuth.verifySmsCode(this.pendingContact, otp);
       this.walletAddress = address;
       this.authExpanded = false;
+      this.authStep = "entry";
+      this.pendingContact = "";
       this.refreshActionState();
-      const verb = this.authMode === "signup" ? "Wallet connected" : "Logged in";
+      const verb = this.authMode === "signup" ? "Signed up" : "Logged in";
       this.setStatus(`${verb} as ${this.truncateAddress(address)}.`);
     });
   }
@@ -760,6 +860,84 @@ export class LandingPage {
 
       .xr-landing-auth-switch button.active {
         color: #ffcc24;
+      }
+
+      .xr-landing-auth-tabs {
+        display: inline-flex;
+        gap: 0;
+        margin-bottom: 10px;
+        border: 1px solid rgba(146, 185, 222, 0.35);
+      }
+
+      .xr-landing-auth-tabs button {
+        background: rgba(7, 16, 36, 0.4);
+        color: #9db2cd;
+        border: none;
+        padding: 8px 18px;
+        font: 700 11px/1 "Courier New", monospace;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .xr-landing-auth-tabs button + button {
+        border-left: 1px solid rgba(146, 185, 222, 0.35);
+      }
+
+      .xr-landing-auth-tabs button.active {
+        background: rgba(255, 204, 36, 0.18);
+        color: #ffcc24;
+      }
+
+      .xr-landing-auth-form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .xr-landing-auth-input {
+        width: 100%;
+        padding: 10px 12px;
+        background: rgba(7, 16, 36, 0.85);
+        border: 1px solid rgba(146, 185, 222, 0.35);
+        color: #e8eeff;
+        font: 600 14px/1 "Courier New", monospace;
+        letter-spacing: 0.04em;
+        outline: none;
+      }
+
+      .xr-landing-auth-input:focus {
+        border-color: #ffcc24;
+      }
+
+      .xr-landing-auth-input[hidden] { display: none; }
+
+      .xr-landing-auth-otp {
+        text-align: center;
+        letter-spacing: 0.5em;
+        font-size: 22px;
+        padding: 12px;
+      }
+
+      .xr-landing-auth-hint {
+        color: #9db2cd;
+        font: 600 11px/1.4 "Courier New", monospace;
+        letter-spacing: 0.04em;
+      }
+
+      .xr-landing-auth-row-split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .xr-landing-auth-btn-secondary {
+        background: rgba(7, 16, 36, 0.4);
+        color: #9db2cd;
+      }
+
+      .xr-landing-auth-btn-secondary:hover {
+        background: rgba(12, 24, 50, 0.6);
       }
 
       .xr-landing-btn,

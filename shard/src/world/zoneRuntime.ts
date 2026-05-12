@@ -8,6 +8,7 @@ import { queueItemMint, queueGoldTransfer } from "../blockchain/chainBatcher.js"
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest, advanceGatherQuests } from "../social/questSystem.js";
+import { markQuestsDirty } from "../social/questPersistence.js";
 import { type ProfessionType, getLearnedProfessions, restoreProfessions } from "../professions/professions.js";
 import type { FlowerType } from "../resources/flowerCatalog.js";
 import { CROP_CATALOG, GROWTH_MULTIPLIERS, type CropType } from "../farming/cropCatalog.js";
@@ -2608,6 +2609,7 @@ async function worldTick() {
                     const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
                     if (questDef && doesKillCountForQuest(questDef, entity.type, entity.name)) {
                       activeQuest.progress++;
+                      markQuestsDirty(dotKiller);
                     }
                   }
                 }
@@ -2808,6 +2810,7 @@ async function worldTick() {
                   const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
                   if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
                     activeQuest.progress++;
+                    markQuestsDirty(xpRecipient);
                     console.log(
                       `[quest] ${xpRecipient.name} progress: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`
                     );
@@ -3155,6 +3158,7 @@ async function worldTick() {
                   const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
                   if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
                     activeQuest.progress++;
+                    markQuestsDirty(techXpRecipient);
                   }
                 }
               }

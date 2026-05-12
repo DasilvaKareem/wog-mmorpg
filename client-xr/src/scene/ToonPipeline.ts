@@ -164,6 +164,18 @@ export interface ToonPipelineConfig {
   camera: THREE.PerspectiveCamera;
   outlineThickness?: number;
   outlineColor?: number;
+  /**
+   * Scale factor for the EffectComposer render targets. <1.0 renders the
+   * composited frame at lower resolution and lets the GPU upscale during
+   * the final blit. Default 1.0 (full resolution).
+   */
+  renderScale?: number;
+  /**
+   * Scale factor for the normal/depth render target. May differ from
+   * renderScale — the normal pass is often the heaviest single cost so a
+   * dedicated knob is useful. Defaults to renderScale.
+   */
+  normalScale?: number;
 }
 
 export class ToonPipeline {
@@ -175,34 +187,46 @@ export class ToonPipeline {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
+  private renderScale: number;
+  private normalScale: number;
+  private cssWidth: number;
+  private cssHeight: number;
 
   constructor(config: ToonPipelineConfig) {
     const { renderer, scene, camera } = config;
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
+    this.renderScale = config.renderScale ?? 1.0;
+    this.normalScale = config.normalScale ?? this.renderScale;
+    this.cssWidth = window.innerWidth;
+    this.cssHeight = window.innerHeight;
 
     const pr = renderer.getPixelRatio();
-    const w = window.innerWidth * pr;
-    const h = window.innerHeight * pr;
+    const normalW = Math.max(2, Math.floor(this.cssWidth * pr * this.normalScale));
+    const normalH = Math.max(2, Math.floor(this.cssHeight * pr * this.normalScale));
 
     // Normal + depth in one render target (depth texture attached)
-    this.normalRT = new THREE.WebGLRenderTarget(w, h);
+    this.normalRT = new THREE.WebGLRenderTarget(normalW, normalH);
     this.normalRT.texture.minFilter = THREE.NearestFilter;
     this.normalRT.texture.magFilter = THREE.NearestFilter;
-    this.normalRT.depthTexture = new THREE.DepthTexture(w, h);
+    this.normalRT.depthTexture = new THREE.DepthTexture(normalW, normalH);
     this.normalRT.depthTexture.type = THREE.UnsignedShortType;
 
     // Alias for clarity — same RT
     this.depthRT = this.normalRT;
 
-    // Composer
+    // Composer renders at scaled CSS size; pixelRatio is applied internally
     this.composer = new EffectComposer(renderer);
+    this.composer.setSize(
+      Math.max(2, Math.floor(this.cssWidth * this.renderScale)),
+      Math.max(2, Math.floor(this.cssHeight * this.renderScale)),
+    );
     this.composer.addPass(new RenderPass(scene, camera));
 
-    // Edge detection pass
+    // Edge detection pass — resolution uniform tracks normalRT pixels
     this.edgePass = new ShaderPass(EdgeDetectionShader);
-    this.edgePass.uniforms.resolution.value.set(w, h);
+    this.edgePass.uniforms.resolution.value.set(normalW, normalH);
     this.edgePass.uniforms.tNormal.value = this.normalRT.texture;
     this.edgePass.uniforms.tDepth.value = this.normalRT.depthTexture;
     this.edgePass.uniforms.outlineThickness.value = config.outlineThickness ?? 1.2;
@@ -230,14 +254,37 @@ export class ToonPipeline {
 
   /** Must call on window resize */
   setSize(w: number, h: number) {
+    this.cssWidth = w;
+    this.cssHeight = h;
+    this.applyScales();
+  }
+
+  /**
+   * Live-update the render-scale / normal-scale knobs (e.g. when the user
+   * changes quality tier via the Settings panel). No need to rebuild the
+   * composer or RTs — just resize.
+   */
+  setRenderScale(renderScale: number, normalScale?: number): void {
+    this.renderScale = renderScale;
+    this.normalScale = normalScale ?? renderScale;
+    this.applyScales();
+  }
+
+  /** Live-update outline thickness (compensates when renderScale drops). */
+  setOutlineThickness(thickness: number): void {
+    this.edgePass.uniforms.outlineThickness.value = thickness;
+  }
+
+  private applyScales(): void {
     const pr = this.renderer.getPixelRatio();
-    const rtW = w * pr;
-    const rtH = h * pr;
+    const composerW = Math.max(2, Math.floor(this.cssWidth * this.renderScale));
+    const composerH = Math.max(2, Math.floor(this.cssHeight * this.renderScale));
+    const normalW = Math.max(2, Math.floor(this.cssWidth * pr * this.normalScale));
+    const normalH = Math.max(2, Math.floor(this.cssHeight * pr * this.normalScale));
 
-    this.composer.setSize(w, h);
-    this.normalRT.setSize(rtW, rtH);
-
-    this.edgePass.uniforms.resolution.value.set(rtW, rtH);
+    this.composer.setSize(composerW, composerH);
+    this.normalRT.setSize(normalW, normalH);
+    this.edgePass.uniforms.resolution.value.set(normalW, normalH);
     this.edgePass.uniforms.cameraNear.value = this.camera.near;
     this.edgePass.uniforms.cameraFar.value = this.camera.far;
   }

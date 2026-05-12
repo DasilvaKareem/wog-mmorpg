@@ -6,6 +6,7 @@ import { CharacterAssets } from "./CharacterAssets.js";
 import { ArmorSystem } from "./ArmorSystem.js";
 import { fetchTerrain } from "../api.js";
 import type { WorldLayout, WorldLayoutZone, ElevationProvider } from "../types.js";
+import { QualityManager } from "../quality/QualityManager.js";
 
 const COORD_SCALE = 1 / 10;
 /** All terrain grids are 64x64 tiles = 64 3D units */
@@ -59,24 +60,37 @@ export class WorldManager implements ElevationProvider {
     this.group.name = "world";
     this.borderGroup.name = "borders";
     this.group.add(this.borderGroup);
+
+    const qcfg = QualityManager.config();
+
     // Environment/town assets are only needed for decorative props. Let the
     // first terrain build happen without blocking on every GLB, then rebuild
-    // loaded zones when these assets are ready.
-    this.envAssetsReady = Promise.all([
-      this.envAssets.preload(),
-      this.envAssets.preloadTown(),
-    ]).then(() => {
+    // loaded zones when these assets are ready. On POTATO we skip the town
+    // preload entirely — buildings load on demand when first sighted.
+    const envPromises: Promise<unknown>[] = [this.envAssets.preload()];
+    if (qcfg.preloadTown) envPromises.push(this.envAssets.preloadTown());
+    this.envAssetsReady = Promise.all(envPromises).then(() => {
       this.rebuildZonesWithAssets();
     });
 
-    // Character/armor preloads are useful for later smoothness, but they are
-    // expensive on mobile and should not compete with initial world load.
-    window.setTimeout(() => {
-      void Promise.allSettled([
-        this.charAssets.preload(),
-        this.armorSystem.preload(),
-      ]);
-    }, 3_000);
+    // Player class models (~7 GLBs) are needed for the Character Select
+    // screen — start immediately so the preview isn't blocked behind the
+    // full NPC/trainer set. POTATO defers this to CharacterSelect.show().
+    if (qcfg.preloadPlayerClassesAtBoot) {
+      void this.charAssets.preloadPlayerClasses();
+    }
+
+    // NPC/trainer models (~20 GLBs) are only needed once in-world. Defer
+    // them so they don't compete with initial terrain/character-select load.
+    // POTATO never auto-preloads — models load on demand via EntityManager.
+    if (qcfg.npcDeferMs !== null) {
+      window.setTimeout(() => {
+        void Promise.allSettled([
+          this.charAssets.preload(),
+          this.armorSystem.preload(),
+        ]);
+      }, qcfg.npcDeferMs);
+    }
   }
 
   /** Get the shared environment assets instance */

@@ -902,7 +902,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
         : recipeId.startsWith("bar-")
           ? PROFESSION_XP.FORGE_ADVANCED
           : PROFESSION_XP.FORGE_WEAPON;
-      const profXpResult = awardProfessionXp(entity, zoneId, craftXp, "crafting", outputItem?.name);
+      const profXpResult = awardProfessionXp(entity, zoneId, craftXp, "crafting");
 
       // Log craft diary entry
       if (walletAddress) {

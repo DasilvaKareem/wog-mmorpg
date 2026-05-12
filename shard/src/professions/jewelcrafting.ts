@@ -290,7 +290,7 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
       const jcXp = recipeId.includes("amulet")
         ? PROFESSION_XP.JEWEL_AMULET
         : PROFESSION_XP.JEWEL_RING;
-      const profXpResult = awardProfessionXp(entity, zoneId, jcXp, "jewelcrafting", outputItem?.name);
+      const profXpResult = awardProfessionXp(entity, zoneId, jcXp, "jewelcrafting");
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 

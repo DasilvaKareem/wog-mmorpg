@@ -205,17 +205,45 @@ export class CharacterAssets {
   private loading = new Map<string, Promise<CachedModel>>();
   private loader = createCharacterLoader();
   private baseReady = false;
+  private playerClassesReady = false;
+  private playerClassesPromise: Promise<void> | null = null;
 
-  /** Preload all class + NPC + trainer variants so first spawn is instant */
+  /**
+   * Tier 1 preload — just the player-class models (~7 GLBs).
+   * These are needed for the Character Select screen, so they must finish
+   * before the player can see their hero. NPC/trainer models load later.
+   */
+  preloadPlayerClasses(): Promise<void> {
+    if (this.playerClassesPromise) return this.playerClassesPromise;
+    const models = new Set<string>(Object.values(CLASS_MODELS));
+    console.log(`[CharAssets] Preloading ${models.size} player class models`);
+    this.playerClassesPromise = (async () => {
+      const promises = [...models].map((name) =>
+        this.loadModel(name).catch((err) => {
+          console.warn(`[CharAssets] Failed to load class ${name}: ${err}`);
+        }),
+      );
+      await Promise.allSettled(promises);
+      this.playerClassesReady = true;
+      console.log(`[CharAssets] Player class models ready (${this.cache.size} cached)`);
+    })();
+    return this.playerClassesPromise;
+  }
+
+  /**
+   * Tier 2 preload — NPC, trainer, and profession-trainer models.
+   * Only needed once the player spawns in-world. Implicitly awaits tier 1.
+   */
   async preload(): Promise<void> {
+    await this.preloadPlayerClasses();
+
     const models = new Set<string>();
     models.add(DEFAULT_NPC_MODEL);
-    for (const m of Object.values(CLASS_MODELS)) models.add(m);
     for (const m of Object.values(NPC_MODEL)) models.add(m);
     for (const m of Object.values(TRAINER_BY_CLASS)) models.add(m);
     for (const m of Object.values(TRAINER_BY_PROFESSION)) models.add(m);
 
-    console.log(`[CharAssets] Preloading ${models.size} character models`);
+    console.log(`[CharAssets] Preloading ${models.size} NPC/trainer models`);
     const promises = [...models].map((name) =>
       this.loadModel(name).catch((err) => {
         console.warn(`[CharAssets] Failed to load ${name}: ${err}`);
@@ -223,11 +251,20 @@ export class CharacterAssets {
     );
     await Promise.allSettled(promises);
     this.baseReady = true;
-    console.log(`[CharAssets] Loaded ${this.cache.size}/${models.size} characters`);
+    console.log(`[CharAssets] All characters ready (${this.cache.size} cached)`);
   }
 
   isReady(): boolean {
     return this.baseReady;
+  }
+
+  isPlayerClassesReady(): boolean {
+    return this.playerClassesReady;
+  }
+
+  /** Resolves when player-class models are ready (starting the load if needed). */
+  waitForPlayerClasses(): Promise<void> {
+    return this.preloadPlayerClasses();
   }
 
   /**
@@ -269,7 +306,11 @@ export class CharacterAssets {
 
     const cached = this.cache.get(modelName);
     if (!cached) {
-      console.warn(`[CharAssets] Model "${modelName}" not in cache (cache has: ${[...this.cache.keys()].join(", ")})`);
+      // Kick off an on-demand load so the next spawn attempt succeeds.
+      // Dedup'd via this.loading — repeated misses don't refetch.
+      void this.loadModel(modelName).catch((err) => {
+        console.warn(`[CharAssets] On-demand load failed for "${modelName}":`, err);
+      });
       return null;
     }
 

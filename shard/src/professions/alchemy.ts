@@ -719,7 +719,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
         : isMid
           ? PROFESSION_XP.BREW_TIER2
           : PROFESSION_XP.BREW_TIER3;
-      const profXpResult = awardProfessionXp(entity, zoneId, brewXp, "alchemy", outputItem?.name);
+      const profXpResult = awardProfessionXp(entity, zoneId, brewXp, "alchemy");
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 

@@ -235,7 +235,7 @@ export function registerSkinningRoutes(server: FastifyInstance) {
 
       // Award profession XP
       const region = zoneId ?? entity.region ?? "unknown";
-      const profXpResult = awardProfessionXp(entity, region, PROFESSION_XP.SKIN, "skinning", undefined, "corpse");
+      const profXpResult = awardProfessionXp(entity, region, PROFESSION_XP.SKIN, "skinning");
 
       server.log.info(
         `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items (node: ${corpseId})`

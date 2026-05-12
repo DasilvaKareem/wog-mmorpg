@@ -55,6 +55,7 @@ import { AnimationLab } from "./scene/AnimationLab.js";
 import { GauntletCursor } from "./hud/GauntletCursor.js";
 import type { ActivePlayer, Entity, FriendInfo, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 import { createSfxManager, playSoundEffect } from "./sfx.js";
+import { QualityManager } from "./quality/QualityManager.js";
 
 let gauntletCursor: GauntletCursor | null = null;
 const urlParams = new URLSearchParams(window.location.search);
@@ -295,8 +296,18 @@ function syncWeaponsToTuner() {
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const ZONE_POLL_INTERVAL = 250;
-const ACTIVE_PLAYERS_POLL_INTERVAL = 1000;
+// Resolve quality tier before the renderer is constructed — antialias is
+// a context-creation flag and can't be changed without a reload.
+const qualityBoot = QualityManager.init();
+const qualityCfg = qualityBoot.config;
+console.log(
+  `[quality] tier=${qualityBoot.tier} source=${qualityBoot.source} detected=${qualityBoot.detected}`,
+);
+// Expose for devtools verification: window.__quality.current() / .config()
+(window as unknown as { __quality: typeof QualityManager }).__quality = QualityManager;
+
+let ZONE_POLL_INTERVAL = qualityCfg.pollNearbyMs;
+let ACTIVE_PLAYERS_POLL_INTERVAL = qualityCfg.pollPlayersMs;
 const COORD_SCALE = 1 / 10; // server coords → 3D units
 /** Poll zones whose center is within this distance (3D units) of the camera */
 const POLL_RADIUS = 90;
@@ -305,9 +316,12 @@ const GATHER_NODE_TYPES = new Set(["ore-node", "flower-node", "nectar-node", "cr
 
 // ── Renderer ────────────────────────────────────────────────────────
 
-const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({
+  antialias: qualityCfg.antialias,
+  powerPreference: "high-performance",
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, qualityCfg.dprCap));
 renderer.shadowMap.enabled = false;
 document.body.appendChild(renderer.domElement);
 
@@ -327,8 +341,10 @@ camera.layers.enable(NO_OUTLINE_LAYER); // render text/sprites/UI but exclude fr
 
 const toonPipeline = new ToonPipeline({
   renderer, scene, camera,
-  outlineThickness: 1.2,
+  outlineThickness: qualityCfg.outlineThickness,
   outlineColor: 0x000000,
+  renderScale: qualityCfg.renderScale,
+  normalScale: qualityCfg.normalScale,
 });
 
 // ── Subsystems ──────────────────────────────────────────────────────
@@ -2696,9 +2712,21 @@ async function init() {
   await pollActivePlayers();
   landing?.setReady(true);
 
-  // Poll loop
-  setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
-  setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
+  // Poll loop — cadence comes from QualityManager and can change live
+  let zonePollTimer = window.setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
+  let playersPollTimer = window.setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
+
+  QualityManager.subscribe((_tier, cfg) => {
+    ZONE_POLL_INTERVAL = cfg.pollNearbyMs;
+    ACTIVE_PLAYERS_POLL_INTERVAL = cfg.pollPlayersMs;
+    clearInterval(zonePollTimer);
+    clearInterval(playersPollTimer);
+    zonePollTimer = window.setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
+    playersPollTimer = window.setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, cfg.dprCap));
+    toonPipeline.setRenderScale(cfg.renderScale, cfg.normalScale);
+    toonPipeline.setOutlineThickness(cfg.outlineThickness);
+  });
 
   // Display mode: resolve the followed wallet → liveEntity → camera + lock.
   // Retries every 3s until a live entity is found (character may not be

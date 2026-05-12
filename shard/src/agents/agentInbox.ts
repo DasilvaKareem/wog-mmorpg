@@ -344,10 +344,12 @@ export async function countInbox(wallet: string): Promise<number> {
  * Count messages received since a given stream ID (for "new message" badge).
  */
 export async function countNewMessages(wallet: string, since: string): Promise<number> {
+  // Same rule as getMessageHistory: when Postgres is configured, trust its
+  // count — including zero. Falling through on 0 would double-count any
+  // messages Redis still has after Postgres ack/read flips them off.
   if (isPostgresConfigured()) {
     const sinceTs = Number(since.split("-")[0] ?? "0");
-    const count = await countNewInboxMessages(wallet, sinceTs);
-    if (count > 0) return count;
+    return await countNewInboxMessages(wallet, sinceTs);
   }
   const redis = getRedis();
   const key = inboxKey(wallet);
@@ -362,9 +364,7 @@ export async function countNewMessages(wallet: string, since: string): Promise<n
       console.warn(`[inbox] Redis XRANGE count failed: ${err.message}`);
     }
   } else {
-    if (!isPostgresConfigured()) {
-      assertRedisAvailable("countNewMessages");
-    }
+    assertRedisAvailable("countNewMessages");
   }
 
   const list = memInbox.get(wallet.toLowerCase()) ?? [];
@@ -411,9 +411,12 @@ export async function getMessageHistory(
   limit = 100,
   offset = 0,
 ): Promise<{ messages: InboxMessage[]; total: number; unread: number }> {
+  // Postgres is the source of truth for read-state. When configured, always
+  // return its result — an empty inbox is indistinguishable from a silently
+  // failed write, and falling through to Redis would resurrect "read"
+  // messages as unread (Redis LIST has no read_at column).
   if (isPostgresConfigured()) {
-    const history = await listInboxHistory(wallet, limit, offset);
-    if (history.total > 0) return history;
+    return await listInboxHistory(wallet, limit, offset);
   }
   const redis = getRedis();
   const key = historyKey(wallet);
@@ -421,21 +424,17 @@ export async function getMessageHistory(
   if (redis) {
     try {
       const total: number = await redis.llen(key);
-      // Read newest-last: use negative offsets for pagination from the end
       const start = offset;
       const end = offset + limit - 1;
       const raw: string[] = await redis.lrange(key, start, end);
       const messages = raw.map((s: string) => JSON.parse(s) as InboxMessage);
-      // Redis-only fallback has no read-state column; treat all as unread.
       return { messages, total, unread: total };
     } catch (err: any) {
       if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] History read failed: ${err.message}`);
     }
   } else {
-    if (!isPostgresConfigured()) {
-      assertRedisAvailable("getMessageHistory");
-    }
+    assertRedisAvailable("getMessageHistory");
   }
 
   const list = memHistory.get(wallet.toLowerCase()) ?? [];

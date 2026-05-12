@@ -9,7 +9,6 @@ import { recalculateEntityVitals, type Entity, getAllZones } from "../world/zone
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { logDiary, narrativeLevelUp } from "../social/diary.js";
-import { QUEST_CATALOG } from "../social/questSystem.js";
 import type { ProfessionType } from "./professions.js";
 
 // ── Per-profession skill tracking ───────────────────────────────────
@@ -153,16 +152,12 @@ export interface ProfessionXpResult {
  * @param zoneId       The zone where the action occurred
  * @param xpAmount     Amount of XP to award
  * @param actionLabel  Short label for logging (e.g. "mining", "cooking")
- * @param craftedItemName  For craft quest tracking: the crafted item name (e.g. "Hearty Stew")
- * @param gatheredItemName For gather quest tracking: the node/resource name (e.g. "Coal Deposit")
  */
 export function awardProfessionXp(
   entity: Entity,
   zoneId: string,
   xpAmount: number,
   actionLabel: string,
-  craftedItemName?: string,
-  gatheredItemName?: string,
 ): ProfessionXpResult {
   if (xpAmount <= 0) return { xpAwarded: 0, totalXp: entity.xp ?? 0, leveledUp: false };
 
@@ -248,35 +243,6 @@ export function awardProfessionXp(
     }).catch((err) =>
       console.error(`[persistence] Save failed after ${actionLabel} for ${entity.name}:`, err),
     );
-  }
-
-  // Track quest progress for "gather" and "craft" quest types
-  if (entity.activeQuests) {
-    for (const activeQuest of entity.activeQuests) {
-      const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
-      if (!questDef) continue;
-
-      if (questDef.objective.type === "gather" && gatheredItemName) {
-        // Skinning quests match any corpse
-        if (questDef.objective.targetItemName === "corpse" && gatheredItemName === "corpse") {
-          activeQuest.progress++;
-        } else if (
-          questDef.objective.targetItemName &&
-          gatheredItemName.toLowerCase().includes(questDef.objective.targetItemName.toLowerCase())
-        ) {
-          activeQuest.progress++;
-        }
-      }
-
-      if (questDef.objective.type === "craft" && craftedItemName) {
-        if (
-          questDef.objective.targetItemName &&
-          craftedItemName.toLowerCase().includes(questDef.objective.targetItemName.toLowerCase())
-        ) {
-          activeQuest.progress++;
-        }
-      }
-    }
   }
 
   return {

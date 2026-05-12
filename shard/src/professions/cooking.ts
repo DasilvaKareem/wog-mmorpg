@@ -182,7 +182,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
         : recipeId === "hearty_stew"
           ? PROFESSION_XP.COOK_TIER2
           : PROFESSION_XP.COOK_TIER3;
-      const profXpResult = awardProfessionXp(entity, zoneId, cookXp, "cooking", recipe.name);
+      const profXpResult = awardProfessionXp(entity, zoneId, cookXp, "cooking");
 
       advanceGatherQuests(entity, recipe.name);
 

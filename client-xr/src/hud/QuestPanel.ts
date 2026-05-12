@@ -661,7 +661,33 @@ function capitalize(s: string): string {
 
 function formatObjective(obj: { type: string; count: number; targetMobName?: string; targetNpcName?: string; targetItemName?: string }): string {
   const target = obj.targetMobName ?? obj.targetNpcName ?? obj.targetItemName ?? "";
+  const count = obj.count;
+
+  // The shard quest data uses short tokens like "corpse" or "Tanned" because
+  // doesItemCountForQuest matches by substring. Those tokens render as broken
+  // English ("Gather 6 corpse", "Craft Tanned") if we hand them straight to
+  // the generic formatter. Map the known shorthand to readable copy here.
+  if (obj.type === "gather" && target.toLowerCase() === "corpse") {
+    return `Skin ${count} ${count === 1 ? "corpse" : "corpses"}`;
+  }
+  if (obj.type === "craft" && target === "Tanned") {
+    return count === 1
+      ? "Craft 1 piece of Tanned Leather armor"
+      : `Craft ${count} pieces of Tanned Leather armor`;
+  }
+  if (obj.type === "craft" && target.toLowerCase() === "leather") {
+    return count === 1
+      ? "Craft 1 leather item"
+      : `Craft ${count} leather items`;
+  }
+
   const verb = capitalize(obj.type);
-  if (obj.count > 1) return `${verb} ${obj.count} ${target}`.trim();
-  return `${verb} ${target}`.trim();
+  // Naive plural — append "s" when the target is a single-word noun and the
+  // count is > 1. Skip when target already ends in "s" or contains spaces.
+  let displayTarget = target;
+  if (count > 1 && target && !target.includes(" ") && !target.toLowerCase().endsWith("s")) {
+    displayTarget = `${target}s`;
+  }
+  if (count > 1) return `${verb} ${count} ${displayTarget}`.trim();
+  return `${verb} ${displayTarget}`.trim();
 }

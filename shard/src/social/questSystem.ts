@@ -14,6 +14,7 @@ import {
 import { getAllZoneEvents, logZoneEvent } from "../world/zoneEvents.js";
 import { getNpcIdByName } from "../world/npcSpawner.js";
 import { logDiary, narrativeQuestComplete } from "./diary.js";
+import { markQuestsDirty } from "./questPersistence.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
 
@@ -3550,6 +3551,7 @@ export function advanceGatherQuests(
     if (aq.progress >= questDef.objective.count) continue;
     if (doesItemCountForQuest(questDef, itemName)) {
       aq.progress++;
+      markQuestsDirty(entity);
       console.log(
         `[quest] ${entity.name} progress: ${questDef.title} (${aq.progress}/${questDef.objective.count})`
       );
@@ -3598,6 +3600,7 @@ export function notifyDungeonClearForQuests(
       if (aq.progress >= questDef.objective.count) continue;
       if (questDef.objective.targetRank && questDef.objective.targetRank !== rank) continue;
       aq.progress++;
+      markQuestsDirty(player);
       console.log(
         `[quest] ${player.name} dungeon-clear progress: ${questDef.title} (${aq.progress}/${questDef.objective.count})`
       );
@@ -3661,6 +3664,7 @@ export async function awardQuestRewards(
       storyFlags: player.storyFlags ?? [],
       learnedTechniques: player.learnedTechniques,
       kills: player.kills,
+      activeQuests: player.activeQuests ?? [],
     }).catch((err) => console.error(`[persistence] Save failed after quest for ${player.name}:`, err));
   }
 
@@ -3898,6 +3902,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       saveCharacter(player.walletAddress, player.name, {
         completedQuests: player.completedQuests,
         storyFlags: player.storyFlags ?? [],
+        activeQuests: player.activeQuests ?? [],
       }).catch((err) => console.error(`[persistence] Save failed after quest accept for ${player.name}:`, err));
     }
 
@@ -3961,6 +3966,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
     if (player.walletAddress && player.name) {
       saveCharacter(player.walletAddress, player.name, {
         storyFlags: player.storyFlags ?? [],
+        activeQuests: player.activeQuests ?? [],
       }).catch((err) => console.error(`[persistence] Save failed after quest abandon for ${player.name}:`, err));
     }
 
@@ -4129,6 +4135,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       saveCharacter(player.walletAddress, player.name, {
         completedQuests: player.completedQuests,
         storyFlags: player.storyFlags ?? [],
+        activeQuests: player.activeQuests ?? [],
       }).catch((err) => console.error(`[persistence] Save failed after quest turn-in for ${player.name}:`, err));
     }
 
@@ -4273,6 +4280,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       saveCharacter(player.walletAddress, player.name, {
         completedQuests: player.completedQuests,
         storyFlags: player.storyFlags ?? [],
+        activeQuests: player.activeQuests ?? [],
       }).catch((err) => console.error(`[persistence] Save failed after talk quest for ${player.name}:`, err));
     }
 

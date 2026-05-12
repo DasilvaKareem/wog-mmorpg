@@ -234,7 +234,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
       // Award profession XP
       const xpAmount = xpForRarity(oreProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
-      const profXpResult = awardProfessionXp(entity, region, xpAmount, "mining", undefined, oreProps.label);
+      const profXpResult = awardProfessionXp(entity, region, xpAmount, "mining");
 
       // Emit zone event for client gather animation
       logZoneEvent({

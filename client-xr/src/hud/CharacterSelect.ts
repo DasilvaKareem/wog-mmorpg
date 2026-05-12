@@ -243,7 +243,7 @@ export class CharacterSelect {
     }
     this.previewCharacter = null;
 
-    if (!this.charAssets.isReady()) return;
+    if (!this.charAssets.isPlayerClassesReady()) return;
 
     const classId = char.properties.class ?? "warrior";
     const raceId = char.properties.race ?? "human";
@@ -296,7 +296,7 @@ export class CharacterSelect {
     }
     this.previewCharacter = null;
 
-    if (!this.charAssets.isReady() || !this.selectedClass) return;
+    if (!this.charAssets.isPlayerClassesReady() || !this.selectedClass) return;
 
     const instance = this.charAssets.buildCharacter({
       wogClass: this.selectedClass,
@@ -337,6 +337,10 @@ export class CharacterSelect {
       this.startPreviewLoop();
     });
 
+    // Kick off the player-class GLB preload in parallel with API calls so the
+    // 3D preview can show up as soon as both finish.
+    const classModelsPromise = this.charAssets.waitForPlayerClasses();
+
     const token = await getAuthToken(walletAddress);
     if (!token) {
       this.setStatus("Authentication failed. Go back and sign in again.");
@@ -354,6 +358,11 @@ export class CharacterSelect {
     this.liveEntity = charData?.liveEntity ?? null;
     this.deployedCharacterName = charData?.deployedCharacterName ?? null;
     this.characters = charData?.characters ?? [];
+
+    if (!this.charAssets.isPlayerClassesReady()) {
+      this.setStatus("Loading character models...");
+      await classModelsPromise;
+    }
 
     if (this.characters.length === 0) {
       this.showView("create");

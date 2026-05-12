@@ -26,6 +26,7 @@ import { spawnOreNodes } from "./resources/oreSpawner.js";
 import { registerProfessionRoutes } from "./professions/professions.js";
 import { registerCraftingRoutes } from "./professions/crafting.js";
 import { registerQuestRoutes } from "./social/questSystem.js";
+import { flushAllPendingQuests } from "./social/questPersistence.js";
 import { registerHerbalismRoutes } from "./professions/herbalism.js";
 import { spawnFlowerNodes } from "./resources/flowerSpawner.js";
 import { spawnNectarNodes } from "./resources/nectarSpawner.js";
@@ -1217,12 +1218,14 @@ const start = async () => {
 process.on("SIGTERM", async () => {
   await stopChainBatcher();
   await agentManager.stopAll();
+  await flushAllPendingQuests();
   await server.close();
   process.exit(0);
 });
 process.on("SIGINT", async () => {
   await stopChainBatcher();
   await agentManager.stopAll();
+  await flushAllPendingQuests();
   await server.close();
   process.exit(0);
 });

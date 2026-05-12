@@ -238,7 +238,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       // Award profession XP
       const xpAmount = xpForRarity(flowerProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
-      const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism", undefined, flowerProps.label);
+      const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism");
 
       // Emit zone event for client speech bubbles
       logZoneEvent({
@@ -510,7 +510,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       // Award profession XP (same as flower rarity)
       const xpAmount = xpForRarity(nectarProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
-      const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism", undefined, nectarProps.label);
+      const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism");
 
       // Emit zone event for client speech bubbles
       logZoneEvent({

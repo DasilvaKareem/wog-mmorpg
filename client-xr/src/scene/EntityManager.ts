@@ -1293,7 +1293,7 @@ export class EntityManager {
         if (
           info.style === "humanoid" &&
           !existing.hasGlbModel &&
-          this.charAssets?.isReady()
+          this.charAssets?.isPlayerClassesReady()
         ) {
           const replacement = this.createEntity(ent);
           this.refreshCombatFacing(replacement, preferredIntentBySource.get(id), entities);
@@ -3078,8 +3078,10 @@ export class EntityManager {
       console.warn(`[GLB] charAssets not set for ${ent.name}`);
       return null;
     }
-    if (!this.charAssets.isReady()) {
-      console.warn(`[GLB] charAssets not ready for ${ent.name}`);
+    // Players only need the player-class tier; NPCs may be loading on demand
+    // (their buildCharacter call returns null until cached, triggering a
+    // background fetch). Procedural fallback is fine in the gap.
+    if (!this.charAssets.isPlayerClassesReady()) {
       return null;
     }
 

@@ -280,6 +280,28 @@ class XRAuth {
     return account.address;
   }
 
+  async sendSmsCode(phoneNumber: string): Promise<void> {
+    await preAuthenticate({
+      client: thirdwebClient,
+      strategy: "phone",
+      phoneNumber: phoneNumber.trim(),
+    });
+  }
+
+  async verifySmsCode(phoneNumber: string, verificationCode: string): Promise<string> {
+    const account = await sharedInAppWallet.connect({
+      client: thirdwebClient,
+      chain: skaleChain,
+      strategy: "phone",
+      phoneNumber: phoneNumber.trim(),
+      verificationCode: verificationCode.trim(),
+    });
+    this.address = account.address;
+    await rememberAddress(account.address);
+    await getAuthToken(account.address);
+    return account.address;
+  }
+
   async disconnect(): Promise<void> {
     clearCachedToken(this.address ?? undefined);
     this.address = null;
