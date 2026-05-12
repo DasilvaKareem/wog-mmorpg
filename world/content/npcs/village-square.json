@@ -338,6 +338,33 @@
     },
     {
       "type": "mob",
+      "name": "Mire Slime",
+      "x": 555,
+      "y": 395,
+      "hp": 110,
+      "level": 3,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
+      "name": "Mire Slime",
+      "x": 585,
+      "y": 370,
+      "hp": 110,
+      "level": 3,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
+      "name": "Mire Slime",
+      "x": 600,
+      "y": 405,
+      "hp": 110,
+      "level": 3,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
       "name": "Giant Rat",
       "x": 460,
       "y": 70,

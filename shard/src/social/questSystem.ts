@@ -52,11 +52,12 @@ export interface Quest {
   grantStoryFlagsOnAccept?: string[]; // Optional: flags granted as soon as the quest is accepted
   grantStoryFlagsOnComplete?: string[]; // Optional: flags granted on completion/turn-in
   objective: {
-    type: "kill" | "talk" | "gather" | "craft";
+    type: "kill" | "talk" | "gather" | "craft" | "clear_dungeon";
     targetMobType?: string; // kill quests: e.g. "mob" or specific name
     targetMobName?: string; // kill quests: specific mob name like "Hungry Wolf"
     targetNpcName?: string; // talk quests: NPC name to visit
     targetItemName?: string; // gather/craft quests: e.g. "Coal Deposit", "Hearty Stew"
+    targetRank?: "E" | "D" | "C" | "B" | "A" | "S"; // clear_dungeon: optional rank filter
     count: number;
   };
   rewards: {
@@ -1320,7 +1321,7 @@ export const QUEST_CATALOG: Quest[] = [
       items: [
         { tokenId: 77, quantity: 1 },  // Iron Skinning Knife (T2)
         { tokenId: 63, quantity: 5 },  // 5x Light Leather
-        { tokenId: 11, quantity: 3 },  // 3x Wolf Pelt
+        { tokenId: 65, quantity: 3 },  // 3x Wolf Pelt (live tokenId; recipes/loot use 65, legacy 11 is unused)
       ],
     },
   },
@@ -1510,7 +1511,7 @@ export const QUEST_CATALOG: Quest[] = [
       xp: 180,
       items: [
         { tokenId: 63, quantity: 10 }, // 10x Light Leather
-        { tokenId: 11, quantity: 5 },  // 5x Wolf Pelt
+        { tokenId: 65, quantity: 5 },  // 5x Wolf Pelt (live tokenId; recipes/loot use 65, legacy 11 is unused)
         { tokenId: 68, quantity: 5 },  // 5x Small Bone
         { tokenId: 93, quantity: 1 },  // 1x Tanned Leather Boots (+2 DEF, +3 AGI)
       ],
@@ -3576,6 +3577,32 @@ export function doesKillCountForQuest(
 
   // No specific name required, any mob of this type counts
   return true;
+}
+
+/**
+ * Increment clear_dungeon quest progress for a list of party members on full clear.
+ * Caller passes player entity IDs and the cleared gate rank.
+ */
+export function notifyDungeonClearForQuests(
+  memberEntityIds: string[],
+  rank: "E" | "D" | "C" | "B" | "A" | "S"
+): void {
+  for (const entityId of memberEntityIds) {
+    const player = getEntity(entityId);
+    if (!player || player.type !== "player") continue;
+    const activeQuests: ActiveQuest[] = player.activeQuests ?? [];
+    for (const aq of activeQuests) {
+      const questDef = QUEST_CATALOG.find((q) => q.id === aq.questId);
+      if (!questDef) continue;
+      if (questDef.objective.type !== "clear_dungeon") continue;
+      if (aq.progress >= questDef.objective.count) continue;
+      if (questDef.objective.targetRank && questDef.objective.targetRank !== rank) continue;
+      aq.progress++;
+      console.log(
+        `[quest] ${player.name} dungeon-clear progress: ${questDef.title} (${aq.progress}/${questDef.objective.count})`
+      );
+    }
+  }
 }
 
 /**

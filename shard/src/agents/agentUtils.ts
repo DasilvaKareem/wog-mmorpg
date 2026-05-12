@@ -241,6 +241,14 @@ export interface AgentContext {
   equipItem(tokenId: number, instanceId?: string): Promise<boolean>;
   equipItemWithReason(tokenId: number, instanceId?: string): Promise<{ ok: boolean; reason?: string }>;
   learnProfession(professionId: string): Promise<boolean>;
+  /**
+   * If learning `professionId` recently failed for an unrecoverable reason
+   * (insufficient gold, wrong class, missing trainer), returns the failure
+   * details so the calling behavior can return actionBlocked instead of
+   * pretending progress was made. Returns null when no recent failure exists
+   * or when the cooldown has lapsed and a retry is fine.
+   */
+  getLastLearnFailure(professionId: string): { reason: string; category: "strategic" | "transient" } | null;
   recycleItem(tokenId: number, quantity?: number): Promise<{ ok: boolean; error?: string; itemName?: string; totalPayoutCopper?: number }>;
 
   /** Ask the summoner a yes/no (or multi-choice) question. Returns true if question was posted. */

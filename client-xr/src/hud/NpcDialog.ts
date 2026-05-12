@@ -9,7 +9,7 @@ import {
   fetchRecipes, craftAtStation,
   fetchGuilds, createGuild,
   fetchAuctions, bidAuction, buyoutAuction, fetchWalletBalance, cancelPvpBattle,
-  fetchColiseumInfo, joinPvpQueue, fetchPvpLeaderboard,
+  fetchColiseumInfo, joinPvpQueue, joinPvpPartyQueue, fetchPvpLeaderboard,
   fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
   fetchProfessionCatalog, learnProfession,
   fetchEnchantingCatalog, applyEnchantment,
@@ -59,6 +59,13 @@ interface NpcDialogCallbacks {
    * Returning null means the character isn't fully registered yet.
    */
   getOwnCharacterInfo?: () => { level: number; characterTokenId: string | null; agentId: string | null } | null;
+  /**
+   * Returns the local player's party (including self) sized for party-queue
+   * decisions. `leaderId` is the entity id that the shard accepts as the
+   * party leader payload — typically the owner's entity. Returns null when
+   * the player is not in a party.
+   */
+  getOwnParty?: () => { leaderId: string; size: number } | null;
   onShowQuests: () => void;
   /** Optional channel for transient user feedback (toasts in the agent chat). */
   notify?: (text: string, kind?: "info" | "progress" | "success" | "error") => void;
@@ -179,6 +186,7 @@ export class NpcDialog {
       if (action === "bid" && btn.dataset.auctionId) void this.handleBid(btn.dataset.auctionId);
       if (action === "buyout" && btn.dataset.auctionId) void this.handleBuyout(btn.dataset.auctionId);
       if (action === "queue-join") void this.handleQueueJoin();
+      if (action === "queue-join-party") void this.handleQueuePartyJoin();
       if (action === "queue-leave") void this.handleQueueLeave();
       if (action === "select-format" && btn.dataset.format) { this.selectedFormat = btn.dataset.format; if (this.activeTab === "arena") this.renderArena(); }
       if (action === "view-battle" && btn.dataset.battleId) void this.handleViewBattle(btn.dataset.battleId);
@@ -812,17 +820,21 @@ export class NpcDialog {
   // ── Arena view ────────────────────────────────────────────────
 
   private renderArena() {
+    // Battle viewer mode takes priority over arena bootstrap so the standalone
+    // viewer (opened from inbox match-found) can render without an NPC anchor.
+    if (this.viewingBattle) {
+      this.renderBattleViewer();
+      return;
+    }
+    if (this.viewingBattleId && !this.viewingBattle) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading battle...</div>`;
+      return;
+    }
     if (this.arenaLoading) { this.contentEl.innerHTML = `<div class="nd-empty">Loading arena...</div>`; return; }
     if (!this.arenaInfo && !this.arenaLoading) {
       this.arenaLoading = true;
       this.contentEl.innerHTML = `<div class="nd-empty">Loading arena...</div>`;
       void this.loadArena();
-      return;
-    }
-
-    // Battle viewer mode
-    if (this.viewingBattle) {
-      this.renderBattleViewer();
       return;
     }
 
@@ -895,7 +907,25 @@ export class NpcDialog {
       html += `</div></div>`;
 
       if (!this.inQueue) {
-        html += `<div class="nd-shop-item"><button class="nd-btn" data-action="queue-join" style="width:100%;color:#fff;background:rgba(255,68,102,0.25);border-color:rgba(255,68,102,0.4);padding:10px">Join ${esc(this.selectedFormat.toUpperCase())} Queue</button></div>`;
+        const fmt = this.selectedFormat;
+        const isTeamFmt = fmt === "2v2" || fmt === "5v5";
+        const teamSize = fmt === "2v2" ? 2 : fmt === "5v5" ? 5 : 1;
+        const party = this.callbacks.getOwnParty?.() ?? null;
+        if (isTeamFmt) {
+          const partySize = party?.size ?? 0;
+          const partyReady = partySize >= teamSize;
+          const partyLabel = partyReady
+            ? `Join ${esc(fmt.toUpperCase())} as Party`
+            : party
+              ? `Party ${partySize}/${teamSize} — need more`
+              : `No Party — invite first`;
+          html += `<div class="nd-shop-item" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">`;
+          html += `<button class="nd-btn" data-action="queue-join" style="color:#fff;background:rgba(255,68,102,0.25);border-color:rgba(255,68,102,0.4);padding:10px">Join Solo</button>`;
+          html += `<button class="nd-btn" data-action="queue-join-party" ${partyReady ? "" : "disabled"} style="color:${partyReady ? "#fff" : "#776"};background:${partyReady ? "rgba(102,196,255,0.25)" : "rgba(120,120,120,0.12)"};border-color:${partyReady ? "rgba(102,196,255,0.4)" : "rgba(120,120,120,0.3)"};padding:10px${partyReady ? "" : ";cursor:not-allowed"}" title="${esc(partyLabel)}">${esc(partyLabel)}</button>`;
+          html += `</div>`;
+        } else {
+          html += `<div class="nd-shop-item"><button class="nd-btn" data-action="queue-join" style="width:100%;color:#fff;background:rgba(255,68,102,0.25);border-color:rgba(255,68,102,0.4);padding:10px">Join ${esc(fmt.toUpperCase())} Queue</button></div>`;
+        }
       } else {
         html += `<div class="nd-shop-item" style="text-align:center">`;
         html += `<div style="color:#54f28b;font-size:11px;margin-bottom:6px">Searching for match...</div>`;
@@ -935,7 +965,10 @@ export class NpcDialog {
       html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:13px;font-weight:700">Winner: ${b.winner.toUpperCase()} Team</span></div>`;
     }
     if (b.mvp) {
-      html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:10px">MVP: ${esc(b.mvp.name)} (${b.mvp.damage} dmg)</span></div>`;
+      const mvpText = typeof b.mvp === "string"
+        ? (b.mvp.length > 14 ? `${b.mvp.slice(0, 12)}…` : b.mvp)
+        : `${b.mvp.name} (${b.mvp.damage} dmg)`;
+      html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:10px">MVP: ${esc(mvpText)}</span></div>`;
     }
 
     // Teams
@@ -1051,6 +1084,33 @@ export class NpcDialog {
     if (this.activeTab === "arena" && this.isOpen()) this.renderArena();
   }
 
+  /**
+   * Open the arena tab pre-loaded onto a specific battle, without requiring
+   * the player to be standing next to an Arena Master. Used by the inbox
+   * match-found flow and the global PvP HUD's "view" action.
+   */
+  async openBattleViewer(battleId: string) {
+    const synthetic: Entity = {
+      id: "__battle-viewer__",
+      type: "arena-master",
+      name: "Arena Battle Viewer",
+      x: 0,
+      y: 0,
+      hp: 0,
+      maxHp: 0,
+    };
+    this.open(synthetic);
+    this.activeTab = "arena";
+    this.viewingBattleId = battleId;
+    this.viewingBattle = null;
+    this.renderContent();
+    const details = await fetchBattleDetails(battleId);
+    if (details && this.viewingBattleId === battleId) {
+      this.viewingBattle = details;
+      if (this.activeTab === "arena" && this.isOpen()) this.renderArena();
+    }
+  }
+
   private async handleForfeit(battleId: string) {
     const token = await this.callbacks.getAuthToken();
     if (!token) {
@@ -1113,6 +1173,41 @@ export class NpcDialog {
     } else {
       this.callbacks.notify?.(`Queue failed: ${result.error ?? "unknown error"}`, "error");
       if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = `Join ${this.selectedFormat.toUpperCase()} Queue`; }, 2000); return; }
+    }
+    if (this.activeTab === "arena") this.renderArena();
+  }
+
+  private async handleQueuePartyJoin() {
+    const token = await this.callbacks.getAuthToken();
+    const party = this.callbacks.getOwnParty?.() ?? null;
+    if (!token) {
+      this.callbacks.notify?.("Party queue failed: deploy your agent first.", "error");
+      return;
+    }
+    if (!party) {
+      this.callbacks.notify?.("Party queue failed: form a party first (/party invite <name>).", "error");
+      return;
+    }
+    const teamSize = this.selectedFormat === "2v2" ? 2 : this.selectedFormat === "5v5" ? 5 : 0;
+    if (teamSize === 0) {
+      this.callbacks.notify?.(`Party queue is only available for 2v2 or 5v5.`, "error");
+      return;
+    }
+    if (party.size < teamSize) {
+      this.callbacks.notify?.(`Party queue failed: party is ${party.size}/${teamSize}.`, "error");
+      return;
+    }
+    const btn = this.contentEl.querySelector("[data-action='queue-join-party']") as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "Joining…"; btn.disabled = true; }
+    this.callbacks.notify?.(`Queueing party for ${this.selectedFormat.toUpperCase()}…`, "progress");
+    const result = await joinPvpPartyQueue(token, { leaderId: party.leaderId, format: this.selectedFormat });
+    if (result.ok) {
+      this.inQueue = true;
+      this.queuedFormats = [this.selectedFormat];
+      this.startMatchPolling();
+      this.callbacks.notify?.(`Party queued for ${this.selectedFormat.toUpperCase()}. Waiting for opponents…`, "success");
+    } else {
+      this.callbacks.notify?.(`Party queue failed: ${result.error ?? "unknown error"}`, "error");
     }
     if (this.activeTab === "arena") this.renderArena();
   }

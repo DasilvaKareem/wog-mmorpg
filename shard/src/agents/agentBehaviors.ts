@@ -24,6 +24,7 @@ import { logZoneEvent } from "../world/zoneEvents.js";
 import { isQuestNpc } from "../social/questSystem.js";
 import { ORE_CATALOG, type OreType } from "../resources/oreCatalog.js";
 import { FLOWER_CATALOG, type FlowerType } from "../resources/flowerCatalog.js";
+import { getAlchemyRecipeById } from "../professions/alchemy.js";
 import { ORE_SPAWN_DEFS } from "../resources/oreSpawner.js";
 import { FLOWER_SPAWN_DEFS } from "../resources/flowerSpawner.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -1253,6 +1254,16 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
     // Auto-learn alchemy profession before attempting to brew
     const learned = await ctx.learnProfession("alchemy");
     if (!learned) {
+      const failure = ctx.getLastLearnFailure("alchemy");
+      if (failure?.category === "strategic") {
+        // Unrecoverable: insufficient gold, wrong class, etc. Block instead of
+        // pretending progress was made so the circuit breaker rotates focus.
+        return actionBlocked(`Alchemy learn blocked: ${failure.reason}`, {
+          failureKey: "alchemy:learn-blocked",
+          endpoint: "/professions/learn",
+          category: "strategic",
+        });
+      }
       return actionProgressed("Working toward alchemy access");
     }
 
@@ -1279,11 +1290,24 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
       return actionIdle(reason);
     }
 
+    // Fetch current alchemy skill level so we don't pick recipes the server
+    // will 400-reject for "Alchemy skill too low for this recipe". Without
+    // this filter the agent spams /alchemy/brew every cooldown forever.
+    let alchemyLevel = 1;
+    try {
+      const profRes = await ctx.api("GET", `/professions/${ctx.custodialWallet}`);
+      alchemyLevel = Number(profRes?.skills?.alchemy?.level ?? 1) || 1;
+    } catch { /* fall back to level 1 */ }
+
     const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
     const invItems: Array<{ tokenId: number; quantity: number }> = invRes?.items ?? [];
     const haveQty = new Map<number, number>();
     for (const it of invItems) haveQty.set(Number(it.tokenId), Number(it.quantity ?? 0));
 
+    const meetsSkill = (recipe: any): boolean => {
+      const req = Number(recipe.requiredSkillLevel ?? 1);
+      return alchemyLevel >= req;
+    };
     const canBrew = (recipe: any): boolean => {
       const mats: Array<{ tokenId: string | number; quantity: number }> = recipe.materials ?? [];
       if (mats.length === 0) return true;
@@ -1295,7 +1319,19 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
       return true;
     };
 
-    const brewable = recipes.filter(canBrew);
+    const skillFiltered = recipes.filter(meetsSkill);
+    if (skillFiltered.length === 0) {
+      // The recipe catalog has at least one tier-1 recipe at requiredSkillLevel 1,
+      // so reaching here means alchemyLevel resolved to 0 or the catalog is empty.
+      const reason = `Stuck on alchemy: skill level ${alchemyLevel} below every recipe; grind tier-1 brews`;
+      void ctx.logActivity(reason);
+      return actionBlocked(reason, {
+        failureKey: `alchemy:skill-too-low:${alchemyLevel}`,
+        endpoint: "/alchemy/brew",
+        category: "strategic",
+      });
+    }
+    const brewable = skillFiltered.filter(canBrew);
     if (brewable.length === 0) {
       const reason = "Stuck on alchemy: missing ingredients for all potions; not auto-gathering";
       void ctx.logActivity(reason);
@@ -2578,7 +2614,27 @@ export async function doQuesting(
 
     // 1. Check for completed quests and turn them in
     const activeRes = await ctx.api("GET", `/quests/active/${ctx.entityId}`);
-    const activeQuests: any[] = activeRes?.activeQuests ?? [];
+    const rawActiveQuests: any[] = activeRes?.activeQuests ?? [];
+
+    // Apply the user's quest focus filter, if any. When focusedQuestId is set,
+    // the agent narrows its quest pool down to that one quest so it stops
+    // bouncing between active quests. Clears the focus automatically if the
+    // quest has already left the active list (turned in or abandoned).
+    let activeQuests: any[] = rawActiveQuests;
+    const questConfig = await getAgentConfig(ctx.userWallet);
+    const focusedQuestId = questConfig?.focusedQuestId;
+    if (focusedQuestId) {
+      const focused = rawActiveQuests.find((aq: any) =>
+        (aq.questId ?? aq.quest?.id) === focusedQuestId,
+      );
+      if (focused) {
+        activeQuests = [focused];
+      } else {
+        // Focused quest is gone — clear so we don't filter to an empty list forever.
+        void ctx.logActivity(`Focused quest ${focusedQuestId} no longer active — clearing focus`);
+        await patchAgentConfig(ctx.userWallet, { focusedQuestId: undefined });
+      }
+    }
 
     for (const aq of activeQuests) {
       if (aq.complete && aq.quest?.npcId) {
@@ -2814,6 +2870,20 @@ export async function doQuesting(
       } catch (err: any) {
         console.debug(`[agent:${ctx.walletTag}] quest accept: ${err.message?.slice(0, 60)}`);
       }
+    }
+
+    // 3b. Progress clear_dungeon quests by routing into doDungeon.
+    // Only this path lets a questing agent enter a dungeon — gate surges no longer auto-hijack.
+    const dungeonQuests = activeQuests.filter(
+      (aq: any) => !aq.complete && aq.quest?.objective?.type === "clear_dungeon",
+    );
+    if (dungeonQuests.length > 0) {
+      const targetRank = dungeonQuests[0]?.quest?.objective?.targetRank as
+        | "E" | "D" | "C" | "B" | "A" | "S" | undefined;
+      void ctx.logActivity(
+        `Active clear_dungeon quest${targetRank ? ` (rank ${targetRank})` : ""} — routing to dungeon`,
+      );
+      return doDungeon(ctx, strategy, { gateRank: targetRank });
     }
 
     // 4. Progress kill/gather quests
@@ -3130,8 +3200,15 @@ export async function doDungeon(
 
       const myLevel = me.level ?? 1;
 
+      // If a specific rank was requested (e.g. from a clear_dungeon quest), prefer it.
+      const requestedRank = script.gateRank;
+      const rankMatches = requestedRank
+        ? gates.filter(([, g]) => g.gateRank === requestedRank)
+        : [];
+      const candidatePool = rankMatches.length > 0 ? rankMatches : gates;
+
       // Pick the highest-rank gate we qualify for
-      const eligible = gates.filter(([, g]) => {
+      const eligible = candidatePool.filter(([, g]) => {
         const rank = g.gateRank as string;
         return myLevel >= (RANK_LEVEL_REQS[rank] ?? 999);
       }).sort(([, a], [, b]) => {
@@ -3207,7 +3284,39 @@ export async function doDungeon(
               return actionBlocked(reason, { failureKey: `dungeon:forge-key:${rank}` });
             }
           } else {
-            // No reagent — brew the gate essence at the alchemy lab
+            // No reagent — first ensure we have all brewing materials, then brew.
+            // Without this check the agent would call /alchemy/brew with empty inventory,
+            // get a 500, and re-detect the gate next cycle → infinite loop.
+            const recipe = essenceRecipeId ? getAlchemyRecipeById(essenceRecipeId) : undefined;
+            if (recipe) {
+              for (const mat of recipe.requiredMaterials) {
+                let have = 0n;
+                try {
+                  have = await getItemBalance(ctx.custodialWallet, mat.tokenId);
+                } catch {
+                  // treat as zero
+                }
+                if (have < BigInt(mat.quantity)) {
+                  const itemDef = getItemByTokenId(mat.tokenId);
+                  const itemName = itemDef?.name ?? `tokenId ${mat.tokenId}`;
+                  // Classify ore vs herb so doGathering knows which pref to use
+                  const isOre = Object.values(ORE_CATALOG).some((o) => o.tokenId === mat.tokenId);
+                  const gatherPreference: GatherPreference = isOre ? "ore" : "herb";
+                  void ctx.logActivity(
+                    `Need ${mat.quantity}× ${itemName} for ${rank} essence — gathering (have ${have})`,
+                  );
+                  // Keep the dungeon script alive so we resume after gathering.
+                  ctx.setScript({
+                    type: "dungeon",
+                    gateEntityId: targetGateId!,
+                    gateRank: rank,
+                    reason: `Gathering ${itemName} for ${rank} essence`,
+                  });
+                  return doGathering(ctx, strategy, gatherPreference, itemName);
+                }
+              }
+            }
+
             const learned = await ctx.learnProfession("alchemy");
             if (!learned) {
               return actionProgressed("Need alchemy to brew gate essence — learning");
@@ -3245,10 +3354,13 @@ export async function doDungeon(
               return actionProgressed(`Brewed gate essence — will forge ${rank}-Key next`);
             } catch (err: any) {
               const reason = formatAgentError(err);
-              const stuckReason = `Stuck on dungeon key: gate essence brewing failed (${reason}); not auto-gathering`;
-              void ctx.logActivity(stuckReason);
-              ctx.setScript({ type: "idle", reason: stuckReason });
-              return actionIdle(stuckReason);
+              const blockedReason = `Gate essence brew failed: ${reason}`;
+              void ctx.logActivity(blockedReason);
+              // Don't pin to idle — return blocked so the agent can pick a different action next tick.
+              return actionBlocked(blockedReason, {
+                failureKey: `dungeon:essence:${rank}`,
+                category: "strategic",
+              });
             }
           }
         }

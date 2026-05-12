@@ -2415,6 +2415,43 @@ Strategy options: aggressive, balanced, defensive`;
     return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
   });
 
+  // ── POST /agent/focus-quest — Pin the agent's quest behavior to one quest ──
+  // Sends `{ questId }` (or `null` to clear). Sets focus="questing" and stores
+  // focusedQuestId so doQuestObjective biases all kill/gather work to that one
+  // quest. Clears any pending goto so the agent doesn't fight a detour.
+  server.post<{
+    Body: { questId: string | null };
+  }>("/agent/focus-quest", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { questId } = request.body ?? { questId: null };
+
+    if (questId !== null && (typeof questId !== "string" || !questId.trim())) {
+      return reply.code(400).send({ error: "questId must be a non-empty string or null to clear" });
+    }
+
+    const trimmed = questId === null ? null : questId.trim();
+
+    await patchAgentConfig(authWallet, {
+      focusedQuestId: trimmed ?? undefined,
+      focus: trimmed ? "questing" : undefined,
+      gotoTarget: undefined,
+      gotoPosition: undefined,
+    });
+
+    const logText = trimmed
+      ? `[FOCUS] Pinning agent to quest ${trimmed}`
+      : `[FOCUS] Cleared quest focus`;
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: logText,
+      ts: Date.now(),
+    });
+
+    return reply.send({ ok: true, focusedQuestId: trimmed });
+  });
+
   // ── POST /agent/goto-position — Send agent to a world position (map click) ──
   server.post<{
     Body: { x: number; y: number; zoneId: string };

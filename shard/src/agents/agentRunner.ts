@@ -240,6 +240,14 @@ export class AgentRunner {
   private stuckQuests = new Map<string, number>();
   /** Gather nodes blacklisted due to "skill too low" — key=nodeId, value=epoch ms when retry allowed (5 min TTL). */
   private gatherNodeBlacklist = new Map<string, number>();
+  /**
+   * Recent learnProfession failures, keyed by professionId. When a learn
+   * attempt fails for an unrecoverable reason (insufficient gold, no
+   * trainer in zone, wrong class), we record the reason and a cooldown
+   * window so the inner loop stops POSTing /professions/learn at every
+   * tick and callers can return actionBlocked instead of actionProgressed.
+   */
+  private lastLearnFailure = new Map<string, { reason: string; category: "strategic" | "transient"; until: number }>();
   /** Recent death timestamps per zone — used to detect death loops (mob too strong,
    *  agent keeps respawning and walking back to die again). */
   private recentDeathsByZone = new Map<string, number[]>();
@@ -606,12 +614,37 @@ export class AgentRunner {
   async learnProfession(professionId: string): Promise<boolean> {
     return this.withGate(() => this._learnProfessionInner(professionId));
   }
+
+  /**
+   * Return the last unrecoverable failure encountered while trying to learn
+   * `professionId`, or null if no recent failure (or the cooldown has expired).
+   * Behaviors should treat a `strategic` failure as actionBlocked so the
+   * circuit breaker can rotate the agent's focus.
+   */
+  getLastLearnFailure(professionId: string): { reason: string; category: "strategic" | "transient" } | null {
+    const entry = this.lastLearnFailure.get(professionId);
+    if (!entry) return null;
+    if (Date.now() >= entry.until) {
+      this.lastLearnFailure.delete(professionId);
+      return null;
+    }
+    return { reason: entry.reason, category: entry.category };
+  }
+
   private async _learnProfessionInner(professionId: string): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    // If a previous attempt failed for an unrecoverable reason, don't keep
+    // hammering the API every tick — return false until the cooldown lapses.
+    // Callers should be inspecting getLastLearnFailure() and short-circuiting.
+    const cooled = this.lastLearnFailure.get(professionId);
+    if (cooled && Date.now() < cooled.until) return false;
     try {
       const profRes = await this.api("GET", `/professions/${this.custodialWallet}`);
       const learned: string[] = profRes?.professions ?? [];
-      if (learned.includes(professionId)) return true;
+      if (learned.includes(professionId)) {
+        this.lastLearnFailure.delete(professionId);
+        return true;
+      }
 
       const zs = await this.getZoneState();
       if (!zs) return false;
@@ -652,10 +685,30 @@ export class AgentRunner {
       });
       console.log(`[agent:${this.walletTag}] Learned ${professionId}`);
       void this.logActivity(`Learned profession: ${professionId}`);
+      this.lastLearnFailure.delete(professionId);
       return true;
     } catch (err: any) {
-      console.debug(`[agent] learnProfession(${professionId}): ${err.message?.slice(0, 60)}`);
-      this.logError("action", `learnProfession(${professionId}): ${err.message?.slice(0, 120) ?? "unknown"}`, { endpoint: "/professions/learn" });
+      const msg = String(err?.message ?? "unknown");
+      console.debug(`[agent] learnProfession(${professionId}): ${msg.slice(0, 60)}`);
+      this.logError("action", `learnProfession(${professionId}): ${msg.slice(0, 120)}`, { endpoint: "/professions/learn" });
+      // Classify the failure so callers can decide whether to back off.
+      // "Insufficient gold" / "wrong class" / "trainer too far" are strategic —
+      // retrying every tick won't change the outcome; the supervisor needs to
+      // pick a different focus (earn gold, etc.). Anything else is transient.
+      const low = msg.toLowerCase();
+      const strategic =
+        low.includes("insufficient gold") ||
+        low.includes("not authorized") ||
+        low.includes("wrong class") ||
+        low.includes("does not teach") ||
+        low.includes("invalid profession") ||
+        low.includes("too far from trainer");
+      const cooldownMs = strategic ? 60_000 : 15_000;
+      this.lastLearnFailure.set(professionId, {
+        reason: msg.slice(0, 160),
+        category: strategic ? "strategic" : "transient",
+        until: Date.now() + cooldownMs,
+      });
       return false;
     }
   }
@@ -1803,6 +1856,7 @@ export class AgentRunner {
       equipItem: (id, instanceId) => self.equipItem(id, instanceId),
       equipItemWithReason: (id, instanceId) => self.equipItemWithReason(id, instanceId),
       learnProfession: (id) => self.learnProfession(id),
+      getLastLearnFailure: (id) => self.getLastLearnFailure(id),
       recycleItem: (id, quantity) => self.recycleItem(id, quantity),
       askSummoner: async (text, choices, context) => {
         const q = await self.askSummoner(text, choices, context);
@@ -2659,11 +2713,13 @@ export class AgentRunner {
           }
         }
 
-        // Dungeon gate auto-detection — check every 10 ticks when in combat/questing
+        // Dungeon gate auto-detection — only combat focus opportunistically hijacks for gates.
+        // Questing agents route into dungeons explicitly via doQuesting when the active
+        // quest objective is `clear_dungeon` — otherwise gate surges must not derail quests.
         if (
           this.ticksSinceFocusChange % 10 === 0
           && !this.currentRegion.startsWith("dungeon-")
-          && (focus === "combat" || focus === "questing")
+          && focus === "combat"
           && this.currentScript?.type !== "dungeon"
         ) {
           const zoneState = this.cachedZoneState ?? await this.getZoneState();

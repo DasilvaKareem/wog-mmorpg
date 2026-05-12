@@ -75,21 +75,26 @@ export const ORE_SPAWN_DEFS: OreSpawnDef[] = [
   { zoneId: "felsrock-citadel", oreType: "gold", x: 400, y: 550 },
   { zoneId: "felsrock-citadel", oreType: "gold", x: 550, y: 400 },
 
-  // lake-lumina - gold x6
+  // lake-lumina - gold x6 + arcane-crystal x2 (A-tier brewing)
   { zoneId: "lake-lumina", oreType: "gold", x: 100, y: 200 },
   { zoneId: "lake-lumina", oreType: "gold", x: 250, y: 150 },
   { zoneId: "lake-lumina", oreType: "gold", x: 500, y: 150 },
   { zoneId: "lake-lumina", oreType: "gold", x: 150, y: 400 },
   { zoneId: "lake-lumina", oreType: "gold", x: 500, y: 500 },
   { zoneId: "lake-lumina", oreType: "gold", x: 350, y: 580 },
+  { zoneId: "lake-lumina", oreType: "arcane-crystal", x: 420, y: 320 },
+  { zoneId: "lake-lumina", oreType: "arcane-crystal", x: 220, y: 530 },
 
-  // azurshard-chasm - gold x6
+  // azurshard-chasm - gold x6 + arcane-crystal x3 (S-tier brewing)
   { zoneId: "azurshard-chasm", oreType: "gold", x: 150, y: 100 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 350, y: 200 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 550, y: 150 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 200, y: 450 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 400, y: 550 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 560, y: 400 },
+  { zoneId: "azurshard-chasm", oreType: "arcane-crystal", x: 280, y: 320 },
+  { zoneId: "azurshard-chasm", oreType: "arcane-crystal", x: 480, y: 280 },
+  { zoneId: "azurshard-chasm", oreType: "arcane-crystal", x: 340, y: 480 },
 
   // sunflower-fields - stone x3, coal x3, tin x2, copper x1
   { zoneId: "sunflower-fields", oreType: "stone", x: 120, y: 350 },

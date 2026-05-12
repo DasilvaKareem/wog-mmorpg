@@ -113,6 +113,12 @@ export interface AgentConfig {
    *  when the agent is productively questing/combating in a zone. Detour chains
    *  (shop, learn, etc.) travel back here when they complete. */
   homeZone?: string;
+  /**
+   * When set, the agent's quest behavior filters its active-quest pool down to
+   * just this quest id (plus any prerequisites it can finish first). Cleared
+   * once the quest is completed/abandoned or the user toggles focus off.
+   */
+  focusedQuestId?: string;
 }
 
 export interface AgentEntityRef {

@@ -10,7 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { getAllZones, getOrCreateZone, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
-import { getDungeonInstances, cleanupDungeonInstance } from "./dungeonGate.js";
+import { getDungeonInstances, cleanupDungeonInstance, advanceToNextRoom, countRoomMobsAlive } from "./dungeonGate.js";
 
 // --- Configuration ---
 const SURGE_INTERVAL_MS = Math.max(
@@ -177,22 +177,26 @@ function monitorDungeonInstances(): void {
   for (const [instanceId, instance] of getDungeonInstances()) {
     if (instance.cleared) continue;
 
-    // Check timeout
+    // Check timeout first — applies regardless of room state
     if (now >= instance.expiresAt) {
       console.log(`[dungeon] Instance ${instanceId} timed out — evicting party`);
       cleanupDungeonInstance(instanceId, false);
+      continue;
     }
 
-    // Check if all mobs dead (cleared)
+    // Check current room — advance or full clear
     const dungeonZone = getAllZones().get(instance.dungeonZoneId);
-    if (dungeonZone) {
-      const remainingMobs = [...dungeonZone.entities.values()].filter(
-        (e) => e.type === "mob" && e.hp > 0
-      ).length;
-      instance.remainingMobs = remainingMobs;
+    if (!dungeonZone) continue;
 
-      if (remainingMobs === 0 && !instance.cleared) {
-        console.log(`[dungeon] Instance ${instanceId} CLEARED by party!`);
+    const roomMobsAlive = countRoomMobsAlive(instance);
+    instance.remainingMobs = roomMobsAlive;
+
+    if (roomMobsAlive === 0) {
+      // Current room cleared — advance, or finish if last room
+      if (instance.currentRoomIdx + 1 < instance.rooms.length) {
+        advanceToNextRoom(instance);
+      } else {
+        console.log(`[dungeon] Instance ${instanceId} CLEARED by party (all rooms done)!`);
         cleanupDungeonInstance(instanceId, true);
       }
     }

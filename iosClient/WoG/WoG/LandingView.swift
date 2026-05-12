@@ -2,244 +2,144 @@
 //  LandingView.swift
 //  WoG
 //
+//  Hosts the website's /mobile login page in a WKWebView. The page handles
+//  email OTP, social, and wallet auth itself, then redirects to
+//  wog://auth/callback?wallet=...&token=..., which we intercept to transition
+//  to the game.
+//
 
 import SwiftUI
+import WebKit
 
 struct LandingView: View {
-    @State private var screen: Screen = .login
-    @State private var email = ""
-    @State private var otp = ""
-    @State private var error: String? = nil
-    @State private var loading = false
-
-    // Auth result
-    @State private var wallet = ""
-    @State private var token = ""
-
     enum Screen {
-        case login, otpEntry, game
+        case login
+        case game
     }
+
+    @State private var screen: Screen = .login
+    @State private var wallet: String = ""
+    @State private var token: String = ""
 
     var body: some View {
         switch screen {
         case .login:
-            emailScreen
-        case .otpEntry:
-            otpScreen
+            LoginWebView(
+                onAuthenticated: { wallet, token in
+                    self.wallet = wallet
+                    self.token = token
+                    self.screen = .game
+                },
+                onSpectate: {
+                    self.wallet = ""
+                    self.token = ""
+                    self.screen = .game
+                }
+            )
+            .ignoresSafeArea()
         case .game:
-            GameWebView(url: URL(string: "https://worldofgeneva.com/world")!, wallet: wallet, token: token)
-                .ignoresSafeArea()
+            GameWebView(
+                url: URL(string: "https://worldofgeneva.com/world")!,
+                wallet: wallet,
+                token: token
+            )
+            .ignoresSafeArea()
         }
     }
+}
 
-    // MARK: - Email Entry
+// MARK: - Login WebView
 
-    private var emailScreen: some View {
-        VStack(spacing: 0) {
-            Spacer()
+private let loginURL = "https://worldofgeneva.com/mobile"
+private let callbackURL = "wog://auth/callback"
 
-            Text("WORLD OF GENEVA")
-                .font(.system(size: 24, weight: .bold, design: .monospaced))
-                .foregroundColor(WoGColors.gold)
-                .tracking(3)
+struct LoginWebView: UIViewRepresentable {
+    let onAuthenticated: (String, String) -> Void
+    let onSpectate: () -> Void
 
-            Text("Sign in to play")
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundColor(WoGColors.textDim)
-                .padding(.top, 6)
-
-            Spacer().frame(height: 40)
-
-            VStack(spacing: 14) {
-                TextField("", text: $email, prompt: Text("your@email.com").foregroundColor(Color(hex: 0x6d77a3)))
-                    .font(.system(size: 15, design: .monospaced))
-                    .foregroundColor(WoGColors.text)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                    .keyboardType(.emailAddress)
-                    .textContentType(.emailAddress)
-                    .padding(.horizontal, 16)
-                    .frame(height: 50)
-                    .background(Color(hex: 0x0e1628))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x2a3450), lineWidth: 2))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .onSubmit { sendCode() }
-
-                Button(action: sendCode) {
-                    HStack {
-                        if loading {
-                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: WoGColors.bg))
-                        }
-                        Text(loading ? "Sending..." : "Send Login Code")
-                            .font(.system(size: 15, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundColor(WoGColors.bg)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(email.isEmpty || loading ? WoGColors.gold.opacity(0.4) : WoGColors.gold)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .disabled(email.isEmpty || loading)
-
-                if let error = error {
-                    Text(error)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .padding(.horizontal, 32)
-
-            Spacer()
-
-            Button(action: spectate) {
-                Text("Spectate without signing in")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(WoGColors.textDim)
-            }
-            .padding(.bottom, 40)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(WoGColors.bg)
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onAuthenticated: onAuthenticated, onSpectate: onSpectate)
     }
 
-    // MARK: - OTP Entry
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
-    private var otpScreen: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.isOpaque = false
+        webView.backgroundColor = UIColor(red: 0.027, green: 0.051, blue: 0.082, alpha: 1)
+        webView.scrollView.backgroundColor = UIColor(red: 0.027, green: 0.051, blue: 0.082, alpha: 1)
+        webView.customUserAgent = (webView.value(forKey: "userAgent") as? String ?? "") + " WoGiOS/1.0"
 
-            Text("Enter code")
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
-                .foregroundColor(WoGColors.gold)
-
-            Text("Sent to \(email)")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(WoGColors.textDim)
-                .padding(.top, 4)
-
-            Spacer().frame(height: 30)
-
-            TextField("", text: $otp, prompt: Text("000000").foregroundColor(Color(hex: 0x6d77a3)))
-                .font(.system(size: 28, weight: .bold, design: .monospaced))
-                .foregroundColor(WoGColors.text)
-                .multilineTextAlignment(.center)
-                .keyboardType(.numberPad)
-                .textContentType(.oneTimeCode)
-                .frame(width: 200, height: 56)
-                .background(Color(hex: 0x0e1628))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x2a3450), lineWidth: 2))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .onChange(of: otp) { _, newValue in
-                    // Strip non-digits, cap at 6
-                    let digits = newValue.filter { $0.isNumber }
-                    if digits.count > 6 { otp = String(digits.prefix(6)) }
-                    else if digits != newValue { otp = digits }
-                    // Auto-verify when 6 digits
-                    if otp.count == 6 { verifyCode() }
-                }
-                .padding(.horizontal, 32)
-
-            Spacer().frame(height: 20)
-
-            HStack(spacing: 12) {
-                Button(action: { error = nil; screen = .login }) {
-                    Text("Back")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(WoGColors.textDim)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Color(hex: 0x0e1628))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x2a3450), lineWidth: 2))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-
-                Button(action: verifyCode) {
-                    HStack {
-                        if loading {
-                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: WoGColors.bg))
-                        }
-                        Text(loading ? "..." : "Verify")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundColor(WoGColors.bg)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(otp.count < 6 || loading ? WoGColors.gold.opacity(0.4) : WoGColors.gold)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .disabled(otp.count < 6 || loading)
-            }
-            .padding(.horizontal, 32)
-
-            if let error = error {
-                Text(error)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.red)
-                    .padding(.top, 12)
-                    .padding(.horizontal, 32)
-            }
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(WoGColors.bg)
+        var components = URLComponents(string: loginURL)!
+        components.queryItems = [URLQueryItem(name: "callback", value: callbackURL)]
+        webView.load(URLRequest(url: components.url!))
+        return webView
     }
 
-    // MARK: - Actions
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    private func sendCode() {
-        guard !email.isEmpty, !loading else { return }
-        loading = true
-        error = nil
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let onAuthenticated: (String, String) -> Void
+        let onSpectate: () -> Void
 
-        Task {
-            do {
-                try await ThirdwebAuth.sendEmailOTP(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
-                await MainActor.run {
-                    loading = false
-                    screen = .otpEntry
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error.localizedDescription
-                    loading = false
-                }
-            }
+        init(onAuthenticated: @escaping (String, String) -> Void, onSpectate: @escaping () -> Void) {
+            self.onAuthenticated = onAuthenticated
+            self.onSpectate = onSpectate
         }
-    }
 
-    private func verifyCode() {
-        guard otp.count == 6, !loading else { return }
-        loading = true
-        error = nil
-
-        Task {
-            do {
-                let result = try await ThirdwebAuth.verifyEmailOTP(
-                    email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-                    code: otp
-                )
-                await MainActor.run {
-                    wallet = result.walletAddress
-                    token = result.shardToken
-                    loading = false
-                    screen = .game
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error.localizedDescription
-                    otp = ""
-                    loading = false
-                }
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
             }
-        }
-    }
 
-    private func spectate() {
-        wallet = ""
-        token = ""
-        screen = .game
+            // Intercept the auth callback
+            if url.scheme == "wog", url.host == "auth" {
+                let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                let items = comps?.queryItems ?? []
+                if items.first(where: { $0.name == "spectate" })?.value == "true" {
+                    DispatchQueue.main.async { self.onSpectate() }
+                } else {
+                    let wallet = items.first(where: { $0.name == "wallet" })?.value ?? ""
+                    let token = items.first(where: { $0.name == "token" })?.value ?? ""
+                    DispatchQueue.main.async { self.onAuthenticated(wallet, token) }
+                }
+                decisionHandler(.cancel)
+                return
+            }
+
+            // External (non-worldofgeneva) http links → open in Safari (OAuth popups, etc.)
+            if let host = url.host,
+               !host.contains("worldofgeneva.com"),
+               (url.scheme == "http" || url.scheme == "https"),
+               navigationAction.navigationType == .linkActivated {
+                UIApplication.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+
+            decisionHandler(.allow)
+        }
+
+        // Handle window.open popups (used by some OAuth flows)
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if let url = navigationAction.request.url {
+                webView.load(URLRequest(url: url))
+            }
+            return nil
+        }
     }
 }
 

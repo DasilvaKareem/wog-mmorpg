@@ -44,9 +44,10 @@ import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
 import { BetsPanel } from "./hud/BetsPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
+import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -1067,6 +1068,30 @@ const questPanel = new QuestPanel({
   onOpenAvailable: () => {
     void refreshAvailableQuestsNow();
   },
+  onFocusQuest: async (questId, questTitle) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Focus failed: deploy your agent first.", "error");
+      questPanel.setFocusedQuestId(null);
+      return;
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Focus failed: auth.", "error");
+      questPanel.setFocusedQuestId(null);
+      return;
+    }
+    const result = await focusAgentQuest(token, questId);
+    if (result.ok) {
+      questPanel.setFocusedQuestId(result.focusedQuestId ?? null);
+      agentChat.addSystemMessage(
+        questId ? `Agent now focused on "${questTitle}".` : "Quest focus cleared.",
+        "success",
+      );
+    } else {
+      agentChat.addSystemMessage(`Focus failed: ${result.error ?? "unknown error"}`, "error");
+      // Roll back the optimistic toggle by re-querying the agent status the next tick.
+    }
+  },
 });
 
 const bagPanel = new BagPanel({
@@ -1233,18 +1258,20 @@ const inboxPanel = new InboxPanel({
     const arena = data.arenaName ?? "the coliseum";
     const team = data.team ? data.team.toUpperCase() : "";
     agentChat.addSystemMessage(
-      `Match found in ${arena} — you're on team ${team}. Entering arena!`,
+      `Match found in ${arena} — you're on team ${team}. Opening arena viewer…`,
       "success",
     );
     playSoundEffect("ui_notification");
-    if (data.battleId) npcDialog.setCurrentBattleId(data.battleId);
+    if (data.battleId) {
+      npcDialog.setCurrentBattleId(data.battleId);
+      void npcDialog.openBattleViewer(data.battleId);
+      void refreshCurrentBattle(data.battleId);
+    }
   },
   onOpenBattle: (battleId) => {
     npcDialog.setCurrentBattleId(battleId);
-    agentChat.addSystemMessage(
-      `Battle ${battleId} active — visit any Arena Master to spectate.`,
-      "info",
-    );
+    void npcDialog.openBattleViewer(battleId);
+    void refreshCurrentBattle(battleId);
   },
   onAcceptDuel: async (challengeId) => {
     if (!ownWalletAddress) {
@@ -1700,10 +1727,27 @@ refreshActionBarActiveStates();
 initDesktopPanelDragging();
 initPanelVisibilitySync();
 
+/**
+ * Snapshot of the most recent zone-entity merge. Kept in sync with the
+ * VitalsPanel feed so PvP code paths (party detection, ArenaHud) can read
+ * fresh state without re-fetching.
+ */
+let latestEntities: Record<string, Entity> = {};
+
 const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
   getOwnEntityId: () => ownEntityId,
   getOwnWalletAddress: () => ownWalletAddress,
+  getOwnParty: () => {
+    if (!ownEntityId) return null;
+    const own = latestEntities[ownEntityId];
+    if (!own?.partyId) return null;
+    let size = 1;
+    for (const ent of Object.values(latestEntities)) {
+      if (ent.id !== own.id && ent.partyId === own.partyId && ent.type === "player") size++;
+    }
+    return { leaderId: ownEntityId, size };
+  },
   getOwnCharacterInfo: () => {
     if (!ownCharacterInfo) return null;
     // Prefer the live in-world entity's level (it ticks up on level-up) over
@@ -1727,6 +1771,87 @@ const npcDialog = new NpcDialog({
     refreshActionBarActiveStates();
   },
 });
+
+// ── Persistent PvP HUD ──────────────────────────────────────────────
+// Hidden by default; the global current-battle poller below shows/hides it
+// based on /api/pvp/player/:agentId/current-battle responses.
+const arenaHud = new ArenaHud({
+  onForfeit: async (battleId) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Forfeit failed: deploy your agent first.", "error");
+      return;
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Forfeit failed: auth.", "error");
+      return;
+    }
+    agentChat.addSystemMessage("Forfeiting battle…", "progress");
+    const result = await cancelPvpBattle(token, battleId);
+    if (result.ok) {
+      agentChat.addSystemMessage("Battle forfeit.", "info");
+      arenaHud.clear();
+      npcDialog.setCurrentBattleId(null);
+    } else {
+      agentChat.addSystemMessage(`Forfeit failed: ${result.error ?? "unknown error"}`, "error");
+    }
+  },
+  onOpenViewer: (battleId) => {
+    void npcDialog.openBattleViewer(battleId);
+  },
+});
+
+let currentBattlePollTimer: ReturnType<typeof setInterval> | null = null;
+let currentBattleIdle = 2000;
+let currentBattleActive = 1000;
+let lastKnownBattleId: string | null = null;
+
+async function refreshCurrentBattle(forceBattleId?: string): Promise<void> {
+  if (!ownEntityId) return;
+  const targetId = forceBattleId ?? lastKnownBattleId;
+  if (targetId) {
+    const details = await fetchBattleDetails(targetId);
+    if (details) {
+      if (arenaHud.currentBattleId() === targetId) {
+        arenaHud.updateDetails(details, ownEntityId);
+      } else {
+        arenaHud.setBattle(targetId, details, ownEntityId);
+      }
+      lastKnownBattleId = targetId;
+      npcDialog.setCurrentBattleId(targetId);
+    }
+    return;
+  }
+  const status = await fetchCurrentBattle(ownEntityId);
+  if (status?.inBattle && status.battleId) {
+    const details = await fetchBattleDetails(status.battleId);
+    if (details) {
+      arenaHud.setBattle(status.battleId, details, ownEntityId);
+      lastKnownBattleId = status.battleId;
+      npcDialog.setCurrentBattleId(status.battleId);
+    }
+  } else if (lastKnownBattleId) {
+    arenaHud.clear();
+    lastKnownBattleId = null;
+    npcDialog.setCurrentBattleId(null);
+    agentChat.addSystemMessage("Match over.", "info");
+  }
+}
+
+function scheduleCurrentBattlePoll() {
+  if (currentBattlePollTimer) clearInterval(currentBattlePollTimer);
+  const ms = arenaHud.hasBattle() ? currentBattleActive : currentBattleIdle;
+  currentBattlePollTimer = setInterval(() => {
+    if (!ownEntityId) return;
+    void (async () => {
+      await refreshCurrentBattle();
+      const wantActive = arenaHud.hasBattle();
+      const currentMs = wantActive ? currentBattleActive : currentBattleIdle;
+      if (currentMs !== ms) scheduleCurrentBattlePoll();
+    })();
+  }, ms);
+}
+scheduleCurrentBattlePoll();
 
 if (landing) {
   controls.setLandingMode(true);
@@ -1843,6 +1968,7 @@ async function pollNearbyZones() {
     }
 
     updateRunPanelFromEntity(ownEntityId ? merged[ownEntityId] : null);
+    latestEntities = merged;
     vitalsPanel.update(ownEntityId ? merged[ownEntityId] : null, merged);
 
     // Minimap — pass camera in server coords

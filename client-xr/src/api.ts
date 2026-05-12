@@ -734,6 +734,25 @@ export async function joinPvpQueue(
   return postJsonWithFallback("/api/pvp/queue/join", token, body);
 }
 
+export async function joinPvpPartyQueue(
+  token: string,
+  body: { leaderId: string; format: string },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback("/api/pvp/queue/join-party", token, body);
+}
+
+/**
+ * Pin the agent's quest behavior to a single quest, or clear focus by passing
+ * null. Server biases doQuestObjective's combat/gather work to this quest and
+ * auto-clears the focus once the quest leaves the active list.
+ */
+export async function focusAgentQuest(
+  token: string,
+  questId: string | null,
+): Promise<{ ok: boolean; focusedQuestId?: string | null; error?: string }> {
+  return postJsonWithFallback("/agent/focus-quest", token, { questId });
+}
+
 export async function cancelPvpBattle(
   token: string,
   battleId: string,
@@ -883,7 +902,11 @@ export interface BattleDetails {
     teamBlue: Array<{ name: string; hp: number; maxHp: number; level: number }>;
   };
   combatLog?: Array<{ turn: number; description: string }>;
-  mvp?: { name: string; damage: number };
+  /**
+   * MVP may be returned as an object by the new arena adapter or as a bare
+   * entity ID by the legacy adapter. Renderers must handle both.
+   */
+  mvp?: string | { name: string; damage: number };
 }
 
 // ── Professions ───────────────────────────────────────────────────

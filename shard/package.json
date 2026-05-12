@@ -11,6 +11,7 @@
     "start": "pnpm run build && node dist/server.js",
     "start:blockchain-worker": "pnpm run build && node dist/blockchainWorker.js",
     "bench:character-bootstrap": "tsx scripts/benchmarkCharacterBootstrap.ts",
+    "debug:gold": "tsx scripts/debugGoldEconomy.ts",
     "test": "tsx tests/runLocalFullFlowAuto.ts",
     "test:erc8004": "tsx tests/erc8004DevIntegration.test.ts",
     "test:erc8004:dev": "tsx tests/erc8004DevIntegration.test.ts",

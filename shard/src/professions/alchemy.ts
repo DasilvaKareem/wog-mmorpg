@@ -272,7 +272,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 22n, quantity: 2 }, // 2x Coal Ore
     ],
     copperCost: 15,
-    requiredSkillLevel: 10,
+    requiredSkillLevel: 1, // entry-level — agents bootstrap E-keys without alchemy grind
     brewingTime: 40,
   },
   {
