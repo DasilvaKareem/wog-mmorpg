@@ -391,6 +391,53 @@ export interface GuildSummary {
   memberCount: number;
 }
 
+export type GuildRank = "Founder" | "Officer" | "Member";
+
+export interface GuildMember {
+  address: string;
+  rank: GuildRank;
+  joinedAt: number;
+  contributedGold: number;
+}
+
+export type GuildProposalType =
+  | "withdraw-gold"
+  | "kick-member"
+  | "promote-officer"
+  | "demote-officer"
+  | "disband-guild";
+
+export interface GuildProposal {
+  proposalId: number;
+  guildId: number;
+  proposer: string;
+  proposalType: GuildProposalType | string;
+  description: string;
+  createdAt: number;
+  votingEndsAt: number;
+  timeRemaining: number;
+  yesVotes: number;
+  noVotes: number;
+  status: "active" | "passed" | "failed" | "executed" | "cancelled" | string;
+  targetAddress: string;
+  targetAmount: number;
+}
+
+export interface GuildDetail extends GuildSummary {
+  description?: string;
+  founder?: string;
+  reputation?: number;
+  createdAt?: number;
+}
+
+export interface MyGuildResponse {
+  inGuild: boolean;
+  guild: GuildDetail | null;
+  member: GuildMember | null;
+  members: GuildMember[];
+  proposals: GuildProposal[];
+}
+
 export interface AuctionListing {
   auctionId: string;
   itemName: string;

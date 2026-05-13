@@ -15,6 +15,9 @@ import type {
   TechniqueInfo,
   CraftingRecipe,
   GuildSummary,
+  GuildProposal,
+  GuildProposalType,
+  MyGuildResponse,
   AuctionListing,
   ProfessionEntry,
   EnchantmentEntry,
@@ -704,6 +707,65 @@ export async function joinGuild(
   memberAddress: string,
 ): Promise<{ ok: boolean; data?: any; error?: string }> {
   return postJsonWithFallback(`/guild/${guildId}/join`, token, { memberAddress });
+}
+
+export async function fetchMyGuild(walletAddress: string): Promise<MyGuildResponse | null> {
+  return fetchJsonWithFallback<MyGuildResponse>(`/guild/wallet/${walletAddress}`);
+}
+
+export async function leaveGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/leave`, token, { memberAddress });
+}
+
+export async function inviteToGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/invite`, token, { memberAddress });
+}
+
+export async function depositToGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+  amount: number,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/deposit`, token, { memberAddress, amount });
+}
+
+export async function proposeGuildAction(
+  token: string,
+  guildId: number,
+  body: {
+    proposerAddress: string;
+    proposalType: GuildProposalType | string;
+    description: string;
+    targetAddress?: string;
+    targetAmount?: number;
+  },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/propose`, token, body);
+}
+
+export async function voteOnGuildProposal(
+  token: string,
+  guildId: number,
+  body: { proposalId: number; voterAddress: string; vote: boolean },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/vote`, token, body);
+}
+
+export async function fetchGuildProposals(
+  guildId: number,
+  status?: string,
+): Promise<GuildProposal[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return (await fetchJsonWithFallback<GuildProposal[]>(`/guild/${guildId}/proposals${qs}`)) ?? [];
 }
 
 // ── Auction House ─────────────────────────────────────────────────

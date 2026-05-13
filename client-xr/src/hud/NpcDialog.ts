@@ -1,6 +1,7 @@
 import type {
   Entity, NpcDialogueMessage, ShopItem, TechniqueInfo,
-  CraftingRecipe, GuildSummary, AuctionListing,
+  CraftingRecipe, GuildSummary, MyGuildResponse, GuildProposal,
+  GuildProposalType, AuctionListing,
   ProfessionEntry, EnchantmentEntry, ArenaInfo, PvpLeaderboardEntry,
 } from "../types.js";
 import {
@@ -8,6 +9,8 @@ import {
   fetchAvailableTechniques, learnTechnique,
   fetchRecipes, craftAtStation,
   fetchGuilds, createGuild, joinGuild,
+  fetchMyGuild, leaveGuild, inviteToGuild, depositToGuild,
+  proposeGuildAction, voteOnGuildProposal,
   fetchAuctions, bidAuction, buyoutAuction, fetchWalletBalance, cancelPvpBattle,
   fetchColiseumInfo, joinPvpQueue, joinPvpPartyQueue, fetchPvpLeaderboard,
   fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
@@ -22,6 +25,57 @@ const NPC_DIALOG_TYPES = new Set([
   "forge", "alchemy-lab", "enchanting-altar", "campfire",
   "tanning-rack", "jewelers-bench",
 ]);
+
+/** localStorage key for proposalIds the player has already voted on. */
+const VOTED_PROPOSALS_KEY = "wog-voted-proposals";
+
+function loadVotedProposals(): Set<number> {
+  try {
+    const raw = localStorage.getItem(VOTED_PROPOSALS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.filter((n): n is number => Number.isFinite(n)));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveVotedProposals(s: Set<number>) {
+  try {
+    localStorage.setItem(VOTED_PROPOSALS_KEY, JSON.stringify([...s]));
+  } catch { /* localStorage may be blocked */ }
+}
+
+const PROPOSAL_TYPE_LABELS: Record<string, string> = {
+  "withdraw-gold": "Withdraw gold",
+  "kick-member": "Kick member",
+  "promote-officer": "Promote to officer",
+  "demote-officer": "Demote officer",
+  "disband-guild": "Disband guild",
+};
+
+const PROPOSAL_TYPE_ORDER: GuildProposalType[] = [
+  "withdraw-gold",
+  "kick-member",
+  "promote-officer",
+  "demote-officer",
+  "disband-guild",
+];
+
+function shortAddr(addr: string): string {
+  if (!addr || addr.length < 12) return addr;
+  return `${addr.slice(0, 6)}\u2026${addr.slice(-4)}`;
+}
+
+function fmtTimeRemaining(seconds: number): string {
+  if (seconds <= 0) return "expired";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h >= 1) return `${h}h ${m}m`;
+  if (m >= 1) return `${m}m`;
+  return `${seconds}s`;
+}
 
 const TYPE_ACCENT: Record<string, string> = {
   merchant: "#ffcc00",
@@ -99,6 +153,15 @@ export class NpcDialog {
   // Guild
   private guilds: GuildSummary[] = [];
   private guildsLoading = false;
+  /** Cached "my guild" lookup. null until first load. */
+  private myGuild: MyGuildResponse | null = null;
+  private myGuildLoading = false;
+  /** Whether the "compose proposal" form is expanded in the guild detail view. */
+  private composeProposalOpen = false;
+  /** Selected proposal type for the compose form. */
+  private composeProposalType: GuildProposalType = "withdraw-gold";
+  /** ProposalIds the player has already voted on (locally tracked). */
+  private votedProposalIds: Set<number> = loadVotedProposals();
   // Auctions
   private auctions: AuctionListing[] = [];
   private auctionsLoading = false;
@@ -184,6 +247,15 @@ export class NpcDialog {
       if (action === "craft" && btn.dataset.recipeId) void this.handleCraft(btn.dataset.recipeId);
       if (action === "create-guild") void this.handleCreateGuild();
       if (action === "join-guild" && btn.dataset.guildId) void this.handleJoinGuild(Number(btn.dataset.guildId));
+      if (action === "leave-guild" && btn.dataset.guildId) void this.handleLeaveGuild(Number(btn.dataset.guildId));
+      if (action === "deposit-guild" && btn.dataset.guildId) void this.handleDepositGuild(Number(btn.dataset.guildId));
+      if (action === "invite-guild" && btn.dataset.guildId) void this.handleInviteGuild(Number(btn.dataset.guildId));
+      if (action === "open-propose") { this.composeProposalOpen = true; if (this.activeTab === "guild") this.renderGuild(); }
+      if (action === "cancel-propose") { this.composeProposalOpen = false; if (this.activeTab === "guild") this.renderGuild(); }
+      if (action === "submit-propose" && btn.dataset.guildId) void this.handleSubmitProposal(Number(btn.dataset.guildId));
+      if ((action === "vote-yes" || action === "vote-no") && btn.dataset.proposalId && btn.dataset.guildId) {
+        void this.handleVote(Number(btn.dataset.proposalId), Number(btn.dataset.guildId), action === "vote-yes");
+      }
       if (action === "bid" && btn.dataset.auctionId) void this.handleBid(btn.dataset.auctionId);
       if (action === "buyout" && btn.dataset.auctionId) void this.handleBuyout(btn.dataset.auctionId);
       if (action === "queue-join") void this.handleQueueJoin();
@@ -222,6 +294,10 @@ export class NpcDialog {
     this.recipesLoading = false;
     this.guilds = [];
     this.guildsLoading = false;
+    this.myGuild = null;
+    this.myGuildLoading = false;
+    this.composeProposalOpen = false;
+    this.composeProposalType = "withdraw-gold";
     this.auctions = [];
     this.auctionsLoading = false;
     this.arenaInfo = null;
@@ -600,6 +676,44 @@ export class NpcDialog {
   // ── Guild view ────────────────────────────────────────────────
 
   private renderGuild() {
+    // First decide: am I in a guild? Kick off the "my guild" lookup if we
+    // haven't tried yet — that one-call response also gives us the full
+    // detail view's data (members + proposals).
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (addr && this.myGuild === null && !this.myGuildLoading) {
+      this.myGuildLoading = true;
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading guild...</div>`;
+      void this.loadMyGuild();
+      return;
+    }
+    if (this.myGuildLoading) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading guild...</div>`;
+      return;
+    }
+    if (this.myGuild?.inGuild) {
+      this.renderMyGuildDetail();
+      return;
+    }
+    // Not in a guild — fall through to the create + browse list.
+    this.renderGuildBrowse();
+  }
+
+  private async loadMyGuild() {
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!addr) { this.myGuildLoading = false; this.myGuild = null; return; }
+    try {
+      const data = await fetchMyGuild(addr);
+      this.myGuild = data ?? { inGuild: false, guild: null, member: null, members: [], proposals: [] };
+    } catch (err) {
+      console.warn("[guild] my-guild lookup failed", err);
+      this.myGuild = { inGuild: false, guild: null, member: null, members: [], proposals: [] };
+    } finally {
+      this.myGuildLoading = false;
+      if (this.activeTab === "guild") this.renderGuild();
+    }
+  }
+
+  private renderGuildBrowse() {
     if (this.guilds.length === 0 && !this.guildsLoading) {
       this.guildsLoading = true;
       this.contentEl.innerHTML = `<div class="nd-empty">Loading guilds...</div>`;
@@ -669,6 +783,7 @@ export class NpcDialog {
       if (btn) btn.textContent = "Created!";
       this.guildsLoading = false;
       this.guilds = [];
+      this.myGuild = null; // force re-detect into the my-guild view
       setTimeout(() => this.renderGuild(), 1500);
     } else {
       if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Create"; }, 2500); }
@@ -686,9 +801,272 @@ export class NpcDialog {
       if (btn) btn.textContent = "Joined!";
       this.guildsLoading = false;
       this.guilds = [];
+      this.myGuild = null; // route into my-guild view on next render
       setTimeout(() => this.renderGuild(), 1500);
     } else {
       if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Join"; }, 2500); }
+    }
+  }
+
+  // ── My Guild detail view ──────────────────────────────────────
+
+  private renderMyGuildDetail() {
+    const my = this.myGuild;
+    if (!my || !my.inGuild || !my.guild || !my.member) {
+      this.renderGuildBrowse();
+      return;
+    }
+    const g = my.guild;
+    const me = my.member;
+    const isOfficer = me.rank === "Founder" || me.rank === "Officer";
+    const gid = Number(g.guildId);
+
+    let html = "";
+
+    // 1. Header card
+    html += `<div class="nd-shop-item" style="border-left:3px solid #44cc88">`;
+    html += `<div class="nd-shop-item-header">`;
+    html += `<span class="nd-shop-item-name" style="color:#44cc88">${esc(g.name)}</span>`;
+    html += `<span class="nd-shop-item-slot">Lvl ${g.level} · ${esc(String(g.status))}</span>`;
+    html += `</div>`;
+    html += `<div class="nd-shop-item-stats">${esc(me.rank)} · ${my.members.length} member${my.members.length === 1 ? "" : "s"} · ${g.treasury}g treasury</div>`;
+    if (g.description) html += `<div class="nd-shop-item-desc">${esc(g.description)}</div>`;
+    html += `<div class="nd-shop-item-footer">`;
+    html += `<button class="nd-btn" data-action="leave-guild" data-guild-id="${gid}" style="color:#ff6677;border-color:rgba(255,102,119,0.35);background:rgba(255,102,119,0.08)">Leave</button>`;
+    html += `</div></div>`;
+
+    // 2. Deposit
+    html += `<div class="nd-shop-item">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ffc24f">Deposit to Treasury</span></div>`;
+    html += `<div class="nd-shop-item-footer">`;
+    html += `<input class="nd-chat-input" type="number" min="1" placeholder="amount" id="nd-guild-deposit" style="flex:1" />`;
+    html += `<button class="nd-btn" data-action="deposit-guild" data-guild-id="${gid}">Deposit</button>`;
+    html += `</div></div>`;
+
+    // 3. Members
+    html += `<div class="nd-shop-item">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">Members</span><span class="nd-shop-item-slot">${my.members.length}</span></div>`;
+    for (const m of my.members) {
+      const isMe = m.address.toLowerCase() === me.address.toLowerCase();
+      html += `<div class="nd-shop-item-stats" style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">`;
+      html += `<span>${shortAddr(m.address)}${isMe ? " <span style='color:#44cc88'>(you)</span>" : ""}</span>`;
+      html += `<span style="color:#9ab">${esc(m.rank)} · ${m.contributedGold}g</span>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+
+    // 4. Invite (officer+ only)
+    if (isOfficer) {
+      html += `<div class="nd-shop-item">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#88aaff">Invite Member</span><span class="nd-shop-item-slot">Officer+</span></div>`;
+      html += `<div class="nd-shop-item-footer">`;
+      html += `<input class="nd-chat-input" type="text" placeholder="0x..." id="nd-guild-invite" maxlength="42" style="flex:1" />`;
+      html += `<button class="nd-btn" data-action="invite-guild" data-guild-id="${gid}">Invite</button>`;
+      html += `</div></div>`;
+    }
+
+    // 5 + 6. Proposals
+    const active = my.proposals.filter((p) => p.status === "active");
+    const past = my.proposals.filter((p) => p.status !== "active");
+
+    html += `<div class="nd-shop-item">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#cc66ff">Active Proposals</span><span class="nd-shop-item-slot">${active.length}</span></div>`;
+    if (active.length === 0) {
+      html += `<div class="nd-shop-item-desc" style="color:#778">None right now</div>`;
+    } else {
+      for (const p of active) {
+        const voted = this.votedProposalIds.has(p.proposalId);
+        const expired = p.timeRemaining <= 0;
+        const typeLabel = PROPOSAL_TYPE_LABELS[p.proposalType] ?? p.proposalType;
+        html += `<div style="border-top:1px solid rgba(204,102,255,0.18);padding-top:6px;margin-top:6px">`;
+        html += `<div style="display:flex;justify-content:space-between"><span style="color:#cc66ff">${esc(typeLabel)}</span><span style="color:#9ab;font-size:11px">${fmtTimeRemaining(p.timeRemaining)}</span></div>`;
+        html += `<div class="nd-shop-item-desc">${esc(p.description)}</div>`;
+        if (p.targetAddress && p.targetAddress !== "0x0000000000000000000000000000000000000000") {
+          html += `<div class="nd-shop-item-desc" style="font-size:11px">→ ${shortAddr(p.targetAddress)}${p.targetAmount ? ` · ${p.targetAmount}g` : ""}</div>`;
+        }
+        html += `<div style="display:flex;gap:6px;align-items:center;margin-top:4px">`;
+        html += `<span style="color:#7fd6be;font-size:11px">yes ${p.yesVotes}</span>`;
+        html += `<span style="color:#ff6677;font-size:11px">no ${p.noVotes}</span>`;
+        html += `<span style="flex:1"></span>`;
+        const dis = (voted || expired) ? " disabled" : "";
+        html += `<button class="nd-btn" data-action="vote-yes" data-proposal-id="${p.proposalId}" data-guild-id="${gid}"${dis} style="color:#7fd6be">${voted ? "Voted" : "Vote Yes"}</button>`;
+        html += `<button class="nd-btn" data-action="vote-no" data-proposal-id="${p.proposalId}" data-guild-id="${gid}"${dis} style="color:#ff6677">${voted ? "" : "Vote No"}</button>`;
+        html += `</div></div>`;
+      }
+    }
+    html += `</div>`;
+
+    // 7. Create proposal (officer+ only)
+    if (isOfficer) {
+      if (this.composeProposalOpen) {
+        html += `<div class="nd-shop-item" style="border-left:3px solid #cc66ff">`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#cc66ff">New Proposal</span></div>`;
+        html += `<select id="nd-prop-type" class="nd-chat-input" style="width:100%;margin-bottom:6px">`;
+        for (const t of PROPOSAL_TYPE_ORDER) {
+          const sel = t === this.composeProposalType ? " selected" : "";
+          html += `<option value="${t}"${sel}>${PROPOSAL_TYPE_LABELS[t]}</option>`;
+        }
+        html += `</select>`;
+        html += `<input class="nd-chat-input" type="text" id="nd-prop-desc" placeholder="Description" maxlength="200" style="width:100%;margin-bottom:6px" />`;
+        html += `<input class="nd-chat-input" type="text" id="nd-prop-target" placeholder="Target 0x... (optional)" maxlength="42" style="width:100%;margin-bottom:6px" />`;
+        html += `<input class="nd-chat-input" type="number" id="nd-prop-amount" placeholder="Amount (optional)" style="width:100%;margin-bottom:6px" />`;
+        html += `<div class="nd-shop-item-footer">`;
+        html += `<button class="nd-btn" data-action="cancel-propose">Cancel</button>`;
+        html += `<button class="nd-btn" data-action="submit-propose" data-guild-id="${gid}" style="color:#cc66ff">Submit</button>`;
+        html += `</div></div>`;
+      } else {
+        html += `<div class="nd-shop-item-footer" style="margin-top:6px">`;
+        html += `<button class="nd-btn" data-action="open-propose" style="color:#cc66ff;border-color:rgba(204,102,255,0.35);background:rgba(204,102,255,0.08)">+ New Proposal</button>`;
+        html += `</div>`;
+      }
+    }
+
+    // Past proposals (collapsed-style — just a summary line for each)
+    if (past.length > 0) {
+      html += `<div class="nd-shop-item">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#778">Past</span><span class="nd-shop-item-slot">${past.length}</span></div>`;
+      for (const p of past) {
+        const typeLabel = PROPOSAL_TYPE_LABELS[p.proposalType] ?? p.proposalType;
+        html += `<div class="nd-shop-item-stats" style="display:flex;justify-content:space-between;padding:2px 0">`;
+        html += `<span>${esc(typeLabel)}</span>`;
+        html += `<span style="color:#9ab">${esc(p.status)} · ${p.yesVotes}/${p.noVotes}</span>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    this.contentEl.innerHTML = `<div class="nd-shop-grid">${html}</div>`;
+
+    // Stop key events from bleeding through to the world keybindings
+    for (const id of ["nd-guild-deposit", "nd-guild-invite", "nd-prop-desc", "nd-prop-target", "nd-prop-amount"]) {
+      const el = this.contentEl.querySelector(`#${id}`) as HTMLInputElement | null;
+      if (el) {
+        el.addEventListener("keydown", (e) => e.stopPropagation());
+        el.addEventListener("keyup", (e) => e.stopPropagation());
+      }
+    }
+    const sel = this.contentEl.querySelector("#nd-prop-type") as HTMLSelectElement | null;
+    if (sel) {
+      sel.addEventListener("change", () => { this.composeProposalType = sel.value as GuildProposalType; });
+    }
+  }
+
+  private async handleLeaveGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const btn = this.contentEl.querySelector(`[data-action='leave-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn && btn.dataset.confirming !== "1") {
+      // First click: arm confirmation
+      btn.dataset.confirming = "1";
+      btn.textContent = "Confirm Leave?";
+      setTimeout(() => {
+        if (btn.dataset.confirming === "1") { btn.dataset.confirming = ""; btn.textContent = "Leave"; }
+      }, 3000);
+      return;
+    }
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await leaveGuild(token, guildId, addr);
+    if (result.ok) {
+      if (btn) btn.textContent = "Left";
+      this.myGuild = null;
+      this.guilds = [];
+      this.guildsLoading = false;
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; btn.dataset.confirming = ""; setTimeout(() => { btn.textContent = "Leave"; }, 2500); }
+    }
+  }
+
+  private async handleDepositGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const input = this.contentEl.querySelector("#nd-guild-deposit") as HTMLInputElement | null;
+    const amount = Math.floor(Number(input?.value ?? 0));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const btn = this.contentEl.querySelector(`[data-action='deposit-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await depositToGuild(token, guildId, addr, amount);
+    if (result.ok) {
+      if (btn) btn.textContent = "Deposited!";
+      this.myGuild = null;
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Deposit"; }, 2500); }
+    }
+  }
+
+  private async handleInviteGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const input = this.contentEl.querySelector("#nd-guild-invite") as HTMLInputElement | null;
+    const target = (input?.value ?? "").trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(target)) {
+      if (input) { input.style.borderColor = "#ff6677"; setTimeout(() => { input.style.borderColor = ""; }, 1500); }
+      return;
+    }
+    const btn = this.contentEl.querySelector(`[data-action='invite-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await inviteToGuild(token, guildId, target);
+    if (result.ok) {
+      if (btn) btn.textContent = "Invited!";
+      if (input) input.value = "";
+      setTimeout(() => { if (btn) { btn.textContent = "Invite"; btn.disabled = false; } }, 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Invite"; }, 2500); }
+    }
+  }
+
+  private async handleVote(proposalId: number, guildId: number, vote: boolean) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const action = vote ? "vote-yes" : "vote-no";
+    const btn = this.contentEl.querySelector(`[data-action='${action}'][data-proposal-id='${proposalId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await voteOnGuildProposal(token, guildId, { proposalId, voterAddress: addr, vote });
+    if (result.ok) {
+      this.votedProposalIds.add(proposalId);
+      saveVotedProposals(this.votedProposalIds);
+      this.myGuild = null;
+      setTimeout(() => this.renderGuild(), 1200);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = vote ? "Vote Yes" : "Vote No"; }, 2500); }
+    }
+  }
+
+  private async handleSubmitProposal(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const descEl = this.contentEl.querySelector("#nd-prop-desc") as HTMLInputElement | null;
+    const targetEl = this.contentEl.querySelector("#nd-prop-target") as HTMLInputElement | null;
+    const amountEl = this.contentEl.querySelector("#nd-prop-amount") as HTMLInputElement | null;
+    const description = (descEl?.value ?? "").trim();
+    if (!description) {
+      if (descEl) { descEl.style.borderColor = "#ff6677"; setTimeout(() => { descEl.style.borderColor = ""; }, 1500); }
+      return;
+    }
+    const targetAddress = (targetEl?.value ?? "").trim();
+    const targetAmount = Math.floor(Number(amountEl?.value ?? 0)) || undefined;
+    const btn = this.contentEl.querySelector(`[data-action='submit-propose'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await proposeGuildAction(token, guildId, {
+      proposerAddress: addr,
+      proposalType: this.composeProposalType,
+      description,
+      targetAddress: targetAddress || undefined,
+      targetAmount,
+    });
+    if (result.ok) {
+      if (btn) btn.textContent = "Submitted!";
+      this.composeProposalOpen = false;
+      this.myGuild = null;
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Submit"; }, 2500); }
     }
   }
 
