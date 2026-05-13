@@ -168,6 +168,9 @@ export interface Entity {
   skinColor?: string;
   hairStyle?: string;
   eyeColor?: string;
+  /** Optional alternate names this NPC also responds to. Used by the quest
+   * matcher when the spawned `name` differs from a quest's `npcId`. */
+  aliases?: string[];
   /** Live computed stats (players + mobs/bosses). */
   stats?: CharacterStats;
   /** Equipped item state by slot (players only). */

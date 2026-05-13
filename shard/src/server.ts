@@ -25,7 +25,7 @@ import { registerMiningRoutes } from "./professions/mining.js";
 import { spawnOreNodes } from "./resources/oreSpawner.js";
 import { registerProfessionRoutes } from "./professions/professions.js";
 import { registerCraftingRoutes } from "./professions/crafting.js";
-import { registerQuestRoutes } from "./social/questSystem.js";
+import { auditQuestNpcMappings, registerQuestRoutes } from "./social/questSystem.js";
 import { flushAllPendingQuests } from "./social/questPersistence.js";
 import { registerHerbalismRoutes } from "./professions/herbalism.js";
 import { spawnFlowerNodes } from "./resources/flowerSpawner.js";
@@ -78,6 +78,7 @@ import { registerWebPushRoutes } from "./social/webPushRoutes.js";
 import { initWebPushAlerts } from "./social/webPushService.js";
 import { registerGoldPurchaseRoutes } from "./economy/goldPurchaseRoutes.js";
 import { registerNpcDialogueRoutes } from "./social/npcDialogueRoutes.js";
+import { registerNpcActionRoutes } from "./social/npcActionRoutes.js";
 import { registerQuestGraphRoutes } from "./social/questGraphRoutes.js";
 import { initTelegramBot } from "./social/telegramNotifications.js";
 import { initWorldMapStore } from "./world/worldMapStore.js";
@@ -1016,6 +1017,7 @@ registerProfessionRoutes(server);
 registerCraftingRoutes(server);
 registerQuestRoutes(server);
 registerNpcDialogueRoutes(server);
+registerNpcActionRoutes(server);
 registerQuestGraphRoutes(server);
 registerHerbalismRoutes(server);
 registerAlchemyRoutes(server);
@@ -1063,6 +1065,10 @@ registerWebPushRoutes(server);
 initDungeonLootTables();
 startGuildNameCacheRefresh(GUILD_CACHE_REFRESH_INTERVAL_MS);
 spawnNpcs();
+// Surface any quest ↔ NPC name drift now, before players hit a silent fallback.
+auditQuestNpcMappings(
+  Array.from(getAllEntities().values()).map((e) => ({ name: e.name, aliases: e.aliases })),
+);
 if (SKIP_MERCHANT_BOOTSTRAP) {
   server.log.info("[merchant] Skipping merchant bootstrap in LOCAL_TEST_MODE=core");
 } else {

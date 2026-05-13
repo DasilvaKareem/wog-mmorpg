@@ -4,6 +4,8 @@ import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getEntity } from "../world/zoneRuntime.js";
 import { isQuestNpc } from "./questSystem.js";
 import {
+  buildRateLimitedReply,
+  checkNpcDialogueRateLimit,
   generateNpcDialogueResponse,
   type NpcDialogueHistoryEntry,
 } from "./npcDialogueService.js";
@@ -62,6 +64,13 @@ export function registerNpcDialogueRoutes(server: FastifyInstance): void {
     if (!DIALOGUE_NPC_TYPES.has(npc.type) && npc.name !== "Scout Kaela") {
       reply.code(400);
       return { error: "This NPC has nothing to say" };
+    }
+
+    // Cheap pre-check so a hot loop can't burn LLM tokens. Skips the model
+    // entirely once the per-minute or per-day cap is exceeded.
+    const rl = await checkNpcDialogueRateLimit(player.walletAddress);
+    if (!rl.allowed) {
+      return reply.send(buildRateLimitedReply(npc));
     }
 
     const response = await generateNpcDialogueResponse({

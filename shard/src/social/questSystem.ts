@@ -3416,19 +3416,104 @@ for (const quest of QUEST_CATALOG) {
   }
 }
 
+/** Alias-aware NPC identity. Accepts either a bare name (legacy callers) or
+ * an entity-like object so quests can match `name` OR any entry in
+ * `aliases`. */
+export type NpcIdentity = string | { name: string; aliases?: string[] };
+
+function identityNames(identity: NpcIdentity): string[] {
+  if (typeof identity === "string") return [identity];
+  return identity.aliases && identity.aliases.length > 0
+    ? [identity.name, ...identity.aliases]
+    : [identity.name];
+}
+
+/** Returns true if `npcId` matches the NPC's name or any of its aliases. */
+export function npcMatchesQuestId(identity: NpcIdentity, npcId: string): boolean {
+  return identityNames(identity).includes(npcId);
+}
+
 /**
- * Get all quests available from an NPC (by NPC name)
+ * Get all quests available from an NPC (by name or entity with aliases).
  */
-export function getQuestsForNpc(npcName: string): Quest[] {
-  return QUEST_CATALOG.filter((q) => q.npcId === npcName);
+export function getQuestsForNpc(identity: NpcIdentity): Quest[] {
+  const names = identityNames(identity);
+  return QUEST_CATALOG.filter((q) => names.includes(q.npcId));
 }
 
 /** Set of all NPC names that have at least one quest in the catalog. */
 const QUEST_NPC_NAMES: ReadonlySet<string> = new Set(QUEST_CATALOG.map((q) => q.npcId));
 
-/** Returns true if an entity has quests in the catalog (any NPC type). */
-export function isQuestNpc(entity: { name: string }): boolean {
-  return QUEST_NPC_NAMES.has(entity.name);
+/** Returns true if an entity has quests in the catalog (any NPC type).
+ * Considers both the entity's `name` and any `aliases`. */
+export function isQuestNpc(entity: { name: string; aliases?: string[] }): boolean {
+  if (QUEST_NPC_NAMES.has(entity.name)) return true;
+  return (entity.aliases ?? []).some((alias) => QUEST_NPC_NAMES.has(alias));
+}
+
+/**
+ * Boot-time audit: emit a console.warn for every quest whose `npcId` is not
+ * matched by any spawned NPC's `name` or `aliases`. Surfaces silent data drift
+ * that would otherwise cause NPCs to fall back to generic chatter.
+ */
+export function auditQuestNpcMappings(
+  spawnedNpcs: Array<{ name: string; aliases?: string[] }>,
+): void {
+  const knownNames = new Set<string>();
+  for (const npc of spawnedNpcs) {
+    knownNames.add(npc.name);
+    for (const alias of npc.aliases ?? []) knownNames.add(alias);
+  }
+
+  const orphans: Array<{ questId: string; npcId: string }> = [];
+  for (const quest of QUEST_CATALOG) {
+    if (!knownNames.has(quest.npcId)) {
+      orphans.push({ questId: quest.id, npcId: quest.npcId });
+    }
+  }
+
+  if (orphans.length === 0) {
+    console.log(`[npc-audit] All ${QUEST_CATALOG.length} quests resolve to a spawned NPC.`);
+    return;
+  }
+
+  const knownList = Array.from(knownNames);
+  for (const o of orphans) {
+    const suggestion = closestName(o.npcId, knownList);
+    const hint = suggestion ? ` (closest spawned name: "${suggestion}" — consider adding to npc.aliases)` : "";
+    console.warn(`[npc-audit] Quest "${o.questId}" targets npcId "${o.npcId}" — no spawned NPC matches.${hint}`);
+  }
+}
+
+/** Crude Levenshtein for the audit suggestion. Small inputs, fine. */
+function closestName(target: string, candidates: string[]): string | undefined {
+  if (candidates.length === 0) return undefined;
+  let best = candidates[0];
+  let bestDist = levenshtein(target.toLowerCase(), best.toLowerCase());
+  for (let i = 1; i < candidates.length; i++) {
+    const d = levenshtein(target.toLowerCase(), candidates[i].toLowerCase());
+    if (d < bestDist) { bestDist = d; best = candidates[i]; }
+  }
+  // Only suggest when reasonably similar — otherwise the hint is noise.
+  if (bestDist > Math.max(4, target.length / 2)) return undefined;
+  return best;
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  let curr = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[b.length];
 }
 
 /**
@@ -3474,12 +3559,12 @@ export function isQuestAvailableForPlayer(
  * Get quests available to a specific player from an NPC
  */
 export function getAvailableQuestsForPlayer(
-  npcName: string,
+  identity: NpcIdentity,
   completedQuestIds: string[],
   activeQuestIds: string[],
   storyFlags: string[] = [],
 ): Quest[] {
-  const allNpcQuests = getQuestsForNpc(npcName);
+  const allNpcQuests = getQuestsForNpc(identity);
 
   return allNpcQuests.filter((quest) => {
     // Filter out already active or completed quests

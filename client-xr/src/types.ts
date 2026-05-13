@@ -339,11 +339,60 @@ export interface NpcDialogueMessage {
   content: string;
 }
 
+export type NpcDialogueIntent =
+  | "greeting"
+  | "offer_quest"
+  | "quest_progress"
+  | "quest_turn_in"
+  | "tutorial"
+  | "lore"
+  | "redirect"
+  | "refuse";
+
+export type NpcActionKind =
+  | "accept_quest"
+  | "complete_quest"
+  | "open_shop"
+  | "open_quests_tab"
+  | "open_skills"
+  | "farewell";
+
+export interface NpcActionBinding {
+  kind: NpcActionKind;
+  questId?: string;
+}
+
+export interface SuggestedNpcAction {
+  label: string;
+  prompt: string;
+  /** When present, the client renders a primary one-click button that
+   * dispatches to POST /npc/action instead of round-tripping through the LLM. */
+  action?: NpcActionBinding;
+}
+
+export interface NpcDialogueQuestContext {
+  availableQuestIds: string[];
+  activeQuestIds: string[];
+  completableQuestIds: string[];
+}
+
 export interface NpcDialogueResponse {
   reply: string;
+  /** Back-compat alias from older server versions. */
   response?: string;
   npcName?: string;
   emotion?: string;
+  provider?: "deterministic" | "llm";
+  intent?: NpcDialogueIntent;
+  referencesQuestId?: string;
+  suggestedActions?: SuggestedNpcAction[];
+  questContext?: NpcDialogueQuestContext;
+  persona?: {
+    id?: string;
+    role?: string;
+    archetype?: string;
+    tone?: string;
+  };
 }
 
 export interface TechniqueInfo {

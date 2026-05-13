@@ -694,6 +694,17 @@ export async function sendNpcDialogue(
   });
 }
 
+export async function sendNpcAction(
+  token: string,
+  npcEntityId: string,
+  entityId: string,
+  action: import("./types.js").NpcActionBinding,
+): Promise<{ ok: boolean; data?: { ok: boolean; result?: Record<string, unknown>; dialogue: NpcDialogueResponse }; error?: string }> {
+  return postJsonWithFallback("/npc/action", token, {
+    npcEntityId, entityId, action,
+  });
+}
+
 export async function fetchAvailableTechniques(entityId: string): Promise<TechniqueInfo[] | null> {
   const data = await fetchJsonWithFallback<{ techniques: TechniqueInfo[] }>(`/techniques/available/${entityId}`);
   return data?.techniques ?? null;

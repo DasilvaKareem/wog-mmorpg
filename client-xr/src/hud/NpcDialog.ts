@@ -4,9 +4,10 @@ import type {
   GuildProposalType, AuctionListing,
   ProfessionEntry, EnchantmentEntry, ArenaInfo, PvpLeaderboardEntry,
   InventoryItem, SellPriceEntry,
+  AvailableQuest, ActiveQuest, QuestObjective, QuestRewards,
 } from "../types.js";
 import {
-  fetchShopInventory, buyShopItem, sendNpcDialogue,
+  fetchShopInventory, buyShopItem, sendNpcDialogue, sendNpcAction,
   fetchAvailableTechniques, learnTechnique,
   fetchRecipes, craftAtStation,
   fetchGuilds, createGuild, joinGuild,
@@ -18,6 +19,7 @@ import {
   fetchProfessionCatalog, learnProfession,
   fetchEnchantingCatalog, applyEnchantment,
   fetchInventory, fetchSellPrices, sellShopItem,
+  fetchZoneQuests, fetchQuestLog, acceptQuest, completeQuest,
 } from "../api.js";
 import type { ActiveBattle, QueueStatusEntry, BattleDetails } from "../api.js";
 
@@ -136,6 +138,33 @@ interface NpcDialogCallbacks {
 
 const AUCTION_POLL_INTERVAL_MS = 5000;
 
+const QUEST_OBJECTIVE_ICONS: Record<string, string> = {
+  kill: "\u2694",
+  talk: "\u{1F4AC}",
+  gather: "\u2618",
+  craft: "\u2692",
+};
+
+function formatQuestObjective(obj: QuestObjective): string {
+  const target = obj.targetMobName ?? obj.targetNpcName ?? obj.targetItemName ?? "";
+  const n = obj.count;
+  switch (obj.type) {
+    case "kill": return `Slay ${n} ${target || "enemies"}`;
+    case "talk": return `Speak with ${target || "the target"}`;
+    case "gather": return `Gather ${n} ${target || "items"}`;
+    case "craft": return `Craft ${n} ${target || "items"}`;
+    default: return `${obj.type} ${n} ${target}`.trim();
+  }
+}
+
+function formatQuestRewards(r: QuestRewards): string {
+  const parts: string[] = [];
+  if (r.copper > 0) parts.push(`${r.copper}c`);
+  if (r.xp > 0) parts.push(`${r.xp} XP`);
+  if (r.items && r.items.length > 0) parts.push(`${r.items.length} item${r.items.length === 1 ? "" : "s"}`);
+  return parts.join(" · ") || "—";
+}
+
 export class NpcDialog {
   private overlay: HTMLDivElement;
   private container: HTMLDivElement;
@@ -148,11 +177,18 @@ export class NpcDialog {
   private entity: Entity | null = null;
   private activeTab = "";
   private chatHistory: NpcDialogueMessage[] = [];
+  /** Latest dialogue response from /npc/dialogue — holds quick-reply suggestions and quest context. */
+  private latestDialogueResponse: import("../types.js").NpcDialogueResponse | null = null;
   // Shop
   private shopItems: ShopItem[] = [];
   private shopLoading = false;
   private dialogSending = false;
   private playerGold: number | null = null;
+  // Quests tab (quest-giver)
+  private npcAvailableQuests: AvailableQuest[] = [];
+  private npcActiveQuests: ActiveQuest[] = [];
+  private npcQuestsLoading = false;
+  private npcQuestsLoaded = false;
   // Sell tab
   private sellPrices: SellPriceEntry[] = [];
   private merchantGold = 0;
@@ -263,6 +299,9 @@ export class NpcDialog {
       const action = btn.dataset.action;
       if (action === "buy" && btn.dataset.tokenId) void this.handleBuy(Number(btn.dataset.tokenId));
       if (action === "sell" && btn.dataset.tokenId && btn.dataset.qty) void this.handleSell(Number(btn.dataset.tokenId), Number(btn.dataset.qty));
+      if (action === "accept-quest" && btn.dataset.questId) void this.handleAcceptQuest(btn.dataset.questId);
+      if (action === "turn-in-quest" && btn.dataset.questId) void this.handleTurnInQuest(btn.dataset.questId);
+      if (action === "open-quest-log") { this.callbacks.onShowQuests(); }
       if (action === "learn" && btn.dataset.techniqueId) void this.handleLearn(btn.dataset.techniqueId);
       if (action === "craft" && btn.dataset.recipeId) void this.handleCraft(btn.dataset.recipeId);
       if (action === "create-guild") void this.handleCreateGuild();
@@ -309,6 +348,7 @@ export class NpcDialog {
   open(entity: Entity) {
     this.entity = entity;
     this.chatHistory = [];
+    this.latestDialogueResponse = null;
     this.shopItems = [];
     this.playerGold = null;
     this.shopLoading = false;
@@ -319,6 +359,10 @@ export class NpcDialog {
     this.sellInventory = [];
     this.sellLoading = false;
     this.sellLoaded = false;
+    this.npcAvailableQuests = [];
+    this.npcActiveQuests = [];
+    this.npcQuestsLoading = false;
+    this.npcQuestsLoaded = false;
     this.techniques = [];
     this.techniquesLoading = false;
     this.recipes = [];
@@ -376,6 +420,7 @@ export class NpcDialog {
     this.overlay.style.display = "none";
     this.entity = null;
     this.chatHistory = [];
+    this.latestDialogueResponse = null;
     this.stopArenaPolling();
     this.stopAuctionPolling();
   }
@@ -465,7 +510,11 @@ export class NpcDialog {
       msgs = `<div class="nd-empty">Start a conversation...</div>`;
     }
 
-    this.contentEl.innerHTML = `<div class="nd-chat-messages" id="nd-chat-scroll">${msgs}</div>`;
+    const bannerHtml = this.renderQuestBanner(accent);
+    const actionsHtml = this.renderSuggestedActions(accent);
+
+    this.contentEl.innerHTML = `${bannerHtml}<div class="nd-chat-messages" id="nd-chat-scroll">${msgs}</div>${actionsHtml}`;
+    this.bindDialogQuickActions();
 
     const hasChar = !!this.callbacks.getOwnEntityId();
     if (hasChar) {
@@ -506,6 +555,114 @@ export class NpcDialog {
     if (scroll) scroll.scrollTop = scroll.scrollHeight;
   }
 
+  private renderQuestBanner(accent: string): string {
+    const qc = this.latestDialogueResponse?.questContext;
+    if (!qc) return "";
+    const available = qc.availableQuestIds?.length ?? 0;
+    const active = qc.activeQuestIds?.length ?? 0;
+    const ready = qc.completableQuestIds?.length ?? 0;
+    if (available + active + ready === 0) return "";
+    const chips: string[] = [];
+    if (ready > 0) chips.push(`<span class="nd-quest-chip nd-quest-ready">${ready} ready to turn in</span>`);
+    if (available > 0) chips.push(`<span class="nd-quest-chip nd-quest-available">${available} available</span>`);
+    if (active > 0) chips.push(`<span class="nd-quest-chip nd-quest-active">${active} in progress</span>`);
+    const canSwitchToQuests = this.entity?.type === "quest-giver";
+    const viewBtn = canSwitchToQuests
+      ? `<button class="nd-quest-banner-btn" data-action="open-quests" style="border-color:${accent};color:${accent}">View Quests →</button>`
+      : "";
+    return `<div class="nd-quest-banner">${chips.join("")}${viewBtn}</div>`;
+  }
+
+  private renderSuggestedActions(accent: string): string {
+    if (this.dialogSending) return "";
+    const actions = this.latestDialogueResponse?.suggestedActions ?? [];
+    if (actions.length === 0) return "";
+    const buttons = actions.map((a, i) => {
+      const label = esc(a.label || a.prompt || "Ask");
+      if (a.action) {
+        // Primary one-click button — accent-filled, hits /npc/action.
+        return `<button class="nd-action-primary" data-action="primary-action" data-idx="${i}" style="background:${accent};border-color:${accent};color:#0b0f18">${label}</button>`;
+      }
+      return `<button class="nd-quick-reply" data-action="quick-reply" data-idx="${i}" style="border-color:${accent};color:${accent}">${label}</button>`;
+    }).join("");
+    return `<div class="nd-quick-replies">${buttons}</div>`;
+  }
+
+  private bindDialogQuickActions() {
+    const banner = this.contentEl.querySelector('[data-action="open-quests"]') as HTMLButtonElement | null;
+    if (banner) {
+      banner.addEventListener("click", () => this.switchTab("quests"));
+    }
+    const quickReplies = this.contentEl.querySelectorAll<HTMLButtonElement>('[data-action="quick-reply"]');
+    quickReplies.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.idx ?? "-1");
+        const action = this.latestDialogueResponse?.suggestedActions?.[idx];
+        if (!action) return;
+        void this.handleDialogSend(action.prompt);
+      });
+    });
+    const primaryButtons = this.contentEl.querySelectorAll<HTMLButtonElement>('[data-action="primary-action"]');
+    primaryButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.idx ?? "-1");
+        const sug = this.latestDialogueResponse?.suggestedActions?.[idx];
+        if (!sug?.action) return;
+        void this.handleNpcAction(sug);
+      });
+    });
+  }
+
+  private async handleNpcAction(sug: import("../types.js").SuggestedNpcAction) {
+    if (!this.entity || !sug.action || this.dialogSending) return;
+    const { kind } = sug.action;
+
+    // Client-only tab hints — no server roundtrip.
+    if (kind === "open_quests_tab") { this.switchTab("quests"); return; }
+    if (kind === "open_skills") { this.switchTab("skills"); return; }
+    if (kind === "open_shop") { this.switchTab("shop"); return; }
+
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+
+    // Render the player's intent in chat, then show typing while the server
+    // dispatches the action and synthesizes the follow-up beat.
+    this.chatHistory.push({ role: "player", content: sug.prompt });
+    this.dialogSending = true;
+    this.latestDialogueResponse = null;
+    this.renderDialog();
+
+    const res = await sendNpcAction(token, this.entity.id, entityId, sug.action);
+    this.dialogSending = false;
+    if (res.ok && res.data) {
+      const dlg = res.data.dialogue;
+      const reply = dlg?.reply ?? dlg?.response ?? "";
+      this.chatHistory.push({ role: "npc", content: reply || "(no response)" });
+      if (dlg) this.latestDialogueResponse = dlg;
+      // If the action affected quest state, force the quest tab to re-fetch
+      // on next view by clearing its cached payload.
+      if (kind === "accept_quest" || kind === "complete_quest") {
+        this.npcQuestsLoaded = false;
+        this.npcAvailableQuests = [];
+        this.npcActiveQuests = [];
+      }
+    } else {
+      this.chatHistory.push({ role: "npc", content: res.error ?? "(no response)" });
+    }
+    this.renderDialog();
+  }
+
+  private switchTab(tabId: string) {
+    if (!this.entity) return;
+    const tabBtn = this.tabBar.querySelector<HTMLButtonElement>(`[data-tab="${tabId}"]`);
+    if (!tabBtn) return;
+    this.tabBar.querySelectorAll(".nd-tab").forEach((b) => b.classList.remove("active"));
+    tabBtn.classList.add("active");
+    this.activeTab = tabId;
+    this.renderContent();
+  }
+
   private async handleDialogSend(message: string) {
     if (!this.entity || this.dialogSending) return;
     const token = await this.callbacks.getAuthToken();
@@ -514,15 +671,21 @@ export class NpcDialog {
 
     if (message) this.chatHistory.push({ role: "player", content: message });
     this.dialogSending = true;
+    // Player is sending a new message — last NPC suggestions are stale until the
+    // next response lands. Clear them so the quick-reply row hides during the
+    // typing indicator.
+    this.latestDialogueResponse = null;
     this.renderDialog();
 
     const result = await sendNpcDialogue(token, this.entity.id, entityId, message, this.chatHistory.slice(-10));
     this.dialogSending = false;
     if (result.ok && result.data) {
-      const text = (result.data as any).reply ?? (result.data as any).response ?? "";
-      this.chatHistory.push({ role: "npc", content: text || "(no response)" });
+      const reply = result.data.reply ?? result.data.response ?? "";
+      this.chatHistory.push({ role: "npc", content: reply || "(no response)" });
+      this.latestDialogueResponse = result.data;
     } else {
       this.chatHistory.push({ role: "npc", content: result.error ?? "(no response)" });
+      this.latestDialogueResponse = null;
     }
     this.renderDialog();
   }
@@ -1950,8 +2113,121 @@ export class NpcDialog {
   // ── Quests view ────────────────────────────────────────────────
 
   private renderQuests() {
-    this.contentEl.innerHTML = `<div class="nd-empty">Quest log opened in side panel.</div>`;
-    this.callbacks.onShowQuests();
+    const hasChar = !!this.callbacks.getOwnEntityId();
+    if (!hasChar) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Deploy a character to see quests</div>`;
+      this.footerEl.innerHTML = "";
+      return;
+    }
+    if (!this.npcQuestsLoaded && !this.npcQuestsLoading) {
+      this.npcQuestsLoading = true;
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading quests...</div>`;
+      void this.loadNpcQuests();
+      return;
+    }
+    if (this.npcQuestsLoading) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading quests...</div>`;
+      return;
+    }
+
+    let html = "";
+
+    if (this.npcActiveQuests.length > 0) {
+      html += `<div class="nd-sell-header"><span>In Progress</span><span class="nd-sell-sub">turn in here</span></div>`;
+      for (const q of this.npcActiveQuests) {
+        const icon = QUEST_OBJECTIVE_ICONS[q.objective.type] ?? "?";
+        html += `<div class="nd-shop-item">`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${icon} ${esc(q.title)}</span><span class="nd-shop-item-slot">${q.complete ? "Ready" : `${q.progress}/${q.required}`}</span></div>`;
+        if (q.description) html += `<div class="nd-shop-item-desc">${esc(q.description)}</div>`;
+        html += `<div class="nd-shop-item-stats">${esc(formatQuestObjective(q.objective))}</div>`;
+        html += `<div class="nd-shop-item-footer"><span class="nd-shop-item-price">${esc(formatQuestRewards(q.rewards))}</span>`;
+        if (q.complete) {
+          html += `<button class="nd-btn" data-action="turn-in-quest" data-quest-id="${esc(q.questId)}">Turn In</button>`;
+        } else {
+          html += `<span class="nd-shop-item-stock">${q.progress}/${q.required}</span>`;
+        }
+        html += `</div></div>`;
+      }
+    }
+
+    if (this.npcAvailableQuests.length > 0) {
+      html += `<div class="nd-sell-header"><span>Available</span><span class="nd-sell-sub">${this.npcAvailableQuests.length} quest${this.npcAvailableQuests.length === 1 ? "" : "s"}</span></div>`;
+      for (const q of this.npcAvailableQuests) {
+        const icon = QUEST_OBJECTIVE_ICONS[q.objective.type] ?? "?";
+        html += `<div class="nd-shop-item">`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${icon} ${esc(q.title)}</span><span class="nd-shop-item-slot">${esc(q.objective.type)}</span></div>`;
+        if (q.description) html += `<div class="nd-shop-item-desc">${esc(q.description)}</div>`;
+        html += `<div class="nd-shop-item-stats">${esc(formatQuestObjective(q.objective))}</div>`;
+        html += `<div class="nd-shop-item-footer"><span class="nd-shop-item-price">${esc(formatQuestRewards(q.rewards))}</span>`;
+        html += `<button class="nd-btn" data-action="accept-quest" data-quest-id="${esc(q.questId)}">Accept</button>`;
+        html += `</div></div>`;
+      }
+    }
+
+    if (!html) {
+      html = `<div class="nd-empty">${esc(this.entity?.name ?? "This NPC")} has nothing for you right now.</div>`;
+    }
+
+    html += `<div class="nd-quest-footer-link"><a href="#" data-action="open-quest-log">Open full quest log</a></div>`;
+    this.contentEl.innerHTML = `<div class="nd-shop-grid">${html}</div>`;
+    this.footerEl.innerHTML = "";
+  }
+
+  private async loadNpcQuests() {
+    if (!this.entity) { this.npcQuestsLoading = false; return; }
+    const playerId = this.callbacks.getOwnEntityId();
+    const wallet = this.callbacks.getOwnInventoryWallet?.() ?? this.callbacks.getOwnWalletAddress();
+    const zoneId = this.entity.zoneId;
+    if (!playerId || !zoneId) {
+      this.npcQuestsLoading = false;
+      this.npcQuestsLoaded = true;
+      return;
+    }
+    const [zone, log] = await Promise.all([
+      fetchZoneQuests(zoneId, playerId),
+      wallet ? fetchQuestLog(wallet) : Promise.resolve(null),
+    ]);
+    const npcId = this.entity.id;
+    this.npcAvailableQuests = (zone?.quests ?? []).filter((q) => q.npcEntityId === npcId);
+    this.npcActiveQuests = (log?.activeQuests ?? []).filter((q) => q.npcEntityId === npcId);
+    this.npcQuestsLoading = false;
+    this.npcQuestsLoaded = true;
+    if (this.activeTab === "quests") this.renderQuests();
+  }
+
+  private async handleAcceptQuest(questId: string) {
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+    const btn = this.contentEl.querySelector(`[data-action="accept-quest"][data-quest-id="${questId}"]`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await acceptQuest(token, entityId, questId);
+    if (result.ok) {
+      this.callbacks.notify?.(`Quest accepted`, "success");
+      this.npcQuestsLoaded = false;
+      void this.loadNpcQuests();
+    } else {
+      this.callbacks.notify?.(result.error ?? "Could not accept quest", "error");
+      if (btn) { btn.textContent = "Failed"; setTimeout(() => this.renderQuests(), 1500); }
+    }
+  }
+
+  private async handleTurnInQuest(questId: string) {
+    if (!this.entity) return;
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+    const btn = this.contentEl.querySelector(`[data-action="turn-in-quest"][data-quest-id="${questId}"]`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await completeQuest(token, entityId, questId, this.entity.id);
+    if (result.ok) {
+      this.callbacks.notify?.(`Quest complete!`, "success");
+      this.npcQuestsLoaded = false;
+      void this.loadNpcQuests();
+    } else {
+      this.callbacks.notify?.(result.error ?? "Could not turn in quest", "error");
+      if (btn) { btn.textContent = "Failed"; setTimeout(() => this.renderQuests(), 1500); }
+    }
   }
 
   // ── Styles ─────────────────────────────────────────────────────
@@ -2047,6 +2323,58 @@ export class NpcDialog {
       .nd-msg-name { display: block; font-size: 10px; font-weight: bold; margin-bottom: 2px; }
       .nd-msg-text { display: block; font-size: 12px; color: #dde; line-height: 1.5; }
 
+      /* Quest banner + quick replies */
+      .nd-quest-banner {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+        padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,0.06);
+      }
+      .nd-quest-chip {
+        font: bold 10px monospace; letter-spacing: 0.5px;
+        padding: 2px 8px; border-radius: 10px;
+      }
+      .nd-quest-ready { background: rgba(255, 204, 68, 0.18); color: #ffcc44; }
+      .nd-quest-available { background: rgba(68, 255, 136, 0.15); color: #4f8; }
+      .nd-quest-active { background: rgba(102, 187, 255, 0.15); color: #66bbff; }
+      .nd-quest-banner-btn {
+        margin-left: auto;
+        background: transparent;
+        border: 1px solid #4f8;
+        color: #4f8;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font: bold 11px monospace;
+        cursor: pointer;
+      }
+      .nd-quest-banner-btn:hover { background: rgba(68, 255, 136, 0.12); }
+
+      .nd-quick-replies {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        padding: 4px 16px 10px;
+      }
+      .nd-quick-reply {
+        background: transparent;
+        border: 1px solid #66bbff;
+        color: #66bbff;
+        padding: 4px 10px;
+        border-radius: 14px;
+        font: 11px monospace;
+        cursor: pointer;
+        transition: background 0.12s;
+      }
+      .nd-quick-reply:hover { background: rgba(102, 187, 255, 0.12); }
+      .nd-action-primary {
+        background: #66bbff;
+        border: 1px solid #66bbff;
+        color: #0b0f18;
+        padding: 5px 14px;
+        border-radius: 14px;
+        font: bold 11px monospace;
+        cursor: pointer;
+        transition: filter 0.12s;
+      }
+      .nd-action-primary:hover { filter: brightness(1.15); }
+      .nd-action-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
       .nd-chat-input-row {
         display: flex;
         gap: 6px;
@@ -2115,6 +2443,8 @@ export class NpcDialog {
       }
       .nd-sell-header b { color: #ffcc00; }
       .nd-sell-sub { color: #778; font-size: 10px; font-style: italic; }
+      .nd-quest-footer-link { padding: 10px 16px; text-align: center; font-size: 11px; }
+      .nd-quest-footer-link a { color: #66bbff; text-decoration: underline; cursor: pointer; }
 
       .nd-btn {
         margin-left: auto;

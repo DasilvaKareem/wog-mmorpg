@@ -1,5 +1,6 @@
 import type { Entity } from "../world/zoneRuntime.js";
-import { getAvailableQuestsForPlayer, isQuestComplete, QUEST_CATALOG, type ActiveQuest, type Quest } from "./questSystem.js";
+import { getRedis } from "../redis.js";
+import { getAvailableQuestsForPlayer, isQuestComplete, npcMatchesQuestId, QUEST_CATALOG, type ActiveQuest, type Quest } from "./questSystem.js";
 import { getNpcPersona, type NpcPersona } from "./npcPersonas.js";
 import {
   validateNpcDialogueDraft,
@@ -66,6 +67,129 @@ const NPC_DIALOGUE_ALLOWED_INTENTS: NpcDialogueIntent[] = [
   "refuse",
 ];
 
+// ── Redis-backed conversation history + visit counter ────────────────
+// The client supplies recentHistory for back-compat, but a malicious client
+// could replay a fabricated history to coax the LLM. Server-owned history
+// keyed by (player wallet, npc entityId) is authoritative. History expires
+// after an hour of inactivity; expiry implicitly marks a new "session".
+
+const NPC_HISTORY_PREFIX = "npc:history";
+const NPC_VISITS_PREFIX = "npc:visits";
+const NPC_RL_MIN_PREFIX = "npc:rl:min";
+const NPC_RL_DAY_PREFIX = "npc:rl:day";
+const NPC_HISTORY_MAX_TURNS = 12;
+const NPC_HISTORY_TTL_SEC = 60 * 60;
+const NPC_RL_MIN_LIMIT = 20;
+const NPC_RL_DAY_LIMIT = 500;
+const NPC_VISITS_TTL_SEC = 60 * 60 * 24 * 30; // refresh on each visit
+
+function historyKey(wallet: string, npcEntityId: string): string {
+  return `${NPC_HISTORY_PREFIX}:${wallet.toLowerCase()}:${npcEntityId}`;
+}
+function visitsKey(wallet: string, npcName: string): string {
+  return `${NPC_VISITS_PREFIX}:${wallet.toLowerCase()}:${npcName}`;
+}
+
+async function loadServerHistory(wallet: string | undefined, npcEntityId: string): Promise<NpcDialogueHistoryEntry[]> {
+  if (!wallet) return [];
+  const redis = getRedis();
+  if (!redis) return [];
+  try {
+    const raw: string[] = await redis.lrange(historyKey(wallet, npcEntityId), 0, -1);
+    const out: NpcDialogueHistoryEntry[] = [];
+    for (const item of raw) {
+      try {
+        const parsed = JSON.parse(item);
+        if (parsed && (parsed.role === "player" || parsed.role === "npc") && typeof parsed.content === "string") {
+          out.push({ role: parsed.role, content: parsed.content });
+        }
+      } catch { /* skip malformed */ }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function appendServerHistory(
+  wallet: string | undefined,
+  npcEntityId: string,
+  entries: NpcDialogueHistoryEntry[],
+): Promise<void> {
+  if (!wallet || entries.length === 0) return;
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    const key = historyKey(wallet, npcEntityId);
+    const serialized = entries.map((e) => JSON.stringify({ role: e.role, content: e.content.slice(0, 220) }));
+    await redis.rpush(key, ...serialized);
+    await redis.ltrim(key, -NPC_HISTORY_MAX_TURNS, -1);
+    await redis.expire(key, NPC_HISTORY_TTL_SEC);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Bump the (player, npc) visit counter when Redis history is empty — that's
+ * our proxy for "new session". Returns the (possibly incremented) counter. */
+async function getOrBumpVisitCount(
+  wallet: string | undefined,
+  npcName: string,
+  serverHistoryWasEmpty: boolean,
+): Promise<number> {
+  if (!wallet) return 0;
+  const redis = getRedis();
+  if (!redis) return 0;
+  try {
+    const k = visitsKey(wallet, npcName);
+    let value: number;
+    if (serverHistoryWasEmpty) {
+      value = await redis.incr(k);
+    } else {
+      const raw = await redis.get(k);
+      value = raw ? Number(raw) || 0 : 0;
+    }
+    await redis.expire(k, NPC_VISITS_TTL_SEC);
+    return value;
+  } catch {
+    return 0;
+  }
+}
+
+/** Per-player rate limit: returns true if the call should proceed. */
+export async function checkNpcDialogueRateLimit(wallet: string | undefined): Promise<{ allowed: boolean; reason?: "minute" | "day" }> {
+  if (!wallet) return { allowed: true };
+  const redis = getRedis();
+  if (!redis) return { allowed: true };
+  try {
+    const minKey = `${NPC_RL_MIN_PREFIX}:${wallet.toLowerCase()}`;
+    const dayKey = `${NPC_RL_DAY_PREFIX}:${wallet.toLowerCase()}`;
+    const minCount = await redis.incr(minKey);
+    if (minCount === 1) await redis.expire(minKey, 60);
+    if (minCount > NPC_RL_MIN_LIMIT) return { allowed: false, reason: "minute" };
+    const dayCount = await redis.incr(dayKey);
+    if (dayCount === 1) await redis.expire(dayKey, 60 * 60 * 24);
+    if (dayCount > NPC_RL_DAY_LIMIT) return { allowed: false, reason: "day" };
+    return { allowed: true };
+  } catch {
+    return { allowed: true };
+  }
+}
+
+/** Deterministic fallback when the rate limit fires. The route handler can
+ * return this without ever touching the LLM. */
+export function buildRateLimitedReply(npc: Entity): NpcDialogueResponse {
+  const persona = getNpcPersona(npc);
+  return {
+    provider: "deterministic",
+    persona: { id: persona.id, role: persona.role, archetype: persona.archetype, tone: persona.tone },
+    reply: `${npc.name} is tied up — give them a moment.`,
+    intent: "redirect",
+    suggestedActions: [],
+    questContext: { availableQuestIds: [], activeQuestIds: [], completableQuestIds: [] },
+  };
+}
+
 function sanitizeHistory(history: NpcDialogueHistoryEntry[]): NpcDialogueHistoryEntry[] {
   return history
     .filter((entry) => entry && (entry.role === "player" || entry.role === "npc"))
@@ -97,7 +221,7 @@ function buildQuestState(player: Entity, npc: Entity): QuestStateView {
   const storyFlags = player.storyFlags ?? [];
 
   const available = getAvailableQuestsForPlayer(
-    npc.name,
+    npc,
     completedQuestIds,
     activeQuestIds,
     storyFlags,
@@ -106,7 +230,7 @@ function buildQuestState(player: Entity, npc: Entity): QuestStateView {
   const active = (player.activeQuests ?? [])
     .map((entry: ActiveQuest) => {
       const quest = QUEST_CATALOG.find((candidate) => candidate.id === entry.questId);
-      if (!quest || quest.npcId !== npc.name) return null;
+      if (!quest || !npcMatchesQuestId(npc, quest.npcId)) return null;
       const required = quest.objective.count;
       const complete = isQuestComplete(quest, entry.progress);
       return { quest, progress: entry.progress, required, complete };
@@ -124,9 +248,14 @@ function buildQuestState(player: Entity, npc: Entity): QuestStateView {
 
 function defaultSuggestedActions(persona: NpcPersona, questState: QuestStateView): SuggestedNpcAction[] {
   if (questState.completable.length > 0) {
+    const top = questState.completable[0].quest;
     return [
-      { label: "Turn it in", prompt: `I'm ready to turn in ${questState.completable[0].quest.title}.` },
-      { label: "Ask reward", prompt: `What do I earn for ${questState.completable[0].quest.title}?` },
+      {
+        label: "Turn in",
+        prompt: `I'm ready to turn in ${top.title}.`,
+        action: { kind: "complete_quest", questId: top.id },
+      },
+      { label: "Ask reward", prompt: `What do I earn for ${top.title}?` },
     ];
   }
   if (questState.active.length > 0) {
@@ -136,9 +265,14 @@ function defaultSuggestedActions(persona: NpcPersona, questState: QuestStateView
     ];
   }
   if (questState.available.length > 0) {
+    const top = questState.available[0];
     return [
-      { label: "Hear the job", prompt: `Tell me about ${questState.available[0].title}.` },
-      { label: "What's urgent?", prompt: "What needs doing most right now?" },
+      {
+        label: "Accept",
+        prompt: `I'll take ${top.title}.`,
+        action: { kind: "accept_quest", questId: top.id },
+      },
+      { label: "Hear the job", prompt: `Tell me about ${top.title}.` },
     ];
   }
   return [
@@ -392,6 +526,7 @@ function buildSystemPrompt(persona: NpcPersona): string {
     "referencesQuestId must be a quest id string or null.",
     "suggestedActions must be an array of up to 3 objects with label and prompt.",
     "If unsure, choose the safest grounded intent and keep the reply brief.",
+    "If player.visitCount > 1, acknowledge that you've spoken before in a brief, in-character way.",
     'Example JSON: {"reply":"The meadow is not safe after dusk.","intent":"redirect","referencesQuestId":null,"suggestedActions":[{"label":"Ask about work","prompt":"What needs doing right now?"}]}',
     `Speech rules: ${persona.speechStyle.join(" ")}`,
     `Priorities: ${persona.priorities.join(" ")}`,
@@ -492,6 +627,7 @@ function buildModelPrompt(
   message: string,
   history: NpcDialogueHistoryEntry[],
   questState: QuestStateView,
+  visitCount: number,
 ): string {
   return JSON.stringify({
     npc: {
@@ -511,6 +647,7 @@ function buildModelPrompt(
       origin: player.origin ?? null,
       classId: player.classId ?? null,
       storyFlags: player.storyFlags ?? [],
+      visitCount,
     },
     playerMessage: message,
     recentHistory: history,
@@ -546,7 +683,12 @@ function buildModelPrompt(
 export async function generateNpcDialogueResponse(
   context: NpcDialogueContext,
 ): Promise<NpcDialogueResponse> {
-  const history = sanitizeHistory(context.recentHistory);
+  const wallet = context.player.walletAddress;
+  // Server-owned history is authoritative; the client-supplied history is
+  // only used as a cold-start fallback when Redis has nothing yet.
+  const serverHistory = await loadServerHistory(wallet, context.npc.id);
+  const history = sanitizeHistory(serverHistory.length > 0 ? serverHistory : context.recentHistory);
+  const visitCount = await getOrBumpVisitCount(wallet, context.npc.name, serverHistory.length === 0);
   const persona = getNpcPersona(context.npc);
   const questState = buildQuestState(context.player, context.npc);
 
@@ -570,6 +712,7 @@ export async function generateNpcDialogueResponse(
           context.message,
           history,
           questState,
+          visitCount,
         ),
       });
       if (llmDraft?.reply) {
@@ -588,6 +731,12 @@ export async function generateNpcDialogueResponse(
     completableQuestIds: questState.completable.map((entry) => entry.quest.id),
     isTutorialNpc: context.npc.name === SCOUT_KAELA_NAME,
   });
+
+  // Persist this turn so subsequent calls see authoritative history.
+  await appendServerHistory(wallet, context.npc.id, [
+    { role: "player", content: context.message },
+    { role: "npc", content: validated.reply },
+  ]);
 
   return {
     provider,

@@ -336,6 +336,204 @@ export function generateAllMaps(): void {
       console.error(`[mapGenerator] Failed to generate map for ${data.id}:`, err);
     }
   }
+
+  // Final pass: smooth elevation across zone seams so high-contrast neighbors
+  // (mountain↔village, citadel↔plains) blend into believable foothills instead
+  // of sheer cliffs. Operates on every zone after its initial generation so
+  // it can sample neighboring zones' final elevations from mapCache.
+  crossZoneEdgeSmooth();
+
+  // After terrain converges, lift each water region to sit just below its
+  // local shore. Otherwise lakes/ponds in zones whose surrounds got pulled
+  // upward by mountain neighbors look like deep pits with cliffs into the
+  // water.
+  pinWaterToLocalShore();
+}
+
+// ── Cross-zone edge smoothing ───────────────────────────────────────
+
+/**
+ * After every zone's elevation is computed, smooth a strip of tiles near
+ * each edge using a kernel that reaches across to the neighboring zone's
+ * cached elevation array. Per-zone smoothing during generation pulls edge
+ * tiles toward each zone's interior independently, which produces matching
+ * mid-point values at the seam but introduces a kink right at the boundary
+ * once zones interact visually — this pass repairs that.
+ *
+ * Water tiles are preserved at their forced elevation (0) so the lake/pond
+ * surface stays flat.
+ */
+function crossZoneEdgeSmooth(): void {
+  /** Find which zone owns a given world tile coord, returning its cached map. */
+  const sampleAt = (wtx: number, wtz: number): number | null => {
+    for (const z of worldBlendInfos) {
+      if (wtx < z.minWtx || wtx >= z.maxWtx || wtz < z.minWtz || wtz >= z.maxWtz) continue;
+      const map = mapCache.get(z.id);
+      if (!map) return null;
+      const lx = wtx - z.minWtx;
+      const lz = wtz - z.minWtz;
+      return map.elevation[lz * map.width + lx] ?? null;
+    }
+    return null;
+  };
+
+  const isWaterTile = (t: number): boolean =>
+    t === 16 /* WATER_STILL */ || t === 19 || t === 20 || t === 21 || t === 22 || t === 23;
+
+  /** Maximum distance from edge to smooth. Tiles further in keep their interior detail. */
+  const STRIP = 16;
+  /** Maximum kernel radius — applied at the very edge, scaled down inward. */
+  const KERNEL_MAX = 6;
+  /** Number of smoothing passes. More passes = stronger seam convergence at the cost of strip detail. */
+  const PASSES = 3;
+
+  for (let pass = 0; pass < PASSES; pass++) {
+    // Snapshot every zone's elevation first so this pass reads consistent
+    // values across zones (otherwise zones smoothed earlier in the loop
+    // would feed already-smoothed values to zones smoothed later).
+    const snapshot = new Map<string, number[]>();
+    for (const [id, map] of mapCache) snapshot.set(id, map.elevation.slice());
+    const sampleSnap = (wtx: number, wtz: number): number | null => {
+      for (const z of worldBlendInfos) {
+        if (wtx < z.minWtx || wtx >= z.maxWtx || wtz < z.minWtz || wtz >= z.maxWtz) continue;
+        const snap = snapshot.get(z.id);
+        const map = mapCache.get(z.id);
+        if (!snap || !map) return null;
+        const lx = wtx - z.minWtx;
+        const lz = wtz - z.minWtz;
+        return snap[lz * map.width + lx] ?? null;
+      }
+      return null;
+    };
+
+    for (const blendInfo of worldBlendInfos) {
+      const map = mapCache.get(blendInfo.id);
+      if (!map) continue;
+      const w = map.width;
+      const h = map.height;
+
+      for (let tz = 0; tz < h; tz++) {
+        for (let tx = 0; tx < w; tx++) {
+          const minDist = Math.min(tx, w - 1 - tx, tz, h - 1 - tz);
+          if (minDist >= STRIP) continue;
+
+          // Distance-weighted kernel: huge blur at the very edge, gentle
+          // touch by the time we're STRIP tiles in. Lets the seam fully
+          // converge across zones while preserving interior shape.
+          const t = minDist / STRIP; // 0 at edge, 1 at strip boundary
+          const kernel = Math.max(1, Math.round(KERNEL_MAX * (1 - t)));
+
+          let sum = 0;
+          let weight = 0;
+          for (let dz = -kernel; dz <= kernel; dz++) {
+            for (let dx = -kernel; dx <= kernel; dx++) {
+              const wtx = blendInfo.minWtx + tx + dx;
+              const wtz = blendInfo.minWtz + tz + dz;
+              const val = sampleSnap(wtx, wtz);
+              if (val === null) continue;
+              const r = Math.max(Math.abs(dx), Math.abs(dz));
+              const k = kernel + 1 - r;
+              sum += val * k;
+              weight += k;
+            }
+          }
+          if (weight === 0) continue;
+          const smoothed = sum / weight;
+
+          // Keep water tiles pinned at 0.
+          if (isWaterTile(map.ground[tz * w + tx])) {
+            map.elevation[tz * w + tx] = 0;
+          } else {
+            map.elevation[tz * w + tx] = Math.round(smoothed);
+          }
+        }
+      }
+    }
+  }
+  console.log(`[mapGenerator] Cross-zone edge smoothing complete (${PASSES} passes × ${worldBlendInfos.length} zones)`);
+}
+
+// ── Local water level pinning ───────────────────────────────────────
+
+/**
+ * Walk each zone, flood-fill every connected water region, and set the
+ * region's elevation to sit just below the lowest adjacent shore.
+ *
+ * Why: water tiles are forced to 0 during initial elevation generation.
+ * After cross-zone smoothing pulls a zone's perimeter upward (e.g. the
+ * lake-lumina edges that border the citadel and chasm biomes), water at
+ * absolute zero ends up far below the surrounding land — the lake reads
+ * as a sheer-walled pit. Pinning to local shore makes water naturally
+ * track whatever elevation its banks settle to.
+ */
+function pinWaterToLocalShore(): void {
+  const isWaterTile = (t: number): boolean =>
+    t === 16 /* WATER_STILL */ || t === 19 || t === 20 || t === 21 || t === 22 || t === 23;
+
+  for (const [, map] of mapCache) {
+    const w = map.width;
+    const h = map.height;
+    const visited = new Uint8Array(w * h);
+
+    for (let startIdx = 0; startIdx < w * h; startIdx++) {
+      if (visited[startIdx]) continue;
+      if (!isWaterTile(map.ground[startIdx])) {
+        visited[startIdx] = 1;
+        continue;
+      }
+
+      // Flood-fill the connected water region (4-neighbour adjacency).
+      const region: number[] = [];
+      const stack = [startIdx];
+      while (stack.length > 0) {
+        const idx = stack.pop()!;
+        if (visited[idx]) continue;
+        if (!isWaterTile(map.ground[idx])) continue;
+        visited[idx] = 1;
+        region.push(idx);
+        const tx = idx % w;
+        const tz = (idx / w) | 0;
+        if (tx > 0) stack.push(idx - 1);
+        if (tx < w - 1) stack.push(idx + 1);
+        if (tz > 0) stack.push(idx - w);
+        if (tz < h - 1) stack.push(idx + w);
+      }
+
+      // Collect every unique adjacent shore-tile elevation (8-neighbour).
+      const seenShore = new Uint8Array(w * h);
+      const shoreElevs: number[] = [];
+      for (const ridx of region) {
+        const tx = ridx % w;
+        const tz = (ridx / w) | 0;
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dz === 0) continue;
+            const nx = tx + dx;
+            const nz = tz + dz;
+            if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+            const nidx = nz * w + nx;
+            if (isWaterTile(map.ground[nidx])) continue;
+            if (seenShore[nidx]) continue;
+            seenShore[nidx] = 1;
+            shoreElevs.push(map.elevation[nidx]);
+          }
+        }
+      }
+
+      // Water surface = (lowest adjacent shore) - 1. Physically a body of
+      // water can't sit above its lowest bank — otherwise it spills. The -1
+      // ensures the surface is visibly recessed even on flat banks.
+      let surface = 0;
+      if (shoreElevs.length > 0) {
+        let minShore = Infinity;
+        for (const e of shoreElevs) if (e < minShore) minShore = e;
+        surface = Math.max(0, minShore - 1);
+      }
+
+      for (const ridx of region) map.elevation[ridx] = surface;
+    }
+  }
+  console.log(`[mapGenerator] Pinned water surfaces to local shore level`);
 }
 
 // ── Main generator ───────────────────────────────────────────────────
@@ -1309,47 +1507,6 @@ function generateElevation(
           elevation[idx] = Math.round(targetElev * (1 - blend) + elevation[idx] * blend);
         }
       }
-    }
-  }
-
-  // Lake biome: raise land within 6 tiles of any water tile so the lake sits in
-  // a believable basin instead of a flat puddle. Peak bump at dist 2, decaying
-  // to 0 at dist 6.
-  if (biome === "lake") {
-    const SHORE_RADIUS = 6;
-    const SHORE_PEAK_BUMP = 12;
-    const isWaterTile = (i: number): boolean => {
-      const t = ground[i];
-      return t === TILE.WATER_STILL || t === TILE.WATER_EDGE_N || t === TILE.WATER_EDGE_S
-        || t === TILE.WATER_EDGE_E || t === TILE.WATER_EDGE_W || t === TILE.WATER_CORNER;
-    };
-    const shoreBump = new Array(w * h).fill(0);
-    for (let tz = 0; tz < h; tz++) {
-      for (let tx = 0; tx < w; tx++) {
-        const idx = tz * w + tx;
-        if (isWaterTile(idx)) continue;
-        // Cheap nearest-water search in a (2R+1)² window
-        let nearest = Infinity;
-        for (let dz = -SHORE_RADIUS; dz <= SHORE_RADIUS && nearest > 0; dz++) {
-          for (let dx = -SHORE_RADIUS; dx <= SHORE_RADIUS; dx++) {
-            const nx = tx + dx;
-            const nz = tz + dz;
-            if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
-            if (!isWaterTile(nz * w + nx)) continue;
-            const d = Math.sqrt(dx * dx + dz * dz);
-            if (d < nearest) nearest = d;
-          }
-        }
-        if (nearest >= SHORE_RADIUS) continue;
-        // Falloff: 0 at dist 0 (shoreline can't be higher than the lake edge),
-        // peaks near dist 2, decays to 0 at SHORE_RADIUS.
-        const t = nearest / SHORE_RADIUS; // 0..1
-        const bump = Math.round(SHORE_PEAK_BUMP * 4 * t * (1 - t)); // parabolic
-        shoreBump[idx] = bump;
-      }
-    }
-    for (let i = 0; i < w * h; i++) {
-      elevation[i] = Math.min(MAX_ELEVATION, elevation[i] + shoreBump[i]);
     }
   }
 
