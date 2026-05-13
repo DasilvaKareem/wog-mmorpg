@@ -1145,6 +1145,13 @@ interface EntityObject {
   combatAnimHold: number;
   /** When the current one-shot animation started (performance.now ms), 0 if looping */
   oneShotStart: number;
+  /**
+   * performance.now() timestamp of the last basic-attack windup event seen
+   * for this entity. The server emits `attack-windup` ~250ms before the
+   * matching `combat` damage event; we use this to suppress restarting the
+   * swing animation when the damage event arrives.
+   */
+  lastBasicAttackWindupMs: number;
   /** Queued melee animation waiting for entity to be in visual range */
   pendingMelee: {
     action: Action;
@@ -2436,17 +2443,43 @@ export class EntityManager {
         }
       }
 
+      // ── Attack windup: basic-attack telegraph fires ~250ms before damage.
+      // Start the swing animation now so it lands visually around the same
+      // moment the matching `combat` event applies HP delta.
+      if (ev.type === "attack-windup" && ev.entityId) {
+        const obj = this.entities.get(ev.entityId);
+        if (obj && obj.lifeState === "alive" && (obj.rig || obj.hasGlbModel)) {
+          const animStyle = ev.data?.animStyle as string | undefined;
+          const action = resolveAction(obj.entity, "basic-attack", undefined, animStyle);
+          const isMelee = animStyle !== "projectile";
+          obj.lastBasicAttackWindupMs = performance.now();
+          animLogFor(obj.entity.name, `attack-windup style=${animStyle ?? "?"} → ${action}`);
+          this.faceTarget(obj, ev.targetId);
+          this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle);
+        }
+      }
+
       // ── Combat: basic attack landed (PRIMARY animation driver) ──
       if (ev.type === "combat" && ev.entityId) {
         const obj = this.entities.get(ev.entityId);
         if (obj && obj.lifeState === "alive" && (obj.rig || obj.hasGlbModel)) {
           const animStyle = ev.data?.animStyle as string | undefined;
           const critical = ev.data?.critical === true;
-          const action = resolveAction(obj.entity, "basic-attack", undefined, animStyle);
-          const isMelee = animStyle !== "projectile";
-          animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"}${critical ? " CRIT" : ""} → ${action}`);
-          this.faceTarget(obj, ev.targetId);
-          this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle, critical);
+          // If a windup just played for this entity, the swing animation is
+          // already in flight — don't restart it (would visually stutter back
+          // to frame 0). 600ms window covers a 1-tick windup plus client poll
+          // jitter. Crits still re-trigger so the heavy clip can take over.
+          const sinceWindupMs = performance.now() - obj.lastBasicAttackWindupMs;
+          const skipAnim = obj.lastBasicAttackWindupMs > 0 && sinceWindupMs < 600 && !critical;
+          if (!skipAnim) {
+            const action = resolveAction(obj.entity, "basic-attack", undefined, animStyle);
+            const isMelee = animStyle !== "projectile";
+            animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"}${critical ? " CRIT" : ""} → ${action}`);
+            this.faceTarget(obj, ev.targetId);
+            this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle, critical);
+          } else {
+            animLogFor(obj.entity.name, `combat damage landed (anim already playing from windup ${sinceWindupMs.toFixed(0)}ms ago)`);
+          }
         } else if (obj && isAnimDebugFor(obj.entity.name)) {
           animWarn(`${obj.entity.name}: combat event skipped (life=${obj.lifeState} rig=${!!obj.rig} glb=${obj.hasGlbModel})`);
         }
@@ -2735,6 +2768,7 @@ export class EntityManager {
       glbAttackTimer: 0,
       combatAnimHold: 0,
       oneShotStart: 0,
+      lastBasicAttackWindupMs: 0,
       pendingMelee: null,
       lifeState: ent.hp > 0 ? "alive" : "dead-hidden",
       lifeToken: 0,

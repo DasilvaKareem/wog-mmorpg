@@ -2361,20 +2361,21 @@ Strategy options: aggressive, balanced, defensive`;
       return reply.code(400).send({ error: "entityId and zoneId are required" });
     }
 
-    // Validate that the target entity actually exists in the requested zone.
-    // Without this, the agent sets up a goto, walks into the zone, finds
-    // nothing, fails; the UI re-posts with the same stale ID and the failure
-    // chain repeats — surfacing "[BLOCKED] goto failed 3x" in the activity log.
+    // Validate that the target entity actually exists. We keep this check so
+    // we surface stale IDs (re-spawned NPCs get new ids on rebuild).
+    //
+    // Cross-zone tolerance: the client only knows the *player's* current zone,
+    // which is what it sends. For quest-givers in a different zone, we trust
+    // the entity's own `region` over whatever the client sent — otherwise the
+    // "go to NPC" fallback from Accept / Turn-in / Talk on a cross-zone quest
+    // would always 404. The agent runner accepts any zone for the travel
+    // chain, so just route through the entity's real zone.
     const targetEntity = getWorldEntity(entityId);
     if (!targetEntity) {
       return reply.code(404).send({ error: `Entity ${entityId} not found`, hint: "The NPC may have respawned with a new id — reopen the tab and click again." });
     }
-    if (targetEntity.region !== zoneId) {
-      return reply.code(404).send({
-        error: `Entity ${entityId} is not in ${zoneId}`,
-        hint: `Actually located in ${targetEntity.region ?? "unknown zone"}.`,
-      });
-    }
+    const actualZoneId = targetEntity.region ?? zoneId;
+    const crossZone = actualZoneId !== zoneId;
 
     const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
     const resumeFocusAfterGoto =
@@ -2386,20 +2387,21 @@ Strategy options: aggressive, balanced, defensive`;
 
     await patchAgentConfig(authWallet, {
       focus: "goto",
-      gotoTarget: { entityId, zoneId, name, action, profession, questId },
+      gotoTarget: { entityId, zoneId: actualZoneId, name, action, profession, questId },
       gotoPosition: undefined,
       resumeFocusAfterGoto,
     });
 
+    const zoneSuffix = crossZone ? ` (cross-zone → ${actualZoneId})` : "";
     const logText = action === "learn-profession" && profession
-      ? `[LEARN] Sending agent to learn ${profession} from ${name ?? entityId}`
+      ? `[LEARN] Sending agent to learn ${profession} from ${name ?? entityId}${zoneSuffix}`
       : action === "accept-quest" && questId
-      ? `[QUEST] Sending agent to accept quest from ${name ?? entityId}`
+      ? `[QUEST] Sending agent to accept quest from ${name ?? entityId}${zoneSuffix}`
       : action === "complete-quest" && questId
-      ? `[QUEST] Sending agent to turn in quest at ${name ?? entityId}`
+      ? `[QUEST] Sending agent to turn in quest at ${name ?? entityId}${zoneSuffix}`
       : action === "talk-quest"
-      ? `[QUEST] Sending agent to talk to ${name ?? entityId} for quest`
-      : `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`;
+      ? `[QUEST] Sending agent to talk to ${name ?? entityId} for quest${zoneSuffix}`
+      : `[GOTO] Sending agent to ${name ?? entityId} in ${actualZoneId}`;
 
     await appendChatMessage(authWallet, {
       role: "activity",
@@ -2409,10 +2411,10 @@ Strategy options: aggressive, balanced, defensive`;
 
     const runner = agentManager.getRunner(authWallet);
     if (runner) {
-      await runner.setGotoTarget(entityId, zoneId, name, action, profession, { questId });
+      await runner.setGotoTarget(entityId, actualZoneId, name, action, profession, { questId });
     }
 
-    return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
+    return reply.send({ ok: true, gotoTarget: { entityId, zoneId: actualZoneId, name, action, profession, questId }, crossZone });
   });
 
   // ── POST /agent/focus-quest — Pin the agent's quest behavior to one quest ──

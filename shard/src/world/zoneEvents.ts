@@ -20,6 +20,7 @@ export type ZoneEventType =
   | "ability"
   | "technique"
   | "technique-start"
+  | "attack-windup"
   | "consume"
   | "profession"
   | "party";

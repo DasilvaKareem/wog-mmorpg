@@ -243,6 +243,16 @@ export interface Entity {
   castingIntent?: CastingIntent;
   /** Swing timer: tick when this entity is next allowed to land a basic attack. */
   nextAttackTick?: number;
+  /**
+   * In-flight basic-attack windup. When set, the entity has telegraphed a swing
+   * that resolves on `resolveAtTick`. Lets the client play the swing animation
+   * with a real wind-up window instead of damage landing the same tick the mob
+   * enters range. Server-internal only — stripped from the wire payload.
+   */
+  pendingAttack?: {
+    targetId: string;
+    resolveAtTick: number;
+  };
   /** Most recent edict decision that produced the current auto-combat order. */
   lastEdictDecision?: {
     edictId: string;
@@ -272,8 +282,10 @@ function toSerializableEntity(entity: Entity): Record<string, unknown> {
   const guildName = entity.type === "player" && entity.walletAddress
     ? getCachedGuildName(entity.walletAddress)
     : undefined;
+  // Strip server-internal fields that shouldn't leak to clients.
+  const { pendingAttack: _pendingAttack, ...serializable } = entity;
   return {
-    ...entity,
+    ...serializable,
     ...(partyId && { partyId }),
     ...(guildName && { guildName }),
     ...(entity.characterTokenId != null && {
@@ -535,6 +547,11 @@ const DEFAULT_RUN_ENERGY = 100;
 const RUN_ENERGY_DRAIN_PER_TICK = 0.5; // same drain/sec as before
 const RUN_ENERGY_REGEN_PER_TICK = 0.25; // same regen/sec as before
 const MELEE_RANGE = 40; // units — fallback for melee / mobs
+// Basic-attack telegraph: number of ticks between the windup event and damage
+// resolution. 1 tick = 250ms — long enough for client clients on slower poll
+// intervals to often see the windup before damage lands. Bumping this makes
+// combat feel slower; lowering it (to 0) restores instant resolution.
+const ATTACK_WINDUP_TICKS = 1;
 const MIN_DAMAGE = 3;
 const FALLBACK_ATTACK = 15;
 const PARTY_TARGET_LOCK_TICKS = 24; // 6s at 250ms tick (was 6 ticks @ 1s)
@@ -2688,7 +2705,10 @@ async function worldTick() {
         const arrived = moveToward(entity, entity.order.x, entity.order.y, zone.entities);
         if (arrived) entity.order = undefined;
       } else if (entity.order.action === "attack") {
-        const target = getEntity(entity.order.targetId);
+        // `let` so the pending-attack resolve branch below can redirect to
+        // the entity that was windup-targeted (in case the order target changed
+        // mid-swing).
+        let target = getEntity(entity.order.targetId);
         if (!target) {
           entity.order = undefined;
           continue;
@@ -2716,10 +2736,61 @@ async function worldTick() {
           if (applyEdictOverrideForActiveAttack(entity, target, zone)) {
             continue;
           }
-          if ((entity.nextAttackTick ?? 0) > zone.tick) {
+
+          // ── Two-stage swing: windup → resolve ────────────────────────────
+          // Tick 1: emit attack-windup, commit pendingAttack, set swing cooldown.
+          // Tick 1 + ATTACK_WINDUP_TICKS: damage resolves below.
+          // Without this telegraph, damage landed the same tick the mob entered
+          // range — so on a 400ms-poll client the mob appeared to "teleport into"
+          // its swing. Mob commits to the swing; if the target dies in the gap
+          // we whiff cleanly.
+          if (entity.pendingAttack && entity.pendingAttack.resolveAtTick > zone.tick) {
+            // Still winding up — wait for the resolve tick.
             continue;
           }
-          entity.nextAttackTick = zone.tick + getEntitySwingTicks(entity);
+          if (entity.pendingAttack) {
+            // Resolve tick: redirect to the original windup target. If it's
+            // gone or dead, drop the swing.
+            const pendingTarget = world.entities.get(entity.pendingAttack.targetId);
+            entity.pendingAttack = undefined;
+            if (!pendingTarget || pendingTarget.hp <= 0) {
+              continue;
+            }
+            target = pendingTarget;
+          } else {
+            // No swing in flight — queue a new windup if cooldown allows.
+            if ((entity.nextAttackTick ?? 0) > zone.tick) {
+              continue;
+            }
+            entity.nextAttackTick = zone.tick + getEntitySwingTicks(entity);
+            if (ATTACK_WINDUP_TICKS > 0) {
+              entity.pendingAttack = {
+                targetId: target.id,
+                resolveAtTick: zone.tick + ATTACK_WINDUP_TICKS,
+              };
+              logZoneEvent({
+                zoneId: zone.zoneId,
+                type: "attack-windup",
+                tick: zone.tick,
+                message: `${entity.name} winds up to strike ${target.name}`,
+                entityId: entity.id,
+                entityName: entity.name,
+                targetId: target.id,
+                targetName: target.name,
+                data: {
+                  windupTicks: ATTACK_WINDUP_TICKS,
+                  animStyle: getBasicAttackAnimStyle(entity),
+                  casterX: entity.x,
+                  casterZ: entity.y,
+                  targetX: target.x,
+                  targetZ: target.y,
+                },
+              });
+              continue;
+            }
+            // ATTACK_WINDUP_TICKS = 0 path: resolve immediately (kill switch).
+          }
+
           const rawDmg = computeDamage(entity, target, zone.zoneId);
           const hit = resolveHit(entity, target, rawDmg);
 
