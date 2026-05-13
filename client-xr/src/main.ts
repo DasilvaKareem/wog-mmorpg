@@ -385,6 +385,7 @@ const settingsPanel = new SettingsPanel();
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.setInputEnabled(!isDisplayMode);
 controls.collisionCheck = (x, z) => world.isWalkable(x, z);
+controls.setTerrainGroup(world.group);
 const inspector = new EntityInspector({
   canActOnPlayer: (entity) => {
     return entity.type === "player"
