@@ -348,6 +348,12 @@ export function generateAllMaps(): void {
   // upward by mountain neighbors look like deep pits with cliffs into the
   // water.
   pinWaterToLocalShore();
+
+  // Force the very-edge cells of every adjacent zone pair to share identical
+  // elevation. The client's per-zone mesh corner sampler can otherwise pick
+  // slightly different Y values on each side of a seam — fog leaks through
+  // the resulting hairline gap and reads as a blue "river" along the boundary.
+  snapAdjacentZoneEdges();
 }
 
 // ── Cross-zone edge smoothing ───────────────────────────────────────
@@ -534,6 +540,81 @@ function pinWaterToLocalShore(): void {
     }
   }
   console.log(`[mapGenerator] Pinned water surfaces to local shore level`);
+}
+
+// ── Edge-snap (zone seam crack fix) ───────────────────────────────────
+
+/**
+ * For every cell along a zone edge that abuts another zone, set both that
+ * cell and its mirror in the neighbor zone to the average of their two
+ * elevations. Makes the client's per-zone corner-height sampler return
+ * identical world-Y on both sides of the seam, closing the hairline mesh
+ * crack that otherwise lets fog show through as a blue "river".
+ *
+ * Water tiles are skipped — pinWaterToLocalShore already set them and we
+ * don't want averaging to drift their surfaces.
+ */
+function snapAdjacentZoneEdges(): void {
+  const isWaterTile = (t: number): boolean =>
+    t === 16 /* WATER_STILL */ || t === 19 || t === 20 || t === 21 || t === 22 || t === 23;
+
+  interface Sample { map: GeneratedMap; lx: number; lz: number; isWater: boolean; }
+  const sampleAt = (wtx: number, wtz: number): Sample | null => {
+    for (const z of worldBlendInfos) {
+      if (wtx < z.minWtx || wtx >= z.maxWtx || wtz < z.minWtz || wtz >= z.maxWtz) continue;
+      const map = mapCache.get(z.id);
+      if (!map) return null;
+      const lx = wtx - z.minWtx;
+      const lz = wtz - z.minWtz;
+      const idx = lz * map.width + lx;
+      return { map, lx, lz, isWater: isWaterTile(map.ground[idx]) };
+    }
+    return null;
+  };
+
+  const snap = (mine: Sample, other: Sample): void => {
+    if (mine.isWater || other.isWater) return;
+    const w1 = mine.map.width;
+    const w2 = other.map.width;
+    const idx1 = mine.lz * w1 + mine.lx;
+    const idx2 = other.lz * w2 + other.lx;
+    const avg = Math.round((mine.map.elevation[idx1] + other.map.elevation[idx2]) / 2);
+    mine.map.elevation[idx1] = avg;
+    other.map.elevation[idx2] = avg;
+  };
+
+  for (const z of worldBlendInfos) {
+    const map = mapCache.get(z.id);
+    if (!map) continue;
+    const w = map.width;
+    const h = map.height;
+
+    // West edge (lx=0) ↔ neighbor at wtx = z.minWtx - 1
+    for (let lz = 0; lz < h; lz++) {
+      const mine = sampleAt(z.minWtx, z.minWtz + lz);
+      const other = sampleAt(z.minWtx - 1, z.minWtz + lz);
+      if (mine && other) snap(mine, other);
+    }
+    // East edge (lx=w-1) ↔ neighbor at wtx = z.minWtx + w
+    for (let lz = 0; lz < h; lz++) {
+      const mine = sampleAt(z.minWtx + w - 1, z.minWtz + lz);
+      const other = sampleAt(z.minWtx + w, z.minWtz + lz);
+      if (mine && other) snap(mine, other);
+    }
+    // North edge (lz=0)
+    for (let lx = 0; lx < w; lx++) {
+      const mine = sampleAt(z.minWtx + lx, z.minWtz);
+      const other = sampleAt(z.minWtx + lx, z.minWtz - 1);
+      if (mine && other) snap(mine, other);
+    }
+    // South edge (lz=h-1)
+    for (let lx = 0; lx < w; lx++) {
+      const mine = sampleAt(z.minWtx + lx, z.minWtz + h - 1);
+      const other = sampleAt(z.minWtx + lx, z.minWtz + h);
+      if (mine && other) snap(mine, other);
+    }
+  }
+  console.log(`[mapGenerator] Snapped adjacent-zone edge cells to matching elevation`);
 }
 
 // ── Main generator ───────────────────────────────────────────────────
