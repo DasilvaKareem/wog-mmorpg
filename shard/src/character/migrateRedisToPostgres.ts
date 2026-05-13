@@ -108,13 +108,6 @@ function parseEquipment(value: string | undefined): CharacterSaveData["equipment
   }
 }
 
-function parseBoolean(value: string | undefined): boolean | undefined {
-  if (value == null) return undefined;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return undefined;
-}
-
 function buildCharacterSnapshot(name: string, raw: Record<string, string>): CharacterSaveData {
   const raceId = raw.raceId?.trim();
   const classId = raw.classId?.trim();
@@ -147,9 +140,6 @@ function buildCharacterSnapshot(name: string, raw: Record<string, string>): Char
     storyFlags: parseStringArray(raw.storyFlags),
     learnedTechniques: parseStringArray(raw.learnedTechniques),
     professions: parseStringArray(raw.professions),
-    runEnergy: raw.runEnergy != null ? Number(raw.runEnergy) || 0 : undefined,
-    maxRunEnergy: raw.maxRunEnergy != null ? Number(raw.maxRunEnergy) || 0 : undefined,
-    runModeEnabled: parseBoolean(raw.runModeEnabled),
     signatureTechniqueId: raw.signatureTechniqueId || undefined,
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
     equipment: parseEquipment(raw.equipment),

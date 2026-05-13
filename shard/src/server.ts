@@ -953,9 +953,6 @@ server.post<{
     completedQuests: entity.completedQuests ?? [],
     learnedTechniques: entity.learnedTechniques ?? [],
     professions: getLearnedProfessions(entity.walletAddress),
-    runEnergy: entity.runEnergy,
-    maxRunEnergy: entity.maxRunEnergy,
-    runModeEnabled: entity.runModeEnabled,
     equipment: entity.equipment ?? undefined,
   });
 

@@ -60,13 +60,14 @@ export function MobileLoginPage() {
   async function sendPhoneOtp() {
     const normalized = normalizePhone(phone);
     if (!normalized) {
-      setError("Enter your number in international format (e.g. +15551234567).");
+      setError("That doesn't look like a valid phone number.");
       return;
     }
     setSendingOtp(true);
     setError(null);
     try {
       await preAuthenticate({ client: thirdwebClient, strategy: "phone", phoneNumber: normalized });
+      setPhone(normalized);
       setOtp("");
       setStep("phone-otp");
     } catch (e) {
@@ -162,21 +163,25 @@ export function MobileLoginPage() {
 
   // ── Phone input screen ─────────────────────────────────────────────
   if (step === "phone-input") {
+    const preview = normalizePhone(phone);
     return (
       <div className="flex h-[100dvh] flex-col items-center justify-center bg-[#070d15] px-6">
         <p className="mb-2 font-mono text-lg font-bold text-[#d4a437]">Enter your phone</p>
-        <p className="mb-6 font-mono text-[11px] text-[#e2e8f0]/40">International format, e.g. +15551234567</p>
+        <p className="mb-6 font-mono text-[11px] text-[#e2e8f0]/40">Any format works — we'll figure it out</p>
         <input
           type="tel"
           inputMode="tel"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
-          placeholder="+15551234567"
+          placeholder="(555) 123-4567"
           autoFocus
           className="w-full max-w-xs border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 font-mono text-sm text-[#e2e8f0] placeholder-[#6d77a3] outline-none focus:border-[#d4a437]"
           onKeyDown={(e) => e.key === "Enter" && sendPhoneOtp()}
         />
-        {error && <p className="mt-3 max-w-xs font-mono text-xs text-[#ff4d6d]">[ERR] {error}</p>}
+        <p className="mt-2 h-4 max-w-xs font-mono text-[11px] text-[#54f28b]/70">
+          {preview ? `Will send to ${preview}` : ""}
+        </p>
+        {error && <p className="mt-1 max-w-xs font-mono text-xs text-[#ff4d6d]">[ERR] {error}</p>}
         <div className="mt-4 flex w-full max-w-xs gap-2">
           <button
             onClick={() => { setError(null); setStep("login"); }}
@@ -299,9 +304,39 @@ export function MobileLoginPage() {
   );
 }
 
-// Strip whitespace, dashes, parens; require leading + and 7-15 digits.
-function normalizePhone(input: string): string | null {
-  const cleaned = input.replace(/[\s\-()]/g, "");
-  if (!/^\+\d{7,15}$/.test(cleaned)) return null;
-  return cleaned;
+/**
+ * Permissive phone normalizer — accepts any human-typed format and returns
+ * an E.164 string (or null if it's truly unparseable). The user shouldn't
+ * have to know about international format; we figure it out.
+ *
+ * Examples:
+ *   "(555) 123-4567"   → "+15551234567"   (10 digits → assume US)
+ *   "555.123.4567"     → "+15551234567"
+ *   "1-555-123-4567"   → "+15551234567"   (11 digits with leading 1 → US)
+ *   "+44 20 7946 0958" → "+442079460958"
+ *   "442079460958"     → "+442079460958"  (no +, but length ≠ 10/11 → trust as international)
+ */
+function normalizePhone(input: string, defaultCountryCode = "1"): string | null {
+  // Keep digits only, plus a single leading + if present.
+  const hadPlus = input.trim().startsWith("+");
+  const digits = input.replace(/\D/g, "");
+  if (!digits) return null;
+
+  let withCountry: string;
+  if (hadPlus) {
+    withCountry = `+${digits}`;
+  } else if (digits.length === 10) {
+    // Bare 10-digit US number.
+    withCountry = `+${defaultCountryCode}${digits}`;
+  } else if (digits.length === 11 && digits.startsWith(defaultCountryCode)) {
+    // US written as "15551234567" — leading country code without +.
+    withCountry = `+${digits}`;
+  } else {
+    // Some other length without +: best-effort, treat as international.
+    withCountry = `+${digits}`;
+  }
+
+  // Final E.164 sanity check: + and 8–15 digits.
+  if (!/^\+\d{8,15}$/.test(withCountry)) return null;
+  return withCountry;
 }

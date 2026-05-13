@@ -160,7 +160,7 @@ export class LandingPage {
           <!-- Step 1: contact entry -->
           <div class="xr-landing-auth-form" data-auth-form="entry">
             <input type="email" class="xr-landing-auth-input" data-auth-input="email" placeholder="your@email.com" autocomplete="email" />
-            <input type="tel" class="xr-landing-auth-input" data-auth-input="phone" placeholder="+15551234567" autocomplete="tel" hidden />
+            <input type="tel" class="xr-landing-auth-input" data-auth-input="phone" placeholder="(555) 123-4567" autocomplete="tel" hidden />
             <button type="button" class="xr-landing-auth-btn" data-action="auth-send">Send Code</button>
           </div>
 
@@ -414,14 +414,19 @@ export class LandingPage {
     const phoneInput = this.panel.querySelector("[data-auth-input='phone']") as HTMLInputElement | null;
     const contact = (this.authMethod === "email" ? emailInput?.value : phoneInput?.value)?.trim() ?? "";
     if (!contact) {
-      this.setStatus(this.authMethod === "email" ? "Enter your email." : "Enter your phone number (e.g. +15551234567).");
+      this.setStatus(this.authMethod === "email" ? "Enter your email." : "Enter your phone number.");
       return;
     }
-    if (this.authMethod === "sms" && !/^\+\d{7,15}$/.test(contact.replace(/[\s\-()]/g, ""))) {
-      this.setStatus("Use international format, e.g. +15551234567.");
-      return;
+    let normalized = contact;
+    if (this.authMethod === "sms") {
+      const cleaned = normalizePhone(contact);
+      if (!cleaned) {
+        this.setStatus("That doesn't look like a valid phone number.");
+        return;
+      }
+      normalized = cleaned;
+      if (phoneInput) phoneInput.value = cleaned;
     }
-    const normalized = this.authMethod === "sms" ? contact.replace(/[\s\-()]/g, "") : contact;
     await this.runBusy("Sending code...", async () => {
       const { xrAuth } = await this.loadAuthModule();
       if (this.authMethod === "email") {
@@ -1089,4 +1094,30 @@ export class LandingPage {
     `;
     document.head.appendChild(style);
   }
+}
+
+/**
+ * Permissive phone normalizer — accepts any human-typed format and returns
+ * an E.164 string (or null if it's truly unparseable). Mirrors the helper
+ * in client/src/components/MobileLoginPage.tsx so behavior matches across
+ * web + iOS clients.
+ */
+function normalizePhone(input: string, defaultCountryCode = "1"): string | null {
+  const hadPlus = input.trim().startsWith("+");
+  const digits = input.replace(/\D/g, "");
+  if (!digits) return null;
+
+  let withCountry: string;
+  if (hadPlus) {
+    withCountry = `+${digits}`;
+  } else if (digits.length === 10) {
+    withCountry = `+${defaultCountryCode}${digits}`;
+  } else if (digits.length === 11 && digits.startsWith(defaultCountryCode)) {
+    withCountry = `+${digits}`;
+  } else {
+    withCountry = `+${digits}`;
+  }
+
+  if (!/^\+\d{8,15}$/.test(withCountry)) return null;
+  return withCountry;
 }

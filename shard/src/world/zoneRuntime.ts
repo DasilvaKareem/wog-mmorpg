@@ -221,12 +221,7 @@ export interface Entity {
   taggedAtTick?: number;
   /** Out-of-combat regen: tick when this entity last dealt/received damage (players only). */
   lastCombatTick?: number;
-  /** Run energy pool (players only). */
-  runEnergy?: number;
-  maxRunEnergy?: number;
-  /** Player preference: when true, movement uses run speed while energy remains. */
-  runModeEnabled?: boolean;
-  /** Derived movement state for clients/HUD. */
+  /** Derived movement state for clients/HUD: true when this tick used run speed. */
   isRunning?: boolean;
   /** Travel command: zone the entity is walking toward (for portal-based transitions). */
   travelTargetZone?: string;
@@ -543,9 +538,10 @@ const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERS
 const ZONE_RESPONSE_CACHE_MS = Math.max(50, Number.parseInt(process.env.ZONE_RESPONSE_CACHE_MS ?? "100", 10) || 100);
 const WALK_MOVE_SPEED = 7.5; // units per tick (was 30/tick @ 1s; same real speed at 250ms)
 const RUN_MOVE_SPEED = 15; // units per tick (was 60/tick @ 1s)
-const DEFAULT_RUN_ENERGY = 100;
-const RUN_ENERGY_DRAIN_PER_TICK = 0.5; // same drain/sec as before
-const RUN_ENERGY_REGEN_PER_TICK = 0.25; // same regen/sec as before
+// Players automatically run when their move order is far away and decelerate to
+// a walk over the final stretch. Tuned so arriving at an NPC plays the walk
+// animation in the last ~1s of travel.
+const RUN_DISTANCE_THRESHOLD = 30;
 const MELEE_RANGE = 40; // units — fallback for melee / mobs
 // Basic-attack telegraph: number of ticks between the windup event and damage
 // resolution. 1 tick = 250ms — long enough for client clients on slower poll
@@ -716,20 +712,6 @@ export function removeLivePlayerEntityEventually(walletAddress: string, context:
   void removeLivePlayerEntity(walletAddress).catch((err) => {
     console.warn(`[live-player] Failed to remove ${walletAddress} after ${context}:`, err);
   });
-}
-
-function ensurePlayerRunState(entity: Entity): void {
-  if (entity.type !== "player") return;
-  entity.maxRunEnergy = Math.max(1, entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY);
-  entity.runEnergy = Math.max(0, Math.min(entity.runEnergy ?? entity.maxRunEnergy, entity.maxRunEnergy));
-  entity.runModeEnabled = entity.runModeEnabled ?? false;
-  entity.isRunning = entity.isRunning ?? false;
-}
-
-function canEntityRun(entity: Entity): boolean {
-  if (entity.type !== "player") return false;
-  ensurePlayerRunState(entity);
-  return entity.runModeEnabled === true && (entity.runEnergy ?? 0) > 0;
 }
 
 /** Return the attack range for an entity based on its class definition. */
@@ -2451,11 +2433,12 @@ function moveToward(
   entity: Entity, tx: number, ty: number,
   zoneEntities?: Map<string, Entity>,
 ): boolean {
-  const running = canEntityRun(entity);
   const dx = tx - entity.x;
   const dy = ty - entity.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
   if (dist <= 5) return true; // arrived
+  // Players auto-run when their destination is far; mobs always walk.
+  const running = entity.type === "player" && dist > RUN_DISTANCE_THRESHOLD;
   const step = Math.min(running ? RUN_MOVE_SPEED : WALK_MOVE_SPEED, dist);
   let nx = entity.x + (dx / dist) * step;
   let ny = entity.y + (dy / dist) * step;
@@ -2482,11 +2465,7 @@ function moveToward(
   entity.x = nx;
   entity.y = ny;
   if (entity.type === "player") {
-    ensurePlayerRunState(entity);
     entity.isRunning = running;
-    if (running) {
-      entity.runEnergy = Math.max(0, (entity.runEnergy ?? 0) - RUN_ENERGY_DRAIN_PER_TICK);
-    }
   }
   return false;
 }
@@ -2530,7 +2509,6 @@ async function worldTick() {
     // Regenerate player resources and clear per-tick locomotion state.
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
-      ensurePlayerRunState(entity);
       entity.isRunning = false;
       if (entity.essence == null || entity.maxEssence == null) continue;
       const intStat = entity.effectiveStats?.int ?? entity.stats?.int ?? 0;
@@ -3247,16 +3225,6 @@ async function worldTick() {
       }
     }
 
-    for (const entity of zone.entities.values()) {
-      if (entity.type !== "player") continue;
-      ensurePlayerRunState(entity);
-      if (entity.isRunning) continue;
-      entity.runEnergy = Math.min(
-        entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
-        (entity.runEnergy ?? 0) + RUN_ENERGY_REGEN_PER_TICK,
-      );
-    }
-
     // ── Entity separation pass: push overlapping entities apart ─────
     // Build spatial grid once — reused for aggro + auto-combat below.
     // Single pass with grid neighbor lookup replaces 3× O(n²) scan;
@@ -3706,9 +3674,6 @@ export async function saveAllOnlinePlayers(): Promise<void> {
         storyFlags: entity.storyFlags ?? [],
         learnedTechniques: entity.learnedTechniques ?? [],
         professions: getLearnedProfessions(entity.walletAddress),
-        runEnergy: entity.runEnergy,
-        maxRunEnergy: entity.maxRunEnergy,
-        runModeEnabled: entity.runModeEnabled,
         equipment: entity.equipment ?? undefined,
       });
       await persistLivePlayerEntity(entity);

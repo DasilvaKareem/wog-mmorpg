@@ -11,6 +11,9 @@ import type {
   QuestLogResponse,
   ZoneQuestsResponse,
   ShopResponse,
+  SellPricesResponse,
+  SellResult,
+  RecycleResult,
   NpcDialogueResponse,
   TechniqueInfo,
   CraftingRecipe,
@@ -559,6 +562,33 @@ export async function buyShopItem(
   });
 }
 
+export async function fetchSellPrices(merchantEntityId: string): Promise<SellPricesResponse | null> {
+  return fetchJsonWithFallback<SellPricesResponse>(`/shop/sell-prices/${merchantEntityId}`);
+}
+
+export async function sellShopItem(
+  token: string,
+  sellerAddress: string,
+  merchantEntityId: string,
+  tokenId: number,
+  quantity: number,
+): Promise<{ ok: boolean; data?: SellResult; error?: string }> {
+  return postJsonWithFallback("/shop/sell", token, {
+    sellerAddress, merchantEntityId, tokenId, quantity,
+  });
+}
+
+export async function recycleItem(
+  token: string,
+  sellerAddress: string,
+  tokenId: number,
+  quantity: number,
+): Promise<{ ok: boolean; data?: RecycleResult; error?: string }> {
+  return postJsonWithFallback("/shop/recycle", token, {
+    sellerAddress, tokenId, quantity,
+  });
+}
+
 export async function fetchInventory(walletAddress: string): Promise<InventoryResponse | null> {
   return fetchJsonWithFallback<InventoryResponse>(`/inventory/${walletAddress}`);
 }
@@ -599,6 +629,14 @@ export async function sendFriendRequest(
   toWallet: string,
 ): Promise<{ ok: boolean; error?: string }> {
   return postJsonWithFallback("/friends/request", token, { fromWallet, toWallet });
+}
+
+export async function sendFriendRequestByName(
+  token: string,
+  fromWallet: string,
+  toName: string,
+): Promise<{ ok: boolean; error?: string; resolvedWallet?: string }> {
+  return postJsonWithFallback("/friends/request-by-name", token, { fromWallet, toName });
 }
 
 export async function acceptFriendRequest(

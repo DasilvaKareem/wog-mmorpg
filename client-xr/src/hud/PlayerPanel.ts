@@ -4,6 +4,7 @@ import {
   fetchFriendRequests,
   fetchFriends,
   removeFriend,
+  sendFriendRequestByName,
 } from "../api.js";
 import type { ActivePlayer, FriendInfo, FriendRequestInfo } from "../types.js";
 import { playSoundEffect } from "../sfx.js";
@@ -40,6 +41,9 @@ export class PlayerPanel {
   private friends: FriendInfo[] = [];
   private friendRequests: FriendRequestInfo[] = [];
   private friendsStatus = "";
+  private addFriendDraft = "";
+  private addFriendInputFocused = false;
+  private addFriendInflight = false;
   private callbacks: PanelCallbacks;
   private visible = false;
 
@@ -281,7 +285,7 @@ export class PlayerPanel {
 
     html += `<div class="pp-friend-section">Friends (${this.friends.length}/50)</div>`;
     if (this.friends.length === 0) {
-      html += `<div class="pp-empty">No friends yet. Inspect a player and use Add Friend.</div>`;
+      html += `<div class="pp-empty">No friends yet. Add by name below or inspect a player and use Add Friend.</div>`;
     } else {
       for (const friend of this.friends) {
         const name = friendDisplayName(friend);
@@ -299,9 +303,66 @@ export class PlayerPanel {
       }
     }
 
+    // Add-friend-by-name row. Lives inside the scrollable list so it scrolls
+    // with the friend list rather than being pinned to the footer.
+    const draft = this.addFriendDraft;
+    html += `<div class="pp-friend-section">Add Friend</div>`;
+    html += `<div class="pp-add-friend-row">`;
+    html += `<input class="pp-add-friend-input" type="text" maxlength="48" placeholder="Player name (e.g. Supermage)" value="${esc(draft)}" />`;
+    html += `<button class="pp-friend-btn pp-friend-accept" data-friend-action="add-by-name">Send</button>`;
+    html += `</div>`;
+
     this.listEl.innerHTML = html;
+
+    // Restore focus + caret if the user was typing when we re-rendered.
+    if (this.addFriendInputFocused) {
+      const input = this.listEl.querySelector(".pp-add-friend-input") as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        const pos = input.value.length;
+        input.setSelectionRange(pos, pos);
+      }
+    }
+
     const online = this.friends.filter((f) => f.online).length;
     this.footerEl.textContent = this.friendsStatus || `${online} online of ${this.friends.length}`;
+  }
+
+  private async addFriendByName(rawName: string): Promise<void> {
+    const name = rawName.trim();
+    if (!name) {
+      this.friendsStatus = "Enter a player name to send a friend request.";
+      this.render();
+      return;
+    }
+    if (!this.socialWallet) {
+      this.friendsStatus = "Deploy an agent to send friend requests.";
+      this.render();
+      return;
+    }
+    if (this.addFriendInflight) return;
+    const token = await this.callbacks.getAuthToken?.();
+    if (!token) {
+      this.friendsStatus = "Sign in to send a friend request.";
+      this.render();
+      return;
+    }
+    this.addFriendInflight = true;
+    this.friendsStatus = `Sending friend request to ${name}…`;
+    this.render();
+
+    const result = await sendFriendRequestByName(token, this.socialWallet, name);
+    this.addFriendInflight = false;
+
+    if (result.ok) {
+      this.friendsStatus = `Friend request sent to ${name}.`;
+      this.addFriendDraft = "";
+      await this.refreshFriends(true);
+    } else {
+      this.friendsStatus = result.error ?? `Couldn't send request to ${name}.`;
+      // Keep the draft so the user can fix a typo without retyping.
+      this.render();
+    }
   }
 
   private async acceptFriendRequest(requestId: string): Promise<void> {
@@ -580,6 +641,25 @@ export class PlayerPanel {
       .pp-friend-btn:hover,
       .pp-friend-icon-btn:hover { border-color: rgba(68, 255, 136, 0.45); color: #fff; }
       .pp-friend-icon-btn:disabled { opacity: 0.35; cursor: default; }
+      .pp-add-friend-row {
+        display: flex;
+        gap: 6px;
+        padding: 8px 10px 10px;
+        border-bottom: 1px solid rgba(68, 255, 136, 0.07);
+      }
+      .pp-add-friend-input {
+        flex: 1;
+        min-width: 0;
+        padding: 6px 8px;
+        background: rgba(8, 14, 24, 0.65);
+        border: 1px solid rgba(68, 255, 136, 0.22);
+        border-radius: 4px;
+        color: #edf2ff;
+        font: 11px monospace;
+        outline: none;
+      }
+      .pp-add-friend-input:focus { border-color: rgba(68, 255, 136, 0.55); }
+      .pp-add-friend-input::placeholder { color: #56617a; }
       .pp-footer {
         padding: 7px 12px;
         border-top: 1px solid rgba(68, 255, 136, 0.14);
@@ -608,6 +688,14 @@ export class PlayerPanel {
       }
 
       const friendAction = (e.target as HTMLElement).dataset.friendAction;
+      if (friendAction === "add-by-name") {
+        playSoundEffect("ui_button_click");
+        const input = this.listEl.querySelector(".pp-add-friend-input") as HTMLInputElement | null;
+        const value = input?.value ?? this.addFriendDraft;
+        this.addFriendDraft = value;
+        void this.addFriendByName(value);
+        return;
+      }
       if (friendAction) {
         playSoundEffect("ui_button_click");
         const requestRow = (e.target as HTMLElement).closest(".pp-friend-request") as HTMLElement | null;
@@ -652,6 +740,30 @@ export class PlayerPanel {
       const zone = (e.target as HTMLElement).closest(".pp-zone-header") as HTMLElement;
       if (zone?.dataset.zoneToggle) {
         this.callbacks.onZoneClick(zone.dataset.zoneToggle);
+      }
+    });
+    // Add-friend input: track focus, mirror draft, Enter to submit.
+    this.listEl.addEventListener("input", (e) => {
+      const t = e.target as HTMLInputElement;
+      if (t?.classList?.contains("pp-add-friend-input")) {
+        this.addFriendDraft = t.value;
+      }
+    });
+    this.listEl.addEventListener("focusin", (e) => {
+      const t = e.target as HTMLElement;
+      if (t?.classList?.contains("pp-add-friend-input")) this.addFriendInputFocused = true;
+    });
+    this.listEl.addEventListener("focusout", (e) => {
+      const t = e.target as HTMLElement;
+      if (t?.classList?.contains("pp-add-friend-input")) this.addFriendInputFocused = false;
+    });
+    this.listEl.addEventListener("keydown", (e) => {
+      const t = e.target as HTMLInputElement;
+      if (!t?.classList?.contains("pp-add-friend-input")) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        playSoundEffect("ui_button_click");
+        void this.addFriendByName(t.value);
       }
     });
   }

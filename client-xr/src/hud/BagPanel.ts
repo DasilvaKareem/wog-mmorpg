@@ -50,6 +50,14 @@ function esc(s: string): string {
 interface BagPanelCallbacks {
   onUseItem?: (item: InventoryItem) => void;
   onEquipItem?: (item: InventoryItem) => void;
+  onRecycleItem?: (item: InventoryItem, qty: number) => void;
+}
+
+const NON_RECYCLABLE_CATEGORIES = new Set(["currency"]);
+function isRecyclable(item: InventoryItem): boolean {
+  if (item.equipped) return false;
+  const cat = (item.category ?? "").toLowerCase();
+  return !NON_RECYCLABLE_CATEGORIES.has(cat);
 }
 
 export class BagPanel {
@@ -115,7 +123,7 @@ export class BagPanel {
       this.tooltipEl.style.display = "none";
     });
 
-    // Click to equip / unequip / use
+    // Click to equip / unequip / use; Shift+click to recycle
     this.gridEl.addEventListener("click", (e) => {
       if (!this.isOwn) return;
       const cell = (e.target as HTMLElement).closest(".bag-cell[data-idx]") as HTMLElement;
@@ -125,6 +133,11 @@ export class BagPanel {
       if (!item) return;
 
       playSoundEffect("ui_button_click");
+
+      if (e.shiftKey && isRecyclable(item)) {
+        this.callbacks.onRecycleItem?.(item, item.quantity);
+        return;
+      }
 
       const isEquippable = Boolean(item.equipSlot)
         && (item.category === "armor" || item.category === "weapon" || item.category === "tool");
@@ -246,6 +259,9 @@ export class BagPanel {
     }
     if (item.equipped) {
       html += `<div class="bag-tt-equipped">Equipped</div>`;
+    }
+    if (this.isOwn && isRecyclable(item)) {
+      html += `<div class="bag-tt-recycle">Shift+click to recycle</div>`;
     }
 
     this.tooltipEl.innerHTML = html;
@@ -417,6 +433,7 @@ export class BagPanel {
       .bag-tt-dur { color: #997; font-size: 10px; }
       .bag-tt-qty { color: #997; font-size: 10px; }
       .bag-tt-equipped { color: #4f8; font-size: 10px; font-weight: bold; margin-top: 2px; }
+      .bag-tt-recycle { color: #d4a85a; font-size: 10px; margin-top: 3px; font-style: italic; }
     `;
     document.head.appendChild(style);
   }

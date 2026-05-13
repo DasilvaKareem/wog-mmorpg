@@ -3,6 +3,7 @@ import type {
   CraftingRecipe, GuildSummary, MyGuildResponse, GuildProposal,
   GuildProposalType, AuctionListing,
   ProfessionEntry, EnchantmentEntry, ArenaInfo, PvpLeaderboardEntry,
+  InventoryItem, SellPriceEntry,
 } from "../types.js";
 import {
   fetchShopInventory, buyShopItem, sendNpcDialogue,
@@ -16,6 +17,7 @@ import {
   fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
   fetchProfessionCatalog, learnProfession,
   fetchEnchantingCatalog, applyEnchantment,
+  fetchInventory, fetchSellPrices, sellShopItem,
 } from "../api.js";
 import type { ActiveBattle, QueueStatusEntry, BattleDetails } from "../api.js";
 
@@ -144,6 +146,13 @@ export class NpcDialog {
   private shopLoading = false;
   private dialogSending = false;
   private playerGold: number | null = null;
+  // Sell tab
+  private sellPrices: SellPriceEntry[] = [];
+  private merchantGold = 0;
+  private merchantNpcName = "";
+  private sellInventory: InventoryItem[] = [];
+  private sellLoading = false;
+  private sellLoaded = false;
   // Skills (trainer)
   private techniques: TechniqueInfo[] = [];
   private techniquesLoading = false;
@@ -165,6 +174,8 @@ export class NpcDialog {
   // Auctions
   private auctions: AuctionListing[] = [];
   private auctionsLoading = false;
+  private auctionsLoaded = false;
+  private auctionsError: string | null = null;
   private auctionPollTimer: ReturnType<typeof setInterval> | null = null;
   /** Buttons disabled while a bid/buyout request is inflight. */
   private auctionPendingAction = new Set<string>();
@@ -243,6 +254,7 @@ export class NpcDialog {
       if (!btn) return;
       const action = btn.dataset.action;
       if (action === "buy" && btn.dataset.tokenId) void this.handleBuy(Number(btn.dataset.tokenId));
+      if (action === "sell" && btn.dataset.tokenId && btn.dataset.qty) void this.handleSell(Number(btn.dataset.tokenId), Number(btn.dataset.qty));
       if (action === "learn" && btn.dataset.techniqueId) void this.handleLearn(btn.dataset.techniqueId);
       if (action === "craft" && btn.dataset.recipeId) void this.handleCraft(btn.dataset.recipeId);
       if (action === "create-guild") void this.handleCreateGuild();
@@ -258,6 +270,11 @@ export class NpcDialog {
       }
       if (action === "bid" && btn.dataset.auctionId) void this.handleBid(btn.dataset.auctionId);
       if (action === "buyout" && btn.dataset.auctionId) void this.handleBuyout(btn.dataset.auctionId);
+      if (action === "auction-retry") {
+        this.auctionsLoaded = false;
+        this.auctionsError = null;
+        if (this.activeTab === "auctions") this.renderAuctions();
+      }
       if (action === "queue-join") void this.handleQueueJoin();
       if (action === "queue-join-party") void this.handleQueuePartyJoin();
       if (action === "queue-leave") void this.handleQueueLeave();
@@ -288,6 +305,12 @@ export class NpcDialog {
     this.playerGold = null;
     this.shopLoading = false;
     this.dialogSending = false;
+    this.sellPrices = [];
+    this.merchantGold = 0;
+    this.merchantNpcName = "";
+    this.sellInventory = [];
+    this.sellLoading = false;
+    this.sellLoaded = false;
     this.techniques = [];
     this.techniquesLoading = false;
     this.recipes = [];
@@ -300,6 +323,8 @@ export class NpcDialog {
     this.composeProposalType = "withdraw-gold";
     this.auctions = [];
     this.auctionsLoading = false;
+    this.auctionsLoaded = false;
+    this.auctionsError = null;
     this.arenaInfo = null;
     this.arenaLoading = false;
     this.leaderboard = [];
@@ -355,7 +380,11 @@ export class NpcDialog {
   private getTabs(type: string): { id: string; label: string }[] {
     switch (type) {
       case "merchant":
-        return [{ id: "shop", label: "Shop" }, { id: "dialog", label: "Talk" }];
+        return [
+          { id: "shop", label: "Shop" },
+          { id: "sell", label: "Sell" },
+          { id: "dialog", label: "Talk" },
+        ];
       case "quest-giver":
         return [{ id: "dialog", label: "Talk" }, { id: "quests", label: "Quests" }];
       case "trainer":
@@ -384,6 +413,7 @@ export class NpcDialog {
     this.footerEl.innerHTML = "";
     switch (this.activeTab) {
       case "shop": this.renderShop(); break;
+      case "sell": this.renderSell(); break;
       case "quests": this.renderQuests(); break;
       case "skills": this.renderSkills(); break;
       case "craft": this.renderCraft(); break;
@@ -546,6 +576,120 @@ export class NpcDialog {
       if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Buy"; }, 2000); }
     }
     if (this.playerGold != null) this.footerEl.innerHTML = `<div class="nd-footer-text">Your gold: ${this.playerGold}</div>`;
+  }
+
+  // ── Sell view ──────────────────────────────────────────────────
+
+  private renderSell() {
+    const hasChar = !!this.callbacks.getOwnEntityId();
+    if (!hasChar) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Deploy a character to sell items</div>`;
+      this.footerEl.innerHTML = "";
+      return;
+    }
+    if (!this.sellLoaded && !this.sellLoading) {
+      this.sellLoading = true;
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading inventory...</div>`;
+      void this.loadSell();
+      return;
+    }
+    if (this.sellLoading) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading inventory...</div>`;
+      return;
+    }
+
+    const priceByToken = new Map<number, SellPriceEntry>();
+    for (const p of this.sellPrices) {
+      if (p.buyPrice <= 0) continue;
+      const id = Number(p.tokenId);
+      if (Number.isFinite(id)) priceByToken.set(id, p);
+    }
+
+    const sellable = this.sellInventory
+      .filter((item) => !item.equipped && item.quantity > 0 && priceByToken.has(item.tokenId));
+
+    const merchantName = this.merchantNpcName || this.entity?.name || "Merchant";
+    const headerHtml = `
+      <div class="nd-sell-header">
+        <span>${esc(merchantName)} has <b>${this.merchantGold}c</b></span>
+        <span class="nd-sell-sub">pays ~50% of market</span>
+      </div>
+    `;
+
+    if (sellable.length === 0) {
+      this.contentEl.innerHTML = `${headerHtml}<div class="nd-empty">No items this merchant will buy</div>`;
+      const goldText = this.playerGold != null ? `Your gold: ${this.playerGold}` : "";
+      this.footerEl.innerHTML = goldText ? `<div class="nd-footer-text">${goldText}</div>` : "";
+      return;
+    }
+
+    let html = "";
+    for (const item of sellable) {
+      const price = priceByToken.get(item.tokenId)!;
+      const total = price.buyPrice * item.quantity;
+      const affordable = price.buyPrice <= this.merchantGold;
+      const slotText = item.equipSlot ? `[${item.equipSlot}]` : item.category || "";
+      html += `<div class="nd-shop-item">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(item.name)}</span><span class="nd-shop-item-slot">${esc(slotText)}</span></div>`;
+      html += `<div class="nd-shop-item-stats">x${item.quantity} owned · ${price.buyPrice}c each${item.quantity > 1 ? ` · stack: ${total}c` : ""}</div>`;
+      html += `<div class="nd-shop-item-footer">`;
+      html += `<span class="nd-shop-item-price">${price.buyPrice}c</span>`;
+      if (!affordable) {
+        html += `<span class="nd-shop-item-stock" style="color:#c66">Merchant low on gold</span>`;
+      } else {
+        html += `<button class="nd-btn" data-action="sell" data-token-id="${item.tokenId}" data-qty="1">Sell 1</button>`;
+        if (item.quantity > 1) {
+          html += `<button class="nd-btn" data-action="sell" data-token-id="${item.tokenId}" data-qty="${item.quantity}">Sell All</button>`;
+        }
+      }
+      html += `</div></div>`;
+    }
+    this.contentEl.innerHTML = `${headerHtml}<div class="nd-shop-grid">${html}</div>`;
+    const goldText = this.playerGold != null ? `Your gold: ${this.playerGold}` : "";
+    this.footerEl.innerHTML = goldText ? `<div class="nd-footer-text">${goldText}</div>` : "";
+  }
+
+  private async loadSell() {
+    if (!this.entity) { this.sellLoading = false; return; }
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!addr) { this.sellLoading = false; this.sellLoaded = true; return; }
+    const [inv, prices, balance] = await Promise.all([
+      fetchInventory(addr),
+      fetchSellPrices(this.entity.id),
+      this.playerGold == null ? fetchWalletBalance(addr) : Promise.resolve(null),
+    ]);
+    this.sellLoading = false;
+    this.sellLoaded = true;
+    this.sellInventory = inv?.items ?? [];
+    this.sellPrices = prices?.items ?? [];
+    this.merchantGold = prices?.merchantGold ?? 0;
+    this.merchantNpcName = prices?.npcName ?? "";
+    if (balance && this.playerGold == null) this.playerGold = balance.copper;
+    if (this.activeTab === "sell") this.renderSell();
+  }
+
+  private async handleSell(tokenId: number, qty: number) {
+    if (!this.entity) return;
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr || qty <= 0) return;
+    const btn = this.contentEl.querySelector(`[data-action="sell"][data-token-id="${tokenId}"][data-qty="${qty}"]`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await sellShopItem(token, addr, this.entity.id, tokenId, qty);
+    if (result.ok && result.data) {
+      const sold = result.data.quantity;
+      const payout = result.data.totalPayout;
+      const invItem = this.sellInventory.find((i) => i.tokenId === tokenId);
+      if (invItem) invItem.quantity = Math.max(0, invItem.quantity - sold);
+      this.merchantGold = Math.max(0, this.merchantGold - payout);
+      if (this.playerGold != null) this.playerGold += payout;
+      else this.playerGold = payout;
+      this.callbacks.notify?.(`Sold ${sold}x ${result.data.item} for ${payout}c`, "success");
+      this.renderSell();
+    } else {
+      this.callbacks.notify?.(result.error ?? "Sell failed", "error");
+      if (btn) { btn.textContent = result.error ?? "Failed"; setTimeout(() => this.renderSell(), 1500); }
+    }
   }
 
   // ── Skills view (trainer) ─────────────────────────────────────
@@ -1073,7 +1217,11 @@ export class NpcDialog {
   // ── Auctions view ─────────────────────────────────────────────
 
   private renderAuctions() {
-    if (this.auctions.length === 0 && !this.auctionsLoading) {
+    // Initial entry: never loaded → kick off load and show spinner. Subsequent
+    // empty results land in the "loaded but empty" branch below, so the load
+    // doesn't re-trigger every render (which previously caused the UI to be
+    // stuck on "Loading auctions..." forever).
+    if (!this.auctionsLoaded && !this.auctionsLoading) {
       this.auctionsLoading = true;
       this.contentEl.innerHTML = `<div class="nd-empty">Loading auctions...</div>`;
       void this.loadAuctions();
@@ -1081,6 +1229,10 @@ export class NpcDialog {
     }
     if (this.auctionsLoading && this.auctions.length === 0) {
       this.contentEl.innerHTML = `<div class="nd-empty">Loading auctions...</div>`;
+      return;
+    }
+    if (this.auctionsError && this.auctions.length === 0) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Failed to load auctions: ${esc(this.auctionsError)} <button class="nd-btn" data-action="auction-retry">Retry</button></div>`;
       return;
     }
     if (this.auctions.length === 0) { this.contentEl.innerHTML = `<div class="nd-empty">No active auctions</div>`; return; }
@@ -1114,10 +1266,13 @@ export class NpcDialog {
     try {
       const data = await fetchAuctions(zoneId);
       this.auctions = data;
+      this.auctionsError = null;
     } catch (err) {
       console.warn("[npc-dialog] auction refresh failed", err);
+      this.auctionsError = err instanceof Error ? err.message : "network error";
     } finally {
       this.auctionsLoading = false;
+      this.auctionsLoaded = true;
       if (this.activeTab === "auctions") this.renderAuctions();
     }
   }
@@ -1934,6 +2089,19 @@ export class NpcDialog {
       }
       .nd-shop-item-price { color: #ffcc00; font-weight: bold; font-size: 12px; }
       .nd-shop-item-stock { color: #667; font-size: 10px; }
+
+      .nd-sell-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 8px 16px;
+        background: rgba(255,204,0,0.06);
+        border-bottom: 1px solid rgba(255,204,0,0.15);
+        color: #dde;
+        font-size: 11px;
+      }
+      .nd-sell-header b { color: #ffcc00; }
+      .nd-sell-sub { color: #778; font-size: 10px; font-style: italic; }
 
       .nd-btn {
         margin-left: auto;

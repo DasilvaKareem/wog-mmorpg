@@ -14,20 +14,19 @@ import {
 interface CommandBody {
   zoneId: string;
   entityId: string;
-  action: "move" | "attack" | "attack-nearest" | "travel" | "set-run";
+  action: "move" | "attack" | "attack-nearest" | "travel";
   x?: number;
   y?: number;
   targetId?: string;
   targetZone?: string;
   mobName?: string;
-  runEnabled?: boolean;
 }
 
 export function registerCommands(server: FastifyInstance) {
   server.post<{ Body: CommandBody }>("/command", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, entityId, action, x, y, targetId, targetZone, mobName, runEnabled } = request.body;
+    const { zoneId, entityId, action, x, y, targetId, targetZone, mobName } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     const entity = getEntity(entityId);
@@ -125,17 +124,6 @@ export function registerCommands(server: FastifyInstance) {
       // Set move order toward the target region center (world-space)
       order = { action: "move", x: center.x, y: center.z };
       entity.travelTargetZone = targetZone;
-    } else if (action === "set-run") {
-      if (entity.type !== "player") {
-        reply.code(400);
-        return { error: "set-run requires a player entity" };
-      }
-      entity.runModeEnabled = typeof runEnabled === "boolean" ? runEnabled : !entity.runModeEnabled;
-      entity.maxRunEnergy = Math.max(1, entity.maxRunEnergy ?? 100);
-      entity.runEnergy = Math.max(0, Math.min(entity.runEnergy ?? entity.maxRunEnergy, entity.maxRunEnergy));
-      if (!entity.runModeEnabled) {
-        entity.isRunning = false;
-      }
     } else {
       reply.code(400);
       return { error: `Unknown action: ${action}` };
@@ -162,9 +150,6 @@ export function registerCommands(server: FastifyInstance) {
         level: entity.level,
         xp: entity.xp,
         region: entity.region,
-        runEnergy: entity.runEnergy,
-        maxRunEnergy: entity.maxRunEnergy,
-        runModeEnabled: entity.runModeEnabled,
         isRunning: entity.isRunning,
       },
       questProgress: questProgress.length > 0 ? questProgress : undefined,

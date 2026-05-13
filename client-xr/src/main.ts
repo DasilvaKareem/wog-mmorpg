@@ -32,7 +32,6 @@ import type { CharacterReadyDetail } from "./hud/CharacterSelect.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { QuestPanel } from "./hud/QuestPanel.js";
 import { NpcDialog } from "./hud/NpcDialog.js";
-import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SettingsPanel } from "./hud/SettingsPanel.js";
 import { SkillsPanel } from "./hud/SkillsPanel.js";
@@ -50,7 +49,7 @@ import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -374,11 +373,6 @@ const sky = new SkyRenderer(scene);
 const clickMarker = new ClickMarker();
 clickMarker.setElevationProvider(world);
 scene.add(clickMarker.mesh);
-const runPanel = new RunPanel({
-  onToggle: () => {
-    void toggleRunMode();
-  },
-});
 const bgm = new BgmManager();
 createSfxManager();
 
@@ -473,8 +467,6 @@ const charSelect = !isAnimationLab
       ownCustodialWallet = detail.custodialWallet?.toLowerCase() ?? null;
       ownEntityId = detail.entityId || null;
       void import("./scene/AnimationResolver.js").then(m => m.setAnimDebugSelfName(detail.characterName));
-      desiredRunMode = null;
-      runPanel.reset();
       inboxPanel.setCustodialWallet(ownCustodialWallet);
       playerPanel.setFriendIdentity(ownWalletAddress, ownCustodialWallet ?? ownWalletAddress);
       lastInboxPollTime = 0;
@@ -498,8 +490,6 @@ const charSelect = !isAnimationLab
     },
     onBack: () => {
       charSelect!.hide();
-      desiredRunMode = null;
-      runPanel.reset();
       landing!.show();
     },
   })
@@ -514,8 +504,6 @@ const landing = !isAnimationLab
         void charSelect!.show(ownWalletAddress);
       } else {
         // Guest mode — skip character select, enter as spectator
-        desiredRunMode = null;
-        runPanel.reset();
         controls.setLandingMode(false);
         setGameplayHudVisible(true);
         console.log("[enter] Guest spectator mode");
@@ -570,7 +558,6 @@ function setGameplayHudVisible(visible: boolean) {
     "player-panel",
     "panel-toggle",
     "agent-chat",
-    "run-panel",
     "minimap",
     "world-map",
     "intent-tooltip",
@@ -596,7 +583,6 @@ let ownCustodialWallet: string | null = null;
 let ownEntityId: string | null = null;
 let ownCharacterInfo: { level: number; characterTokenId: string | null; agentId: string | null } | null = null;
 let latestActivePlayers: ActivePlayer[] = [];
-let desiredRunMode: boolean | null = null;
 let autoLockEnabled = isDisplayMode;
 let manualUnlockUntilMs = 0;
 let isPollingNearbyZones = false;
@@ -606,7 +592,6 @@ let questLogData: QuestLogResponse | null = null;
 let logoutInFlight = false;
 const QUEST_POLL_INTERVAL = 5_000;
 const processedRecentEventIds = new Map<string, number>();
-const DEFAULT_RUN_ENERGY = 100;
 
 async function logoutOwnCharacter(reason: string) {
   if (logoutInFlight || !ownWalletAddress || !ownEntityId) return;
@@ -651,66 +636,6 @@ function queueLogoutOnExit(reason: string) {
     console.warn(`[logout] keepalive failed during ${reason}:`, error);
     logoutInFlight = false;
   });
-}
-
-function updateRunPanelFromEntity(entity: Entity | null | undefined) {
-  if (!ownWalletAddress || !ownEntityId || !entity || entity.id !== ownEntityId) {
-    runPanel.update({
-      available: false,
-      enabled: false,
-      running: false,
-      energy: 0,
-      maxEnergy: DEFAULT_RUN_ENERGY,
-    });
-    return;
-  }
-
-  if (desiredRunMode != null && entity.runModeEnabled === desiredRunMode) {
-    desiredRunMode = null;
-  }
-
-  runPanel.update({
-    available: true,
-    enabled: desiredRunMode ?? entity.runModeEnabled ?? false,
-    running: entity.isRunning ?? false,
-    energy: entity.runEnergy ?? entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
-    maxEnergy: entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
-  });
-}
-
-async function toggleRunMode() {
-  if (!ownWalletAddress || !ownEntityId) return;
-
-  const ownEntity = entities.getEntity(ownEntityId);
-  const zoneId = ownEntity?.zoneId;
-  if (!ownEntity || !zoneId) return;
-
-  const nextEnabled = !(desiredRunMode ?? ownEntity.runModeEnabled ?? false);
-  desiredRunMode = nextEnabled;
-  updateRunPanelFromEntity({
-    ...ownEntity,
-    runModeEnabled: nextEnabled,
-  });
-
-  const token = await getAuthToken(ownWalletAddress);
-  if (!token) {
-    desiredRunMode = null;
-    updateRunPanelFromEntity(ownEntity);
-    return;
-  }
-
-  const result = await postCommand(token, {
-    zoneId,
-    entityId: ownEntityId,
-    action: "set-run",
-    runEnabled: nextEnabled,
-  });
-
-  if (!result.ok) {
-    console.log("[run] Toggle failed:", result.error);
-    desiredRunMode = null;
-    updateRunPanelFromEntity(entities.getEntity(ownEntityId));
-  }
 }
 
 function filterNewZoneEvents(events: NonNullable<ZoneResponse["recentEvents"]>) {
@@ -1130,6 +1055,28 @@ const bagPanel = new BagPanel({
     }
     lastInventoryPollTime = 0;
     void pollInventory();
+  },
+  onRecycleItem: async (item, qty) => {
+    if (!ownWalletAddress) return;
+    const stack = item.quantity ?? 1;
+    const sellQty = qty > 1 ? stack : 1;
+    const ask = sellQty > 1
+      ? `Recycle all ${stack}x ${item.name}?`
+      : `Recycle 1x ${item.name}?`;
+    if (!window.confirm(ask)) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await recycleItem(token, ownWalletAddress, item.tokenId, sellQty);
+    if (result.ok && result.data) {
+      agentChat.addSystemMessage(
+        `Recycled ${result.data.quantity}x ${result.data.item} for ${result.data.totalPayoutCopper}c`,
+        "success",
+      );
+      lastInventoryPollTime = 0;
+      void pollInventory();
+    } else {
+      agentChat.addSystemMessage(result.error ?? "Recycle failed", "error");
+    }
   },
 });
 bagPanel.setPlayer(null, true);
@@ -1984,7 +1931,6 @@ async function pollNearbyZones() {
       }
     }
 
-    updateRunPanelFromEntity(ownEntityId ? merged[ownEntityId] : null);
     latestEntities = merged;
     vitalsPanel.update(ownEntityId ? merged[ownEntityId] : null, merged);
     buffBar.update(ownEntityId ? merged[ownEntityId] : null);
@@ -2538,11 +2484,6 @@ window.addEventListener("keydown", (e) => {
     openPanel("chat");
     return;
   }
-  if (e.key === "r" || e.key === "R") {
-    e.preventDefault();
-    void toggleRunMode();
-    return;
-  }
   if (e.key === "v" || e.key === "V") {
     intentLines.cycleVisibilityMode();
   }
@@ -2671,7 +2612,6 @@ async function init() {
     document.getElementById("player-panel")?.style.setProperty("display", "none");
     document.getElementById("panel-toggle")?.style.setProperty("display", "none");
     document.getElementById("agent-chat")?.style.setProperty("display", "none");
-    document.getElementById("run-panel")?.style.setProperty("display", "none");
     document.getElementById("minimap")?.style.setProperty("display", "none");
     document.getElementById("world-map")?.style.setProperty("display", "none");
     document.getElementById("intent-tooltip")?.style.setProperty("display", "none");

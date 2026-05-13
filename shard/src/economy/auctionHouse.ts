@@ -651,14 +651,26 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
 
       const auctions = [];
       for (const auctionId of auctionIds) {
-        const auction = await getAuctionFromChain(auctionId);
+        try {
+          const auction = await getAuctionFromChain(auctionId);
 
-        // Filter by tokenId if specified
-        if (tokenId && auction.tokenId !== parseInt(tokenId, 10)) {
+          // Filter by tokenId if specified
+          if (tokenId && auction.tokenId !== parseInt(tokenId, 10)) {
+            continue;
+          }
+
+          auctions.push(formatAuctionForResponse(auction));
+        } catch (auctionErr) {
+          // One orphaned/missing auction id (stale DB projection, cache miss
+          // after restart) used to throw out of the loop and 500 the whole
+          // response — leaving the client UI stuck on "Loading auctions...".
+          // Skip the bad id and keep listing the rest.
+          server.log.warn(
+            { auctionId, zoneId, err: auctionErr instanceof Error ? auctionErr.message : auctionErr },
+            "Skipping auction id missing from cache/chain",
+          );
           continue;
         }
-
-        auctions.push(formatAuctionForResponse(auction));
       }
 
       return auctions;

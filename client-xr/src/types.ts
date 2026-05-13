@@ -36,9 +36,6 @@ export interface Entity {
   maxEssence?: number;
   order?: EntityOrder;
   activeEffects?: ActiveEffect[];
-  runEnergy?: number;
-  maxRunEnergy?: number;
-  runModeEnabled?: boolean;
   isRunning?: boolean;
   // Resource nodes
   oreType?: string;
@@ -497,6 +494,39 @@ export interface ShopResponse {
   npcId: string;
   npcName: string;
   items: ShopItem[];
+}
+
+export interface SellPriceEntry {
+  tokenId: string;
+  name: string;
+  buyPrice: number;
+  currentPrice: number;
+  stock: number;
+  targetStock: number;
+}
+
+export interface SellPricesResponse {
+  merchantEntityId: string;
+  npcName: string;
+  zoneId: string;
+  merchantGold: number;
+  items: SellPriceEntry[];
+}
+
+export interface SellResult {
+  item: string;
+  quantity: number;
+  unitBuyPrice: number;
+  totalPayout: number;
+  merchantEntityId: string;
+}
+
+export interface RecycleResult {
+  item: string;
+  quantity: number;
+  unitRecycleValue: number;
+  totalPayoutCopper: number;
+  goldPayout: number;
 }
 
 // ── Inventory types (for BagPanel) ────────────────────────────────
