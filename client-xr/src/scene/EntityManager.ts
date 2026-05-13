@@ -1671,6 +1671,28 @@ export class EntityManager {
     }
   }
 
+  /**
+   * Render a speech bubble above an entity locally — no server roundtrip,
+   * no broadcast to other clients. Used for private agent replies so only the
+   * player who initiated the chat sees their character speak.
+   */
+  showLocalSpeechBubble(entityId: string, text: string) {
+    const obj = this.entities.get(entityId);
+    if (!obj) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.removeSpeechBubble(entityId);
+    const sprite = makeSpeechBubble(trimmed);
+    sprite.position.y = 2.5;
+    obj.group.add(sprite);
+    this.speechBubbles.push({
+      sprite,
+      entityId,
+      elapsed: 0,
+      duration: Math.min(4 + trimmed.length * 0.05, 8),
+    });
+  }
+
   private forEachEntityMaterial(obj: EntityObject, fn: (mat: THREE.Material) => void) {
     obj.group.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;

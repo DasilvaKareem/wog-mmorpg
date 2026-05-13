@@ -25,6 +25,14 @@ export interface SkillsPanelCallbacks {
   saveEdicts: (edicts: Edict[]) => Promise<{ ok: boolean; error?: string }>;
   /** Fired when the user switches tabs — host may kick polling. */
   onTabChange?: (tab: SkillsTab) => void;
+  /** Fired when the user clicks a profession cell — host opens the recipes panel. */
+  onProfessionClick?: (info: {
+    profId: string;
+    profName: string;
+    profIcon: string;
+    skillLevel: number;
+    learned: boolean;
+  }) => void;
 }
 
 /**
@@ -103,6 +111,22 @@ export class SkillsPanel {
       const related = (e as MouseEvent).relatedTarget as HTMLElement | null;
       if (related && cell.contains(related)) return;
       this.profTooltip.style.display = "none";
+    });
+    this.profGrid.addEventListener("click", (e) => {
+      const cell = (e.target as HTMLElement).closest(".sk-cell") as HTMLElement;
+      const profId = cell?.dataset.prof;
+      if (!profId) return;
+      const prof = PROFESSIONS.find((p) => p.id === profId);
+      if (!prof) return;
+      playSoundEffect("ui_tab_switch");
+      this.profTooltip.style.display = "none";
+      this.callbacks.onProfessionClick?.({
+        profId,
+        profName: prof.name,
+        profIcon: prof.icon,
+        skillLevel: this.skills[profId]?.level ?? 0,
+        learned: this.learnedIds.has(profId),
+      });
     });
 
     // ── Skills view ───────────────────────────────────────────
@@ -244,9 +268,10 @@ export class SkillsPanel {
       html += `</div>`;
       html += `<div class="sk-tt-xp">XP: ${skill.xp.toLocaleString()}</div>`;
       html += `<div class="sk-tt-actions">Actions: ${skill.actions.toLocaleString()}</div>`;
+      html += `<div class="sk-tt-hint">Click to view recipes</div>`;
     } else {
       html += `<div class="sk-tt-locked">Not learned</div>`;
-      html += `<div class="sk-tt-hint">Visit a profession trainer to learn</div>`;
+      html += `<div class="sk-tt-hint">Visit a profession trainer · click to preview recipes</div>`;
     }
 
     this.profTooltip.innerHTML = html;

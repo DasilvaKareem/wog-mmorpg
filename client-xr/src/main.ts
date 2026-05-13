@@ -35,6 +35,7 @@ import { NpcDialog } from "./hud/NpcDialog.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SettingsPanel } from "./hud/SettingsPanel.js";
 import { SkillsPanel } from "./hud/SkillsPanel.js";
+import { RecipesPanel } from "./hud/RecipesPanel.js";
 import type { LearnedTechnique } from "./hud/LearnedTechniquesList.js";
 import type { Edict } from "./hud/EdictEditor.js";
 import { InboxPanel } from "./hud/InboxPanel.js";
@@ -457,6 +458,9 @@ const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const worldMap = new WorldMap();
 const agentChat = new AgentChat();
+agentChat.setOnAgentReply((entityId, text) => {
+  entities.showLocalSpeechBubble(entityId, text);
+});
 const charSelect = !isAnimationLab
   && !isDisplayMode
   ? new CharacterSelect({
@@ -1058,6 +1062,7 @@ const bagPanel = new BagPanel({
   },
   onRecycleItem: async (item, qty) => {
     if (!ownWalletAddress) return;
+    const sellerWallet = ownCustodialWallet ?? ownWalletAddress;
     const stack = item.quantity ?? 1;
     const sellQty = qty > 1 ? stack : 1;
     const ask = sellQty > 1
@@ -1066,7 +1071,7 @@ const bagPanel = new BagPanel({
     if (!window.confirm(ask)) return;
     const token = await getAuthToken(ownWalletAddress);
     if (!token) return;
-    const result = await recycleItem(token, ownWalletAddress, item.tokenId, sellQty);
+    const result = await recycleItem(token, sellerWallet, item.tokenId, sellQty);
     if (result.ok && result.data) {
       agentChat.addSystemMessage(
         `Recycled ${result.data.quantity}x ${result.data.item} for ${result.data.totalPayoutCopper}c`,
@@ -1080,6 +1085,7 @@ const bagPanel = new BagPanel({
   },
 });
 bagPanel.setPlayer(null, true);
+const recipesPanel = new RecipesPanel();
 const skillsPanel = new SkillsPanel({
   saveEdicts: (edicts) => saveEdictsToShard(edicts),
   onTabChange: (tab) => {
@@ -1087,6 +1093,7 @@ const skillsPanel = new SkillsPanel({
     else if (tab === "skills") { lastLearnedTechPollTime = 0; void pollLearnedTechniques(); }
     else if (tab === "edicts") { lastLearnedTechPollTime = 0; lastEdictsPollTime = 0; void pollLearnedTechniques(); void pollEdicts(); }
   },
+  onProfessionClick: (info) => { void recipesPanel.show(info); },
 });
 const vitalsPanel = new VitalsPanel();
 const buffBar = new BuffBar();
@@ -1702,6 +1709,7 @@ const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
   getOwnEntityId: () => ownEntityId,
   getOwnWalletAddress: () => ownWalletAddress,
+  getOwnInventoryWallet: () => ownCustodialWallet ?? ownWalletAddress,
   getOwnParty: () => {
     if (!ownEntityId) return null;
     const own = latestEntities[ownEntityId];
@@ -2582,7 +2590,7 @@ function animate() {
   entities.update(dt, camera);
   effects.update(dt);
   intentLines.update(dt);
-  world.updateAnimations(dt);
+  world.updateAnimations(dt, scene.fog instanceof THREE.FogExp2 ? scene.fog.color : undefined);
   syncWeaponsToTuner();
 
   // Click-to-move marker

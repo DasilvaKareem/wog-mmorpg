@@ -105,7 +105,7 @@ const EVENT_COLORS: Record<string, string> = {
  * Unified chat console: zone events + agent command input + slash commands.
  * Press Enter or T to focus, type a command, Enter to send.
  */
-type ActiveTab = "chat" | "ai";
+type ActiveTab = "chat" | "agent" | "ai";
 
 interface AgentStatus {
   currentActivity: string | null;
@@ -170,6 +170,7 @@ export class AgentChat {
   private sending = false;
   private walletAddress: string | null = null;
   private entityId: string | null = null;
+  private onAgentReply: ((entityId: string, text: string) => void) | null = null;
   private suggestions: typeof SLASH_COMMANDS = [];
   private selectedSuggestion = 0;
   private activeTab: ActiveTab = "chat";
@@ -309,6 +310,7 @@ export class AgentChat {
     } else {
       this.input.placeholder = "Send a command to your agent...";
       this.stopAiPolling();
+      this.renderMessages();
     }
     if (this.expanded) this.input.focus();
   }
@@ -321,7 +323,7 @@ export class AgentChat {
     drag.title = "Drag chat panel";
     drag.textContent = ":::";
     this.tabBar.appendChild(drag);
-    for (const [id, label] of [["chat", "Chat"], ["ai", "Bot"]] as const) {
+    for (const [id, label] of [["chat", "Chat"], ["agent", "Agent"], ["ai", "Bot"]] as const) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "agent-chat-tab" + (this.activeTab === id ? " active" : "");
@@ -462,6 +464,15 @@ export class AgentChat {
     this.entityId = id;
   }
 
+  /**
+   * Register a callback invoked when the agent replies via /agent/chat.
+   * main.ts wires this to EntityManager.showLocalSpeechBubble so the reply
+   * renders as a private speech bubble above the player's own character.
+   */
+  setOnAgentReply(cb: ((entityId: string, text: string) => void) | null) {
+    this.onAgentReply = cb;
+  }
+
   /** Add zone events to the feed */
   addEvents(events: ZoneEvent[]) {
     for (const ev of events) {
@@ -597,9 +608,15 @@ export class AgentChat {
   }
 
   private renderMessages() {
-    const visible = this.expanded
-      ? this.messages
-      : this.messages.slice(-COLLAPSED_VISIBLE);
+    // Agent tab shows only the private user↔agent conversation so it doesn't
+    // get drowned out by streaming zone events.
+    const tabFilter = (msg: ChatEntry): boolean => {
+      if (this.activeTab === "agent") return msg.role !== "event";
+      if (this.activeTab === "chat") return msg.role !== "user" && msg.role !== "agent";
+      return true;
+    };
+    const pool = this.messages.filter(tabFilter);
+    const visible = this.expanded ? pool : pool.slice(-COLLAPSED_VISIBLE);
 
     this.log.innerHTML = "";
     for (const msg of visible) {
@@ -789,6 +806,9 @@ export class AgentChat {
       const data = await res.json();
       if (data.response) {
         this.push({ role: "agent", text: data.response, time: Date.now(), color: "#7fd6be" });
+        if (this.entityId && this.onAgentReply) {
+          this.onAgentReply(this.entityId, data.response);
+        }
       }
     } catch (err) {
       this.push({ role: "system", text: `Network error: ${err}`, time: Date.now(), color: "#ff8866" });

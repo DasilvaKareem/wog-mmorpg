@@ -110,6 +110,13 @@ interface NpcDialogCallbacks {
   getOwnEntityId: () => string | null;
   getOwnWalletAddress: () => string | null;
   /**
+   * Wallet that holds the player's items (custodial for agent-deployed characters,
+   * owner wallet otherwise). Used for sell/recycle flows where the on-chain balance
+   * check must hit the wallet items actually live on. Optional: defaults to
+   * `getOwnWalletAddress` when not provided.
+   */
+  getOwnInventoryWallet?: () => string | null;
+  /**
    * Returns the local player's current character info — used to build PvP
    * queue payloads that the backend requires (level, characterTokenId, agentId).
    * Returning null means the character isn't fully registered yet.
@@ -162,6 +169,7 @@ export class NpcDialog {
   // Guild
   private guilds: GuildSummary[] = [];
   private guildsLoading = false;
+  private guildsLoaded = false;
   /** Cached "my guild" lookup. null until first load. */
   private myGuild: MyGuildResponse | null = null;
   private myGuildLoading = false;
@@ -317,6 +325,7 @@ export class NpcDialog {
     this.recipesLoading = false;
     this.guilds = [];
     this.guildsLoading = false;
+    this.guildsLoaded = false;
     this.myGuild = null;
     this.myGuildLoading = false;
     this.composeProposalOpen = false;
@@ -651,12 +660,12 @@ export class NpcDialog {
 
   private async loadSell() {
     if (!this.entity) { this.sellLoading = false; return; }
-    const addr = this.callbacks.getOwnWalletAddress();
-    if (!addr) { this.sellLoading = false; this.sellLoaded = true; return; }
+    const invWallet = this.callbacks.getOwnInventoryWallet?.() ?? this.callbacks.getOwnWalletAddress();
+    if (!invWallet) { this.sellLoading = false; this.sellLoaded = true; return; }
     const [inv, prices, balance] = await Promise.all([
-      fetchInventory(addr),
+      fetchInventory(invWallet),
       fetchSellPrices(this.entity.id),
-      this.playerGold == null ? fetchWalletBalance(addr) : Promise.resolve(null),
+      this.playerGold == null ? fetchWalletBalance(invWallet) : Promise.resolve(null),
     ]);
     this.sellLoading = false;
     this.sellLoaded = true;
@@ -671,11 +680,11 @@ export class NpcDialog {
   private async handleSell(tokenId: number, qty: number) {
     if (!this.entity) return;
     const token = await this.callbacks.getAuthToken();
-    const addr = this.callbacks.getOwnWalletAddress();
-    if (!token || !addr || qty <= 0) return;
+    const sellerWallet = this.callbacks.getOwnInventoryWallet?.() ?? this.callbacks.getOwnWalletAddress();
+    if (!token || !sellerWallet || qty <= 0) return;
     const btn = this.contentEl.querySelector(`[data-action="sell"][data-token-id="${tokenId}"][data-qty="${qty}"]`) as HTMLButtonElement | null;
     if (btn) { btn.textContent = "..."; btn.disabled = true; }
-    const result = await sellShopItem(token, addr, this.entity.id, tokenId, qty);
+    const result = await sellShopItem(token, sellerWallet, this.entity.id, tokenId, qty);
     if (result.ok && result.data) {
       const sold = result.data.quantity;
       const payout = result.data.totalPayout;
@@ -858,7 +867,7 @@ export class NpcDialog {
   }
 
   private renderGuildBrowse() {
-    if (this.guilds.length === 0 && !this.guildsLoading) {
+    if (!this.guildsLoaded && !this.guildsLoading) {
       this.guildsLoading = true;
       this.contentEl.innerHTML = `<div class="nd-empty">Loading guilds...</div>`;
       void this.loadGuilds();
@@ -909,7 +918,8 @@ export class NpcDialog {
   private async loadGuilds() {
     const data = await fetchGuilds();
     this.guildsLoading = false;
-    this.guilds = data;
+    this.guildsLoaded = true;
+    this.guilds = data ?? [];
     if (this.activeTab === "guild") this.renderGuild();
   }
 
@@ -926,6 +936,7 @@ export class NpcDialog {
     if (result.ok) {
       if (btn) btn.textContent = "Created!";
       this.guildsLoading = false;
+      this.guildsLoaded = false;
       this.guilds = [];
       this.myGuild = null; // force re-detect into the my-guild view
       setTimeout(() => this.renderGuild(), 1500);
@@ -944,6 +955,7 @@ export class NpcDialog {
     if (result.ok) {
       if (btn) btn.textContent = "Joined!";
       this.guildsLoading = false;
+      this.guildsLoaded = false;
       this.guilds = [];
       this.myGuild = null; // route into my-guild view on next render
       setTimeout(() => this.renderGuild(), 1500);
@@ -1116,6 +1128,7 @@ export class NpcDialog {
       this.myGuild = null;
       this.guilds = [];
       this.guildsLoading = false;
+      this.guildsLoaded = false;
       setTimeout(() => this.renderGuild(), 1500);
     } else {
       if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; btn.dataset.confirming = ""; setTimeout(() => { btn.textContent = "Leave"; }, 2500); }

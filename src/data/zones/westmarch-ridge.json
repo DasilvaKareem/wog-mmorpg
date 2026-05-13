@@ -1,0 +1,10 @@
+{
+  "id": "westmarch-ridge",
+  "name": "Westmarch Ridge",
+  "biome": "mountain",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(110,90,80,0.10)",
+  "budget": { "maxPopulation": 0, "maxThreat": 0 },
+  "pois": [],
+  "roads": []
+}

@@ -231,14 +231,21 @@ function biomeBaseTile(biome: string, noise: number): number {
   }
 }
 
-/** Get the elevation profile for a biome (0-30 range, client scales to world Y) */
+/** Get the elevation profile for a biome (0-MAX_ELEVATION range, client scales to world Y) */
 function getElevProfile(biome: string): { noiseScale: number; maxElev: number; baseElev: number } {
   if (biome === "village" || biome === "farmland") return { noiseScale: 0.035, maxElev: 8, baseElev: 0 };
   if (biome === "forest") return { noiseScale: 0.045, maxElev: 26, baseElev: 6 };
+  if (biome === "plains") return { noiseScale: 0.025, maxElev: 14, baseElev: 2 };
+  if (biome === "glade") return { noiseScale: 0.04, maxElev: 16, baseElev: 4 };
+  if (biome === "lake") return { noiseScale: 0.03, maxElev: 40, baseElev: 0 };
+  if (biome === "citadel") return { noiseScale: 0.04, maxElev: 90, baseElev: 30 };
+  if (biome === "mountain") return { noiseScale: 0.055, maxElev: 200, baseElev: 50 };
+  if (biome === "chasm") return { noiseScale: 0.05, maxElev: 180, baseElev: 60 };
   return { noiseScale: 0.03, maxElev: 18, baseElev: 0 }; // grassland
 }
 
-const MAX_ELEVATION = 30;
+/** Hard ceiling for any elevation cell. Server-side units; client applies ELEV_SCALE=0.12. */
+const MAX_ELEVATION = 255;
 
 /**
  * Find the nearest adjacent zone with a different biome and the distance to
@@ -432,7 +439,15 @@ function generateMap(zone: ZoneData): GeneratedMap {
 function detectBiome(zone: ZoneData): string {
   if (zone.biome) return zone.biome;
   const name = zone.name.toLowerCase();
-  if (name.includes("forest") || name.includes("dark")) return "forest";
+  // Order matters: more specific names first. Names like "Felsrock Citadel" and
+  // "Viridian Range" must match "citadel"/"range" before generic substrings.
+  if (name.includes("chasm")) return "chasm";
+  if (name.includes("citadel")) return "citadel";
+  if (name.includes("range") || name.includes("mountain") || name.includes("ridge")) return "mountain";
+  if (name.includes("lake")) return "lake";
+  if (name.includes("glade")) return "glade";
+  if (name.includes("plains") || name.includes("auroral")) return "plains";
+  if (name.includes("forest") || name.includes("woods") || name.includes("dark")) return "forest";
   if (name.includes("village") || name.includes("square")) return "village";
   return "grassland";
 }
@@ -1083,6 +1098,51 @@ function valueNoise2D(tx: number, tz: number, seed: number, scale: number): numb
   return value / totalAmp;
 }
 
+/**
+ * Ridge noise: same fBm structure as valueNoise2D, but each octave folds
+ * `1 - |2n - 1|` so the noise peaks at sharp lines instead of round bumps.
+ * Used for mountain and chasm biomes — produces ridges/spines rather than hills.
+ */
+function ridgeNoise2D(tx: number, tz: number, seed: number, scale: number): number {
+  let value = 0;
+  let amplitude = 1;
+  let totalAmp = 0;
+  const persistence = 0.5;
+  const lacunarity = 2.1;
+
+  for (let octave = 0; octave < 5; octave++) {
+    const freq = scale * Math.pow(lacunarity, octave);
+    const sx = tx * freq;
+    const sz = tz * freq;
+
+    const ix = Math.floor(sx);
+    const iz = Math.floor(sz);
+    const fx = sx - ix;
+    const fz = sz - iz;
+
+    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+    const uz = fz * fz * fz * (fz * (fz * 6 - 15) + 10);
+
+    const n00 = seededNoise2D(ix, iz, seed + octave * 1000);
+    const n10 = seededNoise2D(ix + 1, iz, seed + octave * 1000);
+    const n01 = seededNoise2D(ix, iz + 1, seed + octave * 1000);
+    const n11 = seededNoise2D(ix + 1, iz + 1, seed + octave * 1000);
+
+    const nx0 = n00 + (n10 - n00) * ux;
+    const nx1 = n01 + (n11 - n01) * ux;
+    const n = nx0 + (nx1 - nx0) * uz;
+
+    // Ridge fold: 0..1 noise → peak at 0.5, troughs at 0/1
+    const ridged = 1 - Math.abs(2 * n - 1);
+    // Square it to sharpen the spine
+    value += ridged * ridged * amplitude;
+    totalAmp += amplitude;
+    amplitude *= persistence;
+  }
+
+  return value / totalAmp;
+}
+
 /** 2D seeded noise — deterministic hash for grid position */
 function seededNoise2D(ix: number, iz: number, seed: number): number {
   let h = (ix * 374761393 + iz * 668265263 + seed * 1274126177) | 0;
@@ -1095,9 +1155,23 @@ function seededNoise2D(ix: number, iz: number, seed: number): number {
  * Generate elevation map for a zone. Uses world-space 5-octave fBm with
  * biome-blended profiles for seamless cross-zone terrain.
  *
- * Elevation values: 0 to MAX_ELEVATION (30).
- * Client-XR multiplies by 0.12 → 0 to 3.6 world Y units.
+ * Elevation values: 0 to MAX_ELEVATION (255).
+ * Client-XR multiplies by ELEV_SCALE=0.12 → up to ~30 world Y units for mountain peaks;
+ * gentle biomes (village/grassland) stay in the original 0..3 range.
  */
+function biomeTerrainNoise(
+  biome: string, wtx: number, wtz: number, seed: number, scale: number,
+): number {
+  // Mountain and chasm get a ridge-dominant hybrid for sharp spines instead of
+  // round bumps. Everything else uses the original smooth fBm.
+  if (biome === "mountain" || biome === "chasm") {
+    const r = ridgeNoise2D(wtx, wtz, seed, scale);
+    const v = valueNoise2D(wtx, wtz, seed + 13579, scale);
+    return r * 0.6 + v * 0.4;
+  }
+  return valueNoise2D(wtx, wtz, seed, scale);
+}
+
 function generateElevation(
   ground: number[],
   w: number,
@@ -1121,7 +1195,7 @@ function generateElevation(
       const wtx = worldOffTx + tx;
       const wtz = worldOffTz + tz;
 
-      const n = valueNoise2D(wtx, wtz, worldSeed, profile.noiseScale);
+      const n = biomeTerrainNoise(biome, wtx, wtz, worldSeed, profile.noiseScale);
       let elev = Math.round(n * profile.maxElev);
       elev = Math.min(elev, profile.maxElev);
       elev = Math.max(elev, 0);
@@ -1131,7 +1205,7 @@ function generateElevation(
       const adj = findAdjacentBlend(wtx, wtz, zone.id);
       if (adj && adj.distance < BLEND_TILES) {
         const adjProfile = getElevProfile(adj.biome);
-        const adjN = valueNoise2D(wtx, wtz, worldSeed, adjProfile.noiseScale);
+        const adjN = biomeTerrainNoise(adj.biome, wtx, wtz, worldSeed, adjProfile.noiseScale);
         let adjElev = Math.round(adjN * adjProfile.maxElev);
         adjElev = Math.min(adjElev, adjProfile.maxElev);
         adjElev = Math.max(adjElev, 0);
@@ -1175,26 +1249,48 @@ function generateElevation(
     }
   }
 
-  // Flatten POI areas with smooth falloff at edges
+  // Flatten POI areas with smooth falloff at edges. Most POIs use the average
+  // surrounding elevation (so villages and shrines sit naturally on the local
+  // ground). In dramatic biomes, mountain peaks / citadel plateaus take MAX
+  // and chasm landmarks take MIN — turns the named POIs into the visual
+  // anchors the zone is designed around.
+  const pickPolicy = (poi: PoiDef): "avg" | "max" | "min" => {
+    const tags = poi.tags ?? [];
+    // Portals always sit at the LOWEST nearby elevation so the entry tile is
+    // walkable from the adjacent zone without a cliff.
+    if (poi.type === "portal") return "min";
+    if (biome === "mountain" && (tags.includes("scenic") || tags.includes("boss-area"))) return "max";
+    if (biome === "citadel" && (tags.includes("safe-zone") || tags.includes("boss-area"))) return "max";
+    if (biome === "chasm" && (tags.includes("sacred") || tags.includes("boss-area"))) return "min";
+    return "avg";
+  };
+
   for (const poi of pois) {
     const cx = Math.floor(poi.position.x / TILE_SIZE);
     const cy = Math.floor(poi.position.z / TILE_SIZE);
     const r = Math.ceil(poi.radius / TILE_SIZE) + 2;
+    const policy = pickPolicy(poi);
 
-    // Find average elevation around POI center
+    // Sample elevation in a small window around POI center for avg/max/min
     let totalElev = 0;
     let count = 0;
+    let maxE = 0;
+    let minE = MAX_ELEVATION;
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         const tx = cx + dx;
         const tz = cy + dy;
         if (tx >= 0 && tx < w && tz >= 0 && tz < h) {
-          totalElev += elevation[tz * w + tx];
+          const e = elevation[tz * w + tx];
+          totalElev += e;
           count++;
+          if (e > maxE) maxE = e;
+          if (e < minE) minE = e;
         }
       }
     }
     const avgElev = count > 0 ? Math.round(totalElev / count) : 0;
+    const targetElev = policy === "max" ? maxE : policy === "min" ? minE : avgElev;
 
     // Flatten inner area, smooth blend at outer ring
     for (let dy = -r - 2; dy <= r + 2; dy++) {
@@ -1206,13 +1302,93 @@ function generateElevation(
         if (dist > r + 2) continue;
         const idx = tz * w + tx;
         if (dist <= r) {
-          elevation[idx] = avgElev;
+          elevation[idx] = targetElev;
         } else {
           // Smooth blend in the 2-tile outer ring
           const blend = (dist - r) / 2;
-          elevation[idx] = Math.round(avgElev * (1 - blend) + elevation[idx] * blend);
+          elevation[idx] = Math.round(targetElev * (1 - blend) + elevation[idx] * blend);
         }
       }
+    }
+  }
+
+  // Lake biome: raise land within 6 tiles of any water tile so the lake sits in
+  // a believable basin instead of a flat puddle. Peak bump at dist 2, decaying
+  // to 0 at dist 6.
+  if (biome === "lake") {
+    const SHORE_RADIUS = 6;
+    const SHORE_PEAK_BUMP = 12;
+    const isWaterTile = (i: number): boolean => {
+      const t = ground[i];
+      return t === TILE.WATER_STILL || t === TILE.WATER_EDGE_N || t === TILE.WATER_EDGE_S
+        || t === TILE.WATER_EDGE_E || t === TILE.WATER_EDGE_W || t === TILE.WATER_CORNER;
+    };
+    const shoreBump = new Array(w * h).fill(0);
+    for (let tz = 0; tz < h; tz++) {
+      for (let tx = 0; tx < w; tx++) {
+        const idx = tz * w + tx;
+        if (isWaterTile(idx)) continue;
+        // Cheap nearest-water search in a (2R+1)² window
+        let nearest = Infinity;
+        for (let dz = -SHORE_RADIUS; dz <= SHORE_RADIUS && nearest > 0; dz++) {
+          for (let dx = -SHORE_RADIUS; dx <= SHORE_RADIUS; dx++) {
+            const nx = tx + dx;
+            const nz = tz + dz;
+            if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+            if (!isWaterTile(nz * w + nx)) continue;
+            const d = Math.sqrt(dx * dx + dz * dz);
+            if (d < nearest) nearest = d;
+          }
+        }
+        if (nearest >= SHORE_RADIUS) continue;
+        // Falloff: 0 at dist 0 (shoreline can't be higher than the lake edge),
+        // peaks near dist 2, decays to 0 at SHORE_RADIUS.
+        const t = nearest / SHORE_RADIUS; // 0..1
+        const bump = Math.round(SHORE_PEAK_BUMP * 4 * t * (1 - t)); // parabolic
+        shoreBump[idx] = bump;
+      }
+    }
+    for (let i = 0; i < w * h; i++) {
+      elevation[i] = Math.min(MAX_ELEVATION, elevation[i] + shoreBump[i]);
+    }
+  }
+
+  // Chasm biome: drive elevation to 0 along the road network and slope nearby
+  // tiles down to it, so the road carved by drawRoad reads as a true rift
+  // floor with walls rising on either side.
+  if (biome === "chasm") {
+    const CARVE_RADIUS = 4;
+    const isRoadTile = (i: number): boolean => {
+      const t = ground[i];
+      return t === TILE.DIRT_PLAIN || t === TILE.DIRT_H
+        || t === TILE.DIRT_V || t === TILE.DIRT_CROSS;
+    };
+    const carveTarget = new Array(w * h).fill(-1);
+    for (let tz = 0; tz < h; tz++) {
+      for (let tx = 0; tx < w; tx++) {
+        // Find nearest road tile within CARVE_RADIUS
+        let nearest = Infinity;
+        for (let dz = -CARVE_RADIUS; dz <= CARVE_RADIUS && nearest > 0; dz++) {
+          for (let dx = -CARVE_RADIUS; dx <= CARVE_RADIUS; dx++) {
+            const nx = tx + dx;
+            const nz = tz + dz;
+            if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+            if (!isRoadTile(nz * w + nx)) continue;
+            const d = Math.sqrt(dx * dx + dz * dz);
+            if (d < nearest) nearest = d;
+          }
+        }
+        if (nearest >= CARVE_RADIUS) continue;
+        // Linear ramp: floor (0) at the road, blending up to existing
+        // elevation at CARVE_RADIUS away.
+        const t = nearest / CARVE_RADIUS; // 0..1
+        const idx = tz * w + tx;
+        const existing = elevation[idx];
+        carveTarget[idx] = Math.round(existing * t); // 0 at center, existing at edge
+      }
+    }
+    for (let i = 0; i < w * h; i++) {
+      if (carveTarget[i] >= 0) elevation[i] = carveTarget[i];
     }
   }
 
