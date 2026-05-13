@@ -7,7 +7,7 @@ import {
   fetchShopInventory, buyShopItem, sendNpcDialogue,
   fetchAvailableTechniques, learnTechnique,
   fetchRecipes, craftAtStation,
-  fetchGuilds, createGuild,
+  fetchGuilds, createGuild, joinGuild,
   fetchAuctions, bidAuction, buyoutAuction, fetchWalletBalance, cancelPvpBattle,
   fetchColiseumInfo, joinPvpQueue, joinPvpPartyQueue, fetchPvpLeaderboard,
   fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
@@ -183,6 +183,7 @@ export class NpcDialog {
       if (action === "learn" && btn.dataset.techniqueId) void this.handleLearn(btn.dataset.techniqueId);
       if (action === "craft" && btn.dataset.recipeId) void this.handleCraft(btn.dataset.recipeId);
       if (action === "create-guild") void this.handleCreateGuild();
+      if (action === "join-guild" && btn.dataset.guildId) void this.handleJoinGuild(Number(btn.dataset.guildId));
       if (action === "bid" && btn.dataset.auctionId) void this.handleBid(btn.dataset.auctionId);
       if (action === "buyout" && btn.dataset.auctionId) void this.handleBuyout(btn.dataset.auctionId);
       if (action === "queue-join") void this.handleQueueJoin();
@@ -624,10 +625,17 @@ export class NpcDialog {
       html += `<div class="nd-empty">No guilds registered yet</div>`;
     } else {
       for (const g of this.guilds) {
+        const isActive = g.status === "Active" || g.status === "active";
+        const canJoin = hasChar && isActive;
         html += `<div class="nd-shop-item">`;
         html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(g.name)}</span><span class="nd-shop-item-slot">Lvl ${g.level}</span></div>`;
         html += `<div class="nd-shop-item-stats">${g.memberCount} members · ${g.treasury}g treasury</div>`;
-        html += `<div class="nd-shop-item-footer"><span class="nd-shop-item-stock">${g.status}</span></div>`;
+        html += `<div class="nd-shop-item-footer">`;
+        html += `<span class="nd-shop-item-stock">${esc(String(g.status))}</span>`;
+        if (canJoin) {
+          html += `<button class="nd-btn" data-action="join-guild" data-guild-id="${esc(String(g.guildId))}" style="color:#44cc88;border-color:rgba(68,204,136,0.3);background:rgba(68,204,136,0.1)">Join</button>`;
+        }
+        html += `</div>`;
         html += `</div>`;
       }
     }
@@ -663,7 +671,24 @@ export class NpcDialog {
       this.guilds = [];
       setTimeout(() => this.renderGuild(), 1500);
     } else {
-      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Create"; }, 2000); }
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Create"; }, 2500); }
+    }
+  }
+
+  private async handleJoinGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const btn = this.contentEl.querySelector(`[data-action='join-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await joinGuild(token, guildId, addr);
+    if (result.ok) {
+      if (btn) btn.textContent = "Joined!";
+      this.guildsLoading = false;
+      this.guilds = [];
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Join"; }, 2500); }
     }
   }
 

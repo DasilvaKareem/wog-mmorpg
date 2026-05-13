@@ -698,6 +698,14 @@ export async function createGuild(
   return postJsonWithFallback("/guild/create", token, body);
 }
 
+export async function joinGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/join`, token, { memberAddress });
+}
+
 // ── Auction House ─────────────────────────────────────────────────
 
 export async function fetchAuctions(zoneId: string): Promise<AuctionListing[]> {
