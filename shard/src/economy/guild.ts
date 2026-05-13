@@ -177,8 +177,9 @@ export function registerGuildRoutes(server: FastifyInstance) {
       return { error: "Guild name must be 3-32 characters" };
     }
 
-    // Guild incorporation costs 500 gold: 400 creation fee + 100 treasury deposit
-    const creationFee = 400;
+    // Guild incorporation costs 150 gold: 50 creation fee + 100 treasury
+    // deposit. Matches the client UI, the on-chain comment, and docs.
+    const creationFee = 50;
     const fixedDeposit = 100;
     const totalCost = creationFee + fixedDeposit;
 
@@ -239,7 +240,8 @@ export function registerGuildRoutes(server: FastifyInstance) {
     } catch (err) {
       server.log.error(err, "Failed to create guild");
       reply.code(500);
-      return { error: "Failed to create guild" };
+      const msg = (err as Error)?.message ?? String(err);
+      return { error: `Failed to create guild: ${msg.slice(0, 240)}` };
     }
   });
 
