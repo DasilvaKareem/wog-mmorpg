@@ -2220,6 +2220,17 @@ Strategy options: aggressive, balanced, defensive`;
                     agentRunning: false,
                   });
                 }
+                // Sync focus config so the runner's per-tick focusToScript()
+                // doesn't immediately overwrite the dequeued travel with the
+                // idle script (free-tier path at agentRunner.ts:2196). For a
+                // travel directive, the agent's focus IS traveling — this
+                // matches what update_focus does.
+                if (acceptedTravelZone) {
+                  await patchAgentConfig(authWallet, {
+                    focus: "traveling",
+                    targetZone: acceptedTravelZone,
+                  });
+                }
                 await runner.enqueueUserActions(validatedScripts, input.clearExisting !== false);
                 await runner.clearScript(); // start executing immediately
                 actionsTaken.push(`[queued ${validatedScripts.length} actions: ${summary}]`);
