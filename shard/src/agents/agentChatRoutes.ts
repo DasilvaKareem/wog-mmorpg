@@ -2164,33 +2164,79 @@ Strategy options: aggressive, balanced, defensive`;
             if (!input.actions || input.actions.length === 0) {
               toolResults.push({ name: fnName, content: JSON.stringify({ error: "At least one action is required" }) });
             } else {
-              const scripts: BotScript[] = input.actions.map((a) => ({
-                type: a.type as BotScript["type"],
-                targetZone: a.targetZone,
-                nodeType: a.nodeType as BotScript["nodeType"],
-                maxLevelOffset: a.maxLevelOffset ?? 2,
-                reason: a.reason ?? `Queued: ${a.type}`,
-              }));
-              const summary = scripts.map((s) => s.type).join(" → ");
-              let runner = agentManager.getRunner(authWallet);
-              if (!runner) {
-                await agentManager.ensureRunning(authWallet);
-                runner = agentManager.getRunner(authWallet);
+              // Validate any travel destinations BEFORE queuing — if the LLM passed
+              // a non-canonical zone string, normalize it; if it's bogus, drop the
+              // travel and speak the failure publicly so the player isn't left
+              // wondering why the agent didn't move.
+              const validatedScripts: BotScript[] = [];
+              const blockedTravels: string[] = [];
+              let acceptedTravelZone: string | null = null;
+              for (const a of input.actions) {
+                if (a.type === "travel") {
+                  const validation = await validateTravelTargetForWallet(authWallet, a.targetZone);
+                  if (!validation.normalizedTargetZone) {
+                    const rawLabel = a.targetZone?.trim() || "(missing destination)";
+                    const reason = validation.error ?? `unknown zone "${rawLabel}"`;
+                    blockedTravels.push(reason);
+                    void emitAgentDirectiveChat(authWallet, "travel_blocked", reason);
+                    continue;
+                  }
+                  validatedScripts.push({
+                    type: "travel",
+                    targetZone: validation.normalizedTargetZone,
+                    maxLevelOffset: a.maxLevelOffset ?? 2,
+                    reason: a.reason ?? `Queued: travel to ${validation.normalizedTargetZone}`,
+                  });
+                  acceptedTravelZone = acceptedTravelZone ?? validation.normalizedTargetZone;
+                } else {
+                  validatedScripts.push({
+                    type: a.type as BotScript["type"],
+                    targetZone: a.targetZone,
+                    nodeType: a.nodeType as BotScript["nodeType"],
+                    maxLevelOffset: a.maxLevelOffset ?? 2,
+                    reason: a.reason ?? `Queued: ${a.type}`,
+                  });
+                }
               }
-              if (!runner) {
-                server.log.error(`[agent/chat] queue_actions failed: no runner for ${authWallet.slice(0,8)}; plan=${summary}`);
-                return reply.code(500).send({
-                  error: "Agent runner unavailable. Command not queued.",
-                  response: "I couldn't queue that command because the agent runner is unavailable.",
-                  queued: [],
-                  agentRunning: false,
-                });
+
+              if (validatedScripts.length === 0) {
+                toolResults.push({ name: fnName, content: JSON.stringify({
+                  error: "All requested actions failed validation",
+                  blocked: blockedTravels,
+                }) });
+              } else {
+                const summary = validatedScripts.map((s) => s.type + (s.targetZone ? `→${s.targetZone}` : "")).join(" → ");
+                let runner = agentManager.getRunner(authWallet);
+                if (!runner) {
+                  await agentManager.ensureRunning(authWallet);
+                  runner = agentManager.getRunner(authWallet);
+                }
+                if (!runner) {
+                  server.log.error(`[agent/chat] queue_actions failed: no runner for ${authWallet.slice(0,8)}; plan=${summary}`);
+                  return reply.code(500).send({
+                    error: "Agent runner unavailable. Command not queued.",
+                    response: "I couldn't queue that command because the agent runner is unavailable.",
+                    queued: [],
+                    agentRunning: false,
+                  });
+                }
+                await runner.enqueueUserActions(validatedScripts, input.clearExisting !== false);
+                await runner.clearScript(); // start executing immediately
+                actionsTaken.push(`[queued ${validatedScripts.length} actions: ${summary}]`);
+                if (blockedTravels.length > 0) actionsTaken.push(`[blocked: ${blockedTravels.join(", ")}]`);
+                server.log.info(`[agent/chat] queue_actions: ${summary}${blockedTravels.length ? ` (blocked: ${blockedTravels.join(", ")})` : ""}`);
+                // Speak the directive publicly so observers see the agent commit.
+                if (acceptedTravelZone) {
+                  void emitAgentDirectiveChat(authWallet, "directive_accept", acceptedTravelZone);
+                }
+                toolResults.push({ name: fnName, content: JSON.stringify({
+                  ok: true,
+                  queued: validatedScripts.length,
+                  plan: summary,
+                  agentRunning: true,
+                  ...(blockedTravels.length ? { blocked: blockedTravels } : {}),
+                }) });
               }
-              await runner.enqueueUserActions(scripts, input.clearExisting !== false);
-              await runner.clearScript(); // start executing immediately
-              actionsTaken.push(`[queued ${scripts.length} actions: ${summary}]`);
-              server.log.info(`[agent/chat] queue_actions: ${summary}`);
-              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, queued: scripts.length, plan: summary, agentRunning: true }) });
             }
           } catch {
             toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to queue actions" }) });
