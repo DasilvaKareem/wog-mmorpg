@@ -262,7 +262,7 @@ export class DesktopControls {
     if (!this.inputEnabled) return;
     if (this.landingMode) return;
     e.preventDefault();
-    this.distance = Math.max(5, Math.min(50, this.distance + e.deltaY * 0.02));
+    this.distance = Math.max(5, Math.min(25, this.distance + e.deltaY * 0.02));
     this.updateCamera();
   };
 
@@ -319,7 +319,7 @@ export class DesktopControls {
       const [a, b] = [e.touches[0], e.touches[1]];
       const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
       const ratio = this.pinchStartDist / Math.max(1, d);
-      this.distance = Math.max(5, Math.min(50, this.pinchStartDistance * ratio));
+      this.distance = Math.max(5, Math.min(25, this.pinchStartDistance * ratio));
       this.updateCamera();
       e.preventDefault();
       return;

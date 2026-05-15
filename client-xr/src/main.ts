@@ -50,7 +50,7 @@ import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -401,6 +401,17 @@ const inspector = new EntityInspector({
     const result = await sendFriendRequest(token, fromWallet, entity.walletAddress);
     if (!result.ok) throw new Error(result.error ?? "Failed to send friend request");
     return `Friend request sent to ${entity.name}`;
+  },
+  onParty: async (entity) => {
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Party invite unavailable");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const fromZoneId = entities.getEntity(ownEntityId)?.zoneId;
+    if (!fromZoneId) throw new Error("Your champion is not in a zone");
+    const result = await inviteToParty(token, ownEntityId, fromZoneId, entity.walletAddress);
+    if (!result.ok) throw new Error(result.error ?? "Failed to send party invite");
+    return `Party invite sent to ${entity.name}`;
   },
   onTrade: async (entity) => {
     if (!ownWalletAddress || !entity.walletAddress) throw new Error("Trade unavailable for that player");
@@ -827,6 +838,17 @@ const playerPanel = new PlayerPanel({
     if (!result.ok) throw new Error(result.error ?? "Failed to send friend request");
     lastFriendsPollTime = 0;
     return `Friend request sent to ${player.name}`;
+  },
+  onPartyInviteFriend: async (friend) => {
+    if (!ownWalletAddress) throw new Error("Party invite unavailable");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const fromZoneId = entities.getEntity(ownEntityId)?.zoneId;
+    if (!fromZoneId) throw new Error("Your champion is not in a zone");
+    const result = await inviteToParty(token, ownEntityId, fromZoneId, friend.wallet);
+    if (!result.ok) throw new Error(result.error ?? "Failed to send party invite");
+    return `Party invite sent to ${friend.name ?? friend.wogName ?? "friend"}`;
   },
 });
 
@@ -2591,6 +2613,7 @@ function animate() {
   entities.update(dt, camera);
   effects.update(dt);
   intentLines.update(dt);
+  sky.tick(dt, camera.position);
   world.updateAnimations(dt, scene.fog instanceof THREE.FogExp2 ? scene.fog.color : undefined);
   syncWeaponsToTuner();
 

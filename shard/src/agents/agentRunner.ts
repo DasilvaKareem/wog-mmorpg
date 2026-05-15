@@ -1350,6 +1350,18 @@ export class AgentRunner {
       const msg = `Stuck in ${zone} — Lv${level} agent, ${currentType} keeps blocking on "${failure.reason}". Tell me where to go next.`;
       console.warn(`[agent:${this.walletTag}] Rescue escalation: ${msg}`);
       void this.logActivity(`[STUCK] ${msg}`);
+      if (this.entityId && entity) {
+        emitAgentChat({
+          entityId: this.entityId,
+          entityName: entity.name,
+          zoneId: zone,
+          origin: this.agentOrigin ?? undefined,
+          classId: entity.classId ?? undefined,
+          event: "stuck",
+          detail: `${currentType} keeps failing on ${failure.reason}`,
+          force: true,
+        });
+      }
       void sendAgentPush(this.userWallet, {
         type: "agent_stuck",
         agentName: entity?.name ?? "Agent",
@@ -1390,6 +1402,18 @@ export class AgentRunner {
           ...(failure.targetName ? { targetName: failure.targetName } : {}),
           ...(failure.targetId ? { targetId: failure.targetId } : {}),
         });
+        if (this.entityId && entity) {
+          emitAgentChat({
+            entityId: this.entityId,
+            entityName: entity.name,
+            zoneId: zone,
+            origin: this.agentOrigin ?? undefined,
+            classId: entity.classId ?? undefined,
+            event: "rescue_travel",
+            detail: rescueZone,
+            force: true,
+          });
+        }
         this.lastRescueByZone.set(zone, Date.now());
         await this.enqueueActions(chain, true);
         return true;
@@ -1406,6 +1430,18 @@ export class AgentRunner {
       ...(failure.targetName ? { targetName: failure.targetName } : {}),
       ...(failure.targetId ? { targetId: failure.targetId } : {}),
     });
+    if (this.entityId && entity) {
+      emitAgentChat({
+        entityId: this.entityId,
+        entityName: entity.name,
+        zoneId: zone,
+        origin: this.agentOrigin ?? undefined,
+        classId: entity.classId ?? undefined,
+        event: "give_up_idle",
+        detail: `${currentType} blocked on ${detail}`,
+        force: true,
+      });
+    }
     this.lastRescueByZone.set(zone, Date.now());
     void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
     this.currentScript = { type: "idle", reason: `Circuit breaker: ${currentType} blocked on ${detail}` };

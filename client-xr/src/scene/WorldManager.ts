@@ -5,6 +5,7 @@ import { EnvironmentAssets } from "./EnvironmentAssets.js";
 import { CharacterAssets } from "./CharacterAssets.js";
 import { ArmorSystem } from "./ArmorSystem.js";
 import { HorizonBackdrop } from "./HorizonBackdrop.js";
+import { TerrainSkirt } from "./TerrainSkirt.js";
 import { fetchTerrain } from "../api.js";
 import type { WorldLayout, WorldLayoutZone, ElevationProvider } from "../types.js";
 import { QualityManager } from "../quality/QualityManager.js";
@@ -53,6 +54,7 @@ export class WorldManager implements ElevationProvider {
   private borderElapsed = 0;
   private borderWalls: THREE.Mesh[] = [];
   private horizon = new HorizonBackdrop();
+  private skirt = new TerrainSkirt();
   private envAssets = new EnvironmentAssets();
   private charAssets = new CharacterAssets();
   private armorSystem = new ArmorSystem();
@@ -62,6 +64,7 @@ export class WorldManager implements ElevationProvider {
     this.group.name = "world";
     this.borderGroup.name = "borders";
     this.group.add(this.borderGroup);
+    this.group.add(this.skirt.group);
     this.group.add(this.horizon.group);
 
     const qcfg = QualityManager.config();
@@ -156,7 +159,8 @@ export class WorldManager implements ElevationProvider {
       }
     }
 
-    // Horizon silhouettes share the same cell topology as the borders.
+    // Horizon silhouettes + foothill skirts share the same cell topology as the borders.
+    this.skirt.build(cells, TERRAIN_SIZE);
     this.horizon.build(cells, TERRAIN_SIZE);
 
     // Shared wall material — custom shader for energy barrier effect
@@ -361,7 +365,10 @@ export class WorldManager implements ElevationProvider {
     // Horizon silhouettes lerp toward fog tint so they read as part of the
     // atmosphere (orange-ish at sunset, deep blue at night). Falls back to
     // the material's base color when no fog is passed in.
-    if (fogColor) this.horizon.update(dt, fogColor);
+    if (fogColor) {
+      this.horizon.update(dt, fogColor);
+      this.skirt.update(dt, fogColor);
+    }
   }
 
   /** Rebuild all loaded zones so they use GLB models instead of primitives */

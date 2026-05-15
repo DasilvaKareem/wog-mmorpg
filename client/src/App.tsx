@@ -980,9 +980,21 @@ function RootDetector(): React.ReactElement {
   return <AppShell />;
 }
 
+/**
+ * The client is served from two URL shapes:
+ *   - https://app.worldofgeneva.com/<path>           (Cloudflare Worker rewrites to bucket /app/<path>)
+ *   - https://worldofgeneva.com/app/<path>           (apex domain keeps /app in the URL)
+ * In the apex case React Router needs basename="/app" so route paths match.
+ */
+function resolveRouterBasename(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const path = window.location.pathname;
+  return path === "/app" || path.startsWith("/app/") ? "/app" : undefined;
+}
+
 export default function App(): React.ReactElement {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={resolveRouterBasename()}>
       <GameProvider>
         <WalletProvider>
           <ToastProvider>

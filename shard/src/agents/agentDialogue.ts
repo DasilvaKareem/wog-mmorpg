@@ -43,7 +43,13 @@ type DialogueEvent =
   | "react_loot"
   | "react_technique"
   | "summon_level_up"
-  | "summon_quest_complete";
+  | "summon_quest_complete"
+  | "stuck"
+  | "rescue_travel"
+  | "give_up_idle"
+  | "travel_blocked"
+  | "directive_accept"
+  | "directive_blocked";
 
 interface DialogueContext {
   entityId: string;
@@ -991,6 +997,38 @@ const DIALOGUE: Record<string, string[]> = {
     "Just finished \"{detail}\"! What should I do next?",
     "Quest complete: {detail}. Should I pick up another quest or focus on something else?",
     "Done with \"{detail}\"! What's the plan?",
+  ],
+
+  // ── Circuit-breaker & directive feedback (always forced — players need to know) ──
+  "::stuck": [
+    "I'm stuck — {detail}. Need new orders.",
+    "Hit a wall here: {detail}. Tell me what to do.",
+    "Can't make progress — {detail}. Standing by.",
+  ],
+  "::rescue_travel": [
+    "Nothing more for me here. Heading to {detail}.",
+    "Moving on — {detail} should suit me better.",
+    "Rerouting to {detail}, this zone's tapped out for me.",
+  ],
+  "::give_up_idle": [
+    "Standing down. {detail}",
+    "Going idle — {detail}. Waiting on orders.",
+    "Pausing here: {detail}",
+  ],
+  "::travel_blocked": [
+    "Can't head to {detail}.",
+    "{detail} — not happening from here.",
+    "Travel blocked: {detail}.",
+  ],
+  "::directive_accept": [
+    "On it — {detail}.",
+    "Headed to {detail} now.",
+    "Moving to {detail}.",
+  ],
+  "::directive_blocked": [
+    "I can't do that — {detail}.",
+    "Won't work: {detail}.",
+    "No can do — {detail}.",
   ],
 
 };

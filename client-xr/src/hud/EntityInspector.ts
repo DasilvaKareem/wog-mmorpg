@@ -5,6 +5,7 @@ type EquipmentItem = NonNullable<NonNullable<Entity["equipment"]>[string]>;
 interface EntityInspectorOptions {
   canActOnPlayer?: (entity: Entity) => boolean;
   onAddFriend?: (entity: Entity) => Promise<string>;
+  onParty?: (entity: Entity) => Promise<string>;
   onTrade?: (entity: Entity) => Promise<string>;
   onDuel?: (entity: Entity) => Promise<string>;
   canCommandAgent?: () => boolean;
@@ -54,7 +55,7 @@ export class EntityInspector {
   private _locked = false;
   private readonly options: EntityInspectorOptions;
   private actionFeedback = "";
-  private activeAction: "friend" | "trade" | "duel" | "gather" | null = null;
+  private activeAction: "friend" | "party" | "trade" | "duel" | "gather" | null = null;
   private lastAnchor: { x: number; y: number } | null = null;
 
   constructor(options: EntityInspectorOptions = {}) {
@@ -272,8 +273,9 @@ export class EntityInspector {
 
     if (e.type === "player" && this.options.canActOnPlayer?.(e)) {
       html += `
-        <div style="margin-top:10px; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px;">
+        <div style="margin-top:10px; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px;">
           ${this.renderActionButton("friend", "Add Friend")}
+          ${this.renderActionButton("party", "Invite to Party")}
           ${this.renderActionButton("trade", "Trade")}
           ${this.renderActionButton("duel", "Duel")}
         </div>
@@ -421,7 +423,7 @@ export class EntityInspector {
     document.head.appendChild(style);
   }
 
-  private renderActionButton(action: "friend" | "trade" | "duel", label: string): string {
+  private renderActionButton(action: "friend" | "party" | "trade" | "duel", label: string): string {
     const busy = this.activeAction === action;
     return `
       <button
@@ -438,7 +440,7 @@ export class EntityInspector {
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    const action = btn.dataset.action as "friend" | "trade" | "duel" | "gather" | "close";
+    const action = btn.dataset.action as "friend" | "party" | "trade" | "duel" | "gather" | "close";
     if (action === "close") {
       this.hide();
       return;
@@ -505,9 +507,10 @@ export class EntityInspector {
     this.tooltip.style.top = `${top}px`;
   }
 
-  private async handleAction(action: "friend" | "trade" | "duel" | "gather", entity: Entity) {
+  private async handleAction(action: "friend" | "party" | "trade" | "duel" | "gather", entity: Entity) {
     const handlers = {
       friend: this.options.onAddFriend,
+      party: this.options.onParty,
       trade: this.options.onTrade,
       duel: this.options.onDuel,
       gather: this.options.onAgentGather,

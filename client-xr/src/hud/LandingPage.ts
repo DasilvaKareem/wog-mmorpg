@@ -151,6 +151,24 @@ export class LandingPage {
         <div class="xr-landing-auth-chooser" data-auth-chooser hidden>
           <div class="xr-landing-auth-title" data-auth-title>Sign up options</div>
 
+          <!-- Social + external-wallet buttons -->
+          <div class="xr-landing-auth-providers">
+            <button type="button" class="xr-landing-provider-btn" data-action="provider-google">
+              <span class="xr-landing-provider-icon" style="color:#ea4335;border-color:#ea4335">G</span>
+              <span>Continue with Google</span>
+            </button>
+            <button type="button" class="xr-landing-provider-btn" data-action="provider-discord">
+              <span class="xr-landing-provider-icon" style="color:#5865f2;border-color:#5865f2">D</span>
+              <span>Continue with Discord</span>
+            </button>
+            <button type="button" class="xr-landing-provider-btn xr-landing-provider-btn-wallet" data-action="provider-wallet">
+              <span class="xr-landing-provider-icon" style="color:#7fd6be;border-color:#7fd6be">W</span>
+              <span>Connect Wallet</span>
+            </button>
+          </div>
+
+          <div class="xr-landing-auth-divider"><span>OR</span></div>
+
           <!-- Method picker: Email | SMS -->
           <div class="xr-landing-auth-tabs">
             <button type="button" data-action="method-email" class="active">Email</button>
@@ -289,6 +307,41 @@ export class LandingPage {
     this.panel.querySelector("[data-action='mode-login']")?.addEventListener("click", () => {
       this.authMode = "login";
       this.refreshAuthChooserUI();
+    });
+
+    this.panel.querySelector("[data-action='provider-google']")?.addEventListener("click", () => {
+      void this.connectSocial("google");
+    });
+    this.panel.querySelector("[data-action='provider-discord']")?.addEventListener("click", () => {
+      void this.connectSocial("discord");
+    });
+    this.panel.querySelector("[data-action='provider-wallet']")?.addEventListener("click", () => {
+      void this.connectExternalWallet();
+    });
+  }
+
+  private async connectSocial(strategy: "google" | "discord") {
+    if (this.busy) return;
+    const label = strategy === "google" ? "Opening Google sign-in..." : "Opening Discord sign-in...";
+    await this.runBusy(label, async () => {
+      const { xrAuth } = await this.loadAuthModule();
+      const address = await xrAuth.connectSocial(strategy);
+      this.walletAddress = address;
+      this.authExpanded = false;
+      this.refreshActionState();
+      this.setStatus(`Signed in as ${this.truncateAddress(address)}.`);
+    });
+  }
+
+  private async connectExternalWallet() {
+    if (this.busy) return;
+    await this.runBusy("Connecting wallet...", async () => {
+      const { xrAuth } = await this.loadAuthModule();
+      const address = await xrAuth.connectWallet();
+      this.walletAddress = address;
+      this.authExpanded = false;
+      this.refreshActionState();
+      this.setStatus(`Connected ${this.truncateAddress(address)}.`);
     });
   }
 
@@ -874,6 +927,71 @@ export class LandingPage {
 
       .xr-landing-auth-switch button.active {
         color: #ffcc24;
+      }
+
+      .xr-landing-auth-providers {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .xr-landing-provider-btn {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid rgba(146, 185, 222, 0.35);
+        background: rgba(12, 24, 50, 0.85);
+        color: #d7e6f6;
+        font: 700 12px/1 "Courier New", monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .xr-landing-provider-btn:hover {
+        background: rgba(21, 38, 74, 0.92);
+      }
+
+      .xr-landing-provider-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border: 1px solid currentColor;
+        font: 700 12px/1 "Courier New", monospace;
+        flex: 0 0 auto;
+      }
+
+      .xr-landing-provider-btn-wallet {
+        border-color: rgba(127, 214, 190, 0.5);
+        background: rgba(10, 30, 26, 0.85);
+        color: #c4f1e2;
+      }
+
+      .xr-landing-provider-btn-wallet:hover {
+        background: rgba(17, 50, 43, 0.92);
+      }
+
+      .xr-landing-auth-divider {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 10px 0;
+        color: #6d77a3;
+        font: 700 10px/1 "Courier New", monospace;
+        letter-spacing: 0.18em;
+      }
+
+      .xr-landing-auth-divider::before,
+      .xr-landing-auth-divider::after {
+        content: "";
+        flex: 1;
+        border-top: 1px solid rgba(146, 185, 222, 0.22);
       }
 
       .xr-landing-auth-tabs {

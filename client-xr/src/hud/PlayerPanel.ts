@@ -19,6 +19,7 @@ interface PanelCallbacks {
   onFriendRequestCountChange?: (count: number) => void;
   onFriendLocate?: (friend: FriendInfo) => void;
   onAddFriend?: (player: ActivePlayer) => Promise<string>;
+  onPartyInviteFriend?: (friend: FriendInfo) => Promise<string>;
 }
 
 /**
@@ -36,6 +37,7 @@ export class PlayerPanel {
   private playersById = new Map<string, ActivePlayer>();
   private zonePlayers: Map<string, ActivePlayer[]> = new Map();
   private expandedZones = new Set<string>();
+  private hasAutoExpanded = false;
   private ownerWallet: string | null = null;
   private socialWallet: string | null = null;
   private friends: FriendInfo[] = [];
@@ -161,14 +163,16 @@ export class PlayerPanel {
       this.zonePlayers.get(zoneId)!.push(player);
     }
 
-    // Auto-expand the most populated zone if nothing is expanded yet
-    if (this.expandedZones.size === 0 && this.zonePlayers.size > 0) {
+    // Auto-expand the most populated zone once on first load. Don't re-expand
+    // on subsequent polls — that would override the user's manual collapse.
+    if (!this.hasAutoExpanded && this.zonePlayers.size > 0) {
       let best = "";
       let bestCount = 0;
       for (const [zoneId, zp] of this.zonePlayers) {
         if (zp.length > bestCount) { bestCount = zp.length; best = zoneId; }
       }
       if (best) this.expandedZones.add(best);
+      this.hasAutoExpanded = true;
     }
 
     this.render();
@@ -297,6 +301,7 @@ export class PlayerPanel {
         html += `<span class="pp-friend-dot ${friend.online ? "online" : "offline"}"></span>`;
         html += `<div class="pp-friend-main"><div class="pp-friend-name">${esc(name)}</div><div class="pp-friend-meta">${esc(detail)}${friend.reputationRank ? ` / ${esc(friend.reputationRank)}` : ""}</div></div>`;
         html += `<div class="pp-friend-actions">`;
+        html += `<button class="pp-friend-icon-btn" data-friend-action="party" title="Invite to Party" ${friend.online ? "" : "disabled"}>P</button>`;
         html += `<button class="pp-friend-icon-btn" data-friend-action="locate" title="Locate" ${friend.online ? "" : "disabled"}>@</button>`;
         html += `<button class="pp-friend-icon-btn" data-friend-action="remove" title="Remove">x</button>`;
         html += `</div></div>`;
@@ -389,6 +394,18 @@ export class PlayerPanel {
     const result = await declineFriendRequest(token, this.socialWallet, requestId);
     this.friendsStatus = result.ok ? "Friend request declined." : result.error ?? "Decline failed.";
     await this.refreshFriends(true);
+  }
+
+  private async partyInviteFriend(friend: FriendInfo): Promise<void> {
+    if (!this.callbacks.onPartyInviteFriend) return;
+    this.friendsStatus = `Inviting ${friendDisplayName(friend)} to party...`;
+    this.render();
+    try {
+      this.friendsStatus = await this.callbacks.onPartyInviteFriend(friend);
+    } catch (err) {
+      this.friendsStatus = err instanceof Error ? err.message : "Party invite failed.";
+    }
+    this.render();
   }
 
   private async removeFriend(targetWallet: string): Promise<void> {
@@ -712,6 +729,7 @@ export class PlayerPanel {
         if (!friend) return;
         if (friendAction === "locate") this.callbacks.onFriendLocate?.(friend);
         if (friendAction === "remove") void this.removeFriend(wallet);
+        if (friendAction === "party") void this.partyInviteFriend(friend);
         return;
       }
 

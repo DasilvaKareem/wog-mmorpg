@@ -663,6 +663,15 @@ export async function removeFriend(
   return postJsonWithFallback("/friends/remove", token, { wallet, targetWallet });
 }
 
+export async function inviteToParty(
+  token: string,
+  fromEntityId: string,
+  fromZoneId: string,
+  toCustodialWallet: string,
+): Promise<{ ok: boolean; error?: string; inviteId?: string }> {
+  return postJsonWithFallback("/party/invite-champion", token, { fromEntityId, fromZoneId, toCustodialWallet });
+}
+
 export async function sendInboxMessage(
   token: string,
   body: {

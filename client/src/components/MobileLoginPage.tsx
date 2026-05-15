@@ -5,13 +5,20 @@ import { useWalletContext } from "@/context/WalletContext";
 import { thirdwebClient, skaleChain, sharedInAppWallet } from "@/lib/inAppWalletClient";
 import { getAuthToken } from "@/lib/agentAuth";
 import { trackUserSignedUp } from "@/lib/analytics";
+import { WalletManager } from "@/lib/walletManager";
 
+type SocialStrategy = "google" | "discord" | "x" | "telegram";
 type Step = "login" | "email-input" | "email-otp" | "phone-input" | "phone-otp" | "connecting";
+
+const SOCIAL_PROVIDERS: { strategy: SocialStrategy; label: string; icon: string; color: string }[] = [
+  { strategy: "google", label: "Google", icon: "G", color: "#ea4335" },
+  { strategy: "discord", label: "Discord", icon: "D", color: "#5865f2" },
+];
 
 export function MobileLoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { syncAddress } = useWalletContext();
+  const { syncAddress, connect } = useWalletContext();
 
   // If ?callback=wog:// is present, we're in native auth mode
   // After login, redirect to the callback URL with wallet + token
@@ -94,6 +101,35 @@ export function MobileLoginPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid code. Please try again.");
       setStep("phone-otp");
+    }
+  }
+
+  async function connectSocial(strategy: SocialStrategy) {
+    setError(null);
+    setStep("connecting");
+    try {
+      const account = await sharedInAppWallet.connect({ client: thirdwebClient, chain: skaleChain, strategy });
+      await handleAuthSuccess(account.address);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Login failed. Please try again.");
+      setStep("login");
+    }
+  }
+
+  async function connectExternalWallet() {
+    setError(null);
+    setStep("connecting");
+    try {
+      await connect();
+      const nextAddress = WalletManager.getInstance().address;
+      if (!nextAddress) {
+        setStep("login");
+        return;
+      }
+      await handleAuthSuccess(nextAddress);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Wallet connection failed.");
+      setStep("login");
     }
   }
 
@@ -257,6 +293,23 @@ export function MobileLoginPage() {
 
       {/* Login buttons */}
       <div className="mx-auto mt-10 flex w-full max-w-sm flex-1 flex-col gap-3">
+        {SOCIAL_PROVIDERS.map((p) => (
+          <button
+            key={p.strategy}
+            onClick={() => void connectSocial(p.strategy)}
+            className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left font-mono text-sm text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px]"
+          >
+            <span
+              className="flex h-6 w-6 shrink-0 items-center justify-center border text-xs font-bold"
+              style={{ borderColor: p.color, color: p.color }}
+            >
+              {p.icon}
+            </span>
+            <span>Continue with {p.label}</span>
+            <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
+          </button>
+        ))}
+
         <button
           onClick={() => { setError(null); setStep("email-input"); }}
           className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left font-mono text-sm text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00] active:translate-x-[1px] active:translate-y-[1px]"
@@ -276,6 +329,20 @@ export function MobileLoginPage() {
             #
           </span>
           <span>Continue with SMS</span>
+          <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
+        </button>
+
+        <button
+          onClick={() => void connectExternalWallet()}
+          className="flex w-full items-center gap-3 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3 text-left font-mono text-sm text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
+        >
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#54f28b] text-xs font-bold text-[#54f28b]">
+            W
+          </span>
+          <div className="flex flex-col">
+            <span>Connect Wallet</span>
+            <span className="text-[10px] text-[#6d77a3]">MetaMask, Rabby, Coinbase, WalletConnect</span>
+          </div>
           <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
         </button>
 

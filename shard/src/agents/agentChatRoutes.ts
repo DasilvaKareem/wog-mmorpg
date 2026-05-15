@@ -55,7 +55,7 @@ import { getPartyMemberIdsByPartyId } from "../social/partySystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
-import { getAgentOrigin } from "./agentDialogue.js";
+import { getAgentOrigin, emitAgentChat } from "./agentDialogue.js";
 import { handleSlashCommand } from "./slashCommands.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
@@ -204,6 +204,39 @@ async function getTierCapsForWallet(userWallet: string) {
   const config = await getAgentConfig(userWallet);
   const tier = config?.tier ?? "free";
   return { tier, caps: TIER_CAPABILITIES[tier] };
+}
+
+/**
+ * Emit a public zone-chat line from the agent's character. Used to surface
+ * directive accept/blocked moments so observers see what the agent is doing.
+ * Silent on missing entity (no spawn yet) — caller need not check.
+ */
+async function emitAgentDirectiveChat(
+  userWallet: string,
+  event: "directive_accept" | "directive_blocked" | "travel_blocked",
+  detail: string,
+): Promise<void> {
+  try {
+    const ref = await getAgentEntityRef(userWallet);
+    if (!ref?.entityId) return;
+    const entity = getWorldEntity(ref.entityId);
+    if (!entity) return;
+    const origin = ref.characterName
+      ? (await getAgentOrigin(userWallet, ref.characterName).catch(() => null)) ?? undefined
+      : undefined;
+    emitAgentChat({
+      entityId: ref.entityId,
+      entityName: entity.name,
+      zoneId: ref.zoneId,
+      origin,
+      classId: (entity as any).classId ?? undefined,
+      event,
+      detail,
+      force: true,
+    });
+  } catch {
+    // best-effort — never block the request on chat emission
+  }
 }
 
 async function validateTravelTargetForWallet(userWallet: string, rawTargetZone?: string): Promise<{
@@ -1159,6 +1192,10 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
 
     await patchAgentConfig(authWallet, patch);
 
+    if (patch.focus === "traveling" && patch.targetZone) {
+      void emitAgentDirectiveChat(authWallet, "directive_accept", String(patch.targetZone));
+    }
+
     // Clear the runner's current script so it picks up the new focus immediately
     const runner = agentManager.getRunner(authWallet);
     if (runner) await runner.clearScript();
@@ -1822,7 +1859,12 @@ Strategy options: aggressive, balanced, defensive`;
               } else {
                 patch.focus = "idle";
                 patch.targetZone = undefined;
-                if (travelValidation.error) actionsTaken.push(`[${travelValidation.error}]`);
+                if (travelValidation.error) {
+                  actionsTaken.push(`[${travelValidation.error}]`);
+                  // Speak the failure publicly so the player isn't stuck wondering
+                  // why the agent didn't move.
+                  void emitAgentDirectiveChat(authWallet, "travel_blocked", travelValidation.error);
+                }
               }
             } else {
               // Prevent stale travel directives from overriding non-travel focus.
@@ -1848,6 +1890,9 @@ Strategy options: aggressive, balanced, defensive`;
                   true,
                 );
                 server.log.info(`[agent/chat] Auto-queued travel to ${patch.targetZone}`);
+                // Public confirmation so observers (and the player) see the agent
+                // committing to the directive — pairs with travel_blocked above.
+                void emitAgentDirectiveChat(authWallet, "directive_accept", patch.targetZone);
               }
               await runner.clearScript();
             }
@@ -2529,6 +2574,11 @@ Strategy options: aggressive, balanced, defensive`;
       } else if (typeof targetZone === "string") {
         const travelValidation = await validateTravelTargetForWallet(authWallet, targetZone);
         if (!travelValidation.normalizedTargetZone) {
+          void emitAgentDirectiveChat(
+            authWallet,
+            "travel_blocked",
+            travelValidation.error ?? `unknown zone ${targetZone}`,
+          );
           return reply.code(400).send({
             error: travelValidation.error ?? `Unknown targetZone: ${targetZone}`,
             validZones: availableZoneIds,
@@ -2550,6 +2600,12 @@ Strategy options: aggressive, balanced, defensive`;
     }
 
     await patchAgentConfig(authWallet, patch);
+
+    // Public confirmation when a travel directive lands — so observers see the
+    // agent commit instead of silently changing config.
+    if (patch.focus === "traveling" && patch.targetZone) {
+      void emitAgentDirectiveChat(authWallet, "directive_accept", patch.targetZone);
+    }
 
     // Log the manual override in chat history so AI has context
     const label = [
