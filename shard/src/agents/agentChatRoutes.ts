@@ -132,6 +132,26 @@ async function captureDirectives(userWallet: string, message: string): Promise<s
     standingAdds.push("do not return to village-square unless critical");
   }
 
+  // Craft/make/forge intent — flip focus deterministically so the agent runner
+  // reflects the directive in the bot panel even if the chat LLM hallucinates
+  // "out of materials" and skips queue_actions. The behavior handler will
+  // verify ingredients itself; this just guarantees the agent stops idling.
+  // Disambiguate the verb: "make me proud" / "make sense" shouldn't trigger.
+  const craftIntent = /\b(?:craft|forge|brew|cook(?:\s+up)?|bake|smelt|smith|build|make)\s+(?:me\s+|us\s+|a\s+|an\s+|some\s+|the\s+)?(?:strong|good|new|better|big|great|cool|fancy|fresh|hot|nice|quick|simple|small|tiny|tasty|powerful|legendary|epic|rare|magic|magical|enchanted)?\s*(weapon|sword|axe|mace|hammer|dagger|bow|staff|wand|shield|armor|armour|chest|helm|helmet|boots|gloves|gauntlets|leggings|pants|cloak|robe|ring|amulet|necklace|pendant|potion|elixir|scroll|food|meal|stew|bread|fish|sandwich|pie|gem|gemstone|jewel|leather|hide|key)\b/;
+  if (craftIntent.test(text)) {
+    // Pick the right focus based on the item type. Crafting covers weapons +
+    // armor; alchemy for potions/elixirs; cooking for food; jewelcrafting for
+    // gems/rings; leatherworking for hide/leather gear.
+    let craftFocus: "crafting" | "alchemy" | "cooking" | "jewelcrafting" | "leatherworking" = "crafting";
+    if (/\b(potion|elixir|scroll)\b/.test(text)) craftFocus = "alchemy";
+    else if (/\b(food|meal|stew|bread|fish|sandwich|pie)\b/.test(text)) craftFocus = "cooking";
+    else if (/\b(ring|amulet|necklace|pendant|gem|gemstone|jewel)\b/.test(text)) craftFocus = "jewelcrafting";
+    else if (/\b(leather|hide|cloak|robe|gloves|gauntlets|boots)\b/.test(text)) craftFocus = "leatherworking";
+    patch.focus = craftFocus;
+    patch.targetZone = undefined;
+    captured.push(`focus=${craftFocus} (craft directive)`);
+  }
+
   if (standingAdds.length > 0) {
     const existing = (await getAgentConfig(userWallet))?.standingOrders ?? "";
     // De-dupe — don't append a phrase that's already present
@@ -1357,9 +1377,58 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       ? nearbyPlayers.map((p) => `${p.name} (L${p.level}, wallet:${p.wallet.slice(0, 10)}…)`).join(", ")
       : "none";
 
-    const inventoryDesc = entity
+    const equippedDesc = entity
       ? `Equipped: ${Object.entries(entity.equipment ?? {}).map(([slot, eq]: any) => `${slot}=${eq?.tokenId ?? "none"}`).join(", ") || "nothing"}`
       : "unknown";
+
+    // Inventory snapshot — the prompt used to only show equipped gear, so the
+    // LLM had no idea what materials/tools/keys the agent was carrying. That
+    // made craft directives ("make a sword") trigger hallucinated "I'm out of
+    // materials" replies even when the inventory was full. Inject a grouped,
+    // capped summary so the model has truthy state on hand. Keys and tools get
+    // their own lines because they gate dungeons / gathering — burying them
+    // under "Consumables" caused the agent to miss them.
+    let inventoryBreakdown = "Inventory: (unavailable)";
+    let goldCopperDesc = "Gold: ?";
+    if (custodialWallet) {
+      try {
+        const inv = await fetchLiquidationInventory(custodialWallet);
+        goldCopperDesc = `Gold: ${inv.copper}c`;
+        const mats: string[] = [];
+        const gear: string[] = [];
+        const potions: string[] = [];
+        const keys: string[] = [];
+        const tools: string[] = [];
+        const other: string[] = [];
+        for (const it of inv.items) {
+          const owned = Number(it.balance);
+          if (owned <= 0) continue;
+          const entry = `${it.name}×${owned}`;
+          const lowerName = it.name.toLowerCase();
+          if (it.category === "material") mats.push(entry);
+          else if (it.category === "weapon" || it.category === "armor") gear.push(entry);
+          else if (it.category === "tool") tools.push(entry);
+          else if (it.category === "consumable") {
+            if (/\b[a-z]-key\b/.test(lowerName) || lowerName.endsWith("key")) keys.push(entry);
+            else if (lowerName.includes("potion") || lowerName.includes("elixir") || lowerName.includes("scroll")) potions.push(entry);
+            else other.push(entry);
+          } else {
+            other.push(entry);
+          }
+        }
+        const parts: string[] = [];
+        if (mats.length) parts.push(`Materials: ${mats.slice(0, 30).join(", ")}${mats.length > 30 ? `, +${mats.length - 30} more` : ""}`);
+        if (gear.length) parts.push(`Gear (unequipped): ${gear.slice(0, 16).join(", ")}${gear.length > 16 ? `, +${gear.length - 16} more` : ""}`);
+        if (potions.length) parts.push(`Potions/Elixirs: ${potions.slice(0, 14).join(", ")}`);
+        if (keys.length) parts.push(`Dungeon Keys: ${keys.join(", ")}`);
+        if (tools.length) parts.push(`Tools: ${tools.slice(0, 8).join(", ")}`);
+        if (other.length) parts.push(`Other: ${other.slice(0, 10).join(", ")}`);
+        inventoryBreakdown = parts.length > 0 ? parts.join("\n") : "Inventory: empty";
+      } catch (err) {
+        server.log.warn(`[agent/chat] inventory snapshot failed: ${(err as Error).message?.slice(0, 80)}`);
+      }
+    }
+    const inventoryDesc = `${equippedDesc}\n${goldCopperDesc}\n${inventoryBreakdown}`;
 
     const interactionMode = inferInteractionMode(message);
     const chatHistory = await getChatHistory(authWallet, 14);
@@ -1409,6 +1478,7 @@ RULES:
 10. After tool results, explain briefly as yourself. No bracket tags.
 11. For any explicit user directive ("go to X", "fight Y", "mine Z", "craft W", or multi-step plans), use queue_actions — the queue takes priority over autonomous behavior so the agent will actually obey. update_focus is ONLY for ambient/strategy tweaks (aggressive/defensive) when the user hasn't given a concrete command.
 12. Only use clear_queue when the user explicitly says to stop/cancel/clear the current queue or plan. If the user gives a new directive, use queue_actions with clearExisting=true instead of clear_queue.
+13. CRAFT DIRECTIVES ("make X", "craft Y", "forge Z", "build W"): NEVER claim you are out of materials without verifying. The Materials list above shows what is actually in inventory. If a specific ore/leather/herb you need is listed there with sufficient quantity, queue_actions with type "craft" (or "leatherwork"/"jewelcraft"/"brew"/"cook" as appropriate) RIGHT NOW. If the materials list looks empty or you genuinely don't know what's needed for the target item, call what_can_i_craft FIRST to confirm, then queue_actions or queue a gather→craft chain. Either way, you MUST take an action — saying "I need materials first" without calling a tool is a failure.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, skinning, leatherworking, farming, shopping, trading, traveling, idle
 Strategy options: aggressive, balanced, defensive`;
