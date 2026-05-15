@@ -49,7 +49,9 @@ type DialogueEvent =
   | "give_up_idle"
   | "travel_blocked"
   | "directive_accept"
-  | "directive_blocked";
+  | "directive_blocked"
+  | "strategy_relax"
+  | "try_gather";
 
 interface DialogueContext {
   entityId: string;
@@ -1029,6 +1031,16 @@ const DIALOGUE: Record<string, string[]> = {
     "I can't do that — {detail}.",
     "Won't work: {detail}.",
     "No can do — {detail}.",
+  ],
+  "::strategy_relax": [
+    "Loosening up — going {detail}. Defensive wasn't cutting it.",
+    "Strategy: {detail}. Need to actually swing.",
+    "Switching to {detail} — too many fights waved off.",
+  ],
+  "::try_gather": [
+    "Combat's not working here — gathering instead.",
+    "Mobs aren't cooperating. I'll work the nodes.",
+    "Pivoting to gathering while this sorts itself out.",
   ],
 
 };

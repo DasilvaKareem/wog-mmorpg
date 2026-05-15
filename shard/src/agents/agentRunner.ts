@@ -259,6 +259,11 @@ export class AgentRunner {
    *  If a rescue fires for the same zone twice within 30s, the rescue itself
    *  isn't working — escalate to the user instead of flailing again. */
   private lastRescueByZone = new Map<string, number>();
+  /** Zone → cumulative rescue attempt count. Drives the rescue ladder
+   *  (relax strategy → zone change → gather fallback → idle) so we don't
+   *  jump straight to idle when one path is exhausted. Reset when the
+   *  agent successfully changes zone or after ~5 min idle. */
+  private rescueAttemptByZone = new Map<string, number>();
 
   /** Per-entity tick gate. Serializes the loop's tick body and any externally-
    *  invoked mutating methods (clearScript, enqueueActions, repairGear, etc.)
@@ -1322,78 +1327,87 @@ export class AgentRunner {
   }
 
   /**
-   * When the circuit breaker fires, try the smartest unstick path first:
-   * travel to a different zone whose level/content matches the agent. If no
-   * better zone is available, go idle instead of flailing on fallback actions.
+   * Circuit-breaker rescue ladder. Idle is the LAST resort, not the second —
+   * players hate seeing the agent freeze when there's something useful to do.
+   * Each call advances one rung; the per-zone attempt count resets when the
+   * agent successfully changes zone or after a long quiet period.
    *
-   * Returns true if a rescue plan was enqueued / applied.
+   *   1. Relax strategy (defensive → balanced → aggressive). HP/level gates
+   *      were filtering all mobs; loosening them usually unblocks combat.
+   *   2. Zone rescue via buildLevelBandChain — move to a level-appropriate
+   *      zone if one exists in the agent's tier.
+   *   3. Focus rotation to gathering — ore/herb nodes don't care about combat
+   *      level, so the agent can still earn gold/materials.
+   *   4. Idle (final escalation) — only when 1-3 all failed for this zone.
    */
   private async tryZoneRescueOrFocusRotation(
     currentType: string,
     failure: FailureMemoryEntry,
   ): Promise<boolean> {
-    // User just gave a directive (queue is locked) — do NOT clobber it with a
-    // rescue chain. The user's queued travel/quest takes priority.
     if (this.isUserQueueLocked()) {
       console.log(`[agent:${this.walletTag}] Circuit breaker suppressed — user directive active`);
       return false;
     }
 
-    // One-shot escalation: if we already attempted a rescue for this zone in
-    // the last 30s and we're stuck again, the rescue isn't working. Stop
-    // flailing — go idle and ping the user to choose a direction.
     const zone = this.currentRegion;
-    const lastRescue = this.lastRescueByZone.get(zone);
-    if (lastRescue && Date.now() - lastRescue < 30_000) {
-      const entity = this.entityId ? getWorldEntity(this.entityId) : null;
-      const level = entity?.level ?? 1;
-      const msg = `Stuck in ${zone} — Lv${level} agent, ${currentType} keeps blocking on "${failure.reason}". Tell me where to go next.`;
-      console.warn(`[agent:${this.walletTag}] Rescue escalation: ${msg}`);
-      void this.logActivity(`[STUCK] ${msg}`);
-      if (this.entityId && entity) {
-        emitAgentChat({
-          entityId: this.entityId,
-          entityName: entity.name,
-          zoneId: zone,
-          origin: this.agentOrigin ?? undefined,
-          classId: entity.classId ?? undefined,
-          event: "stuck",
-          detail: `${currentType} keeps failing on ${failure.reason}`,
-          force: true,
-        });
-      }
-      void sendAgentPush(this.userWallet, {
-        type: "agent_stuck",
-        agentName: entity?.name ?? "Agent",
-        detail: `Stuck in ${zone}: ${failure.reason}`,
-      });
-      void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
-      this.currentScript = { type: "idle", reason: `Escalation: stuck in ${zone}` };
-      this.ticksOnCurrentScript = 0;
-      this.lastRescueByZone.delete(zone);
-      return true;
-    }
-
     const entity = this.entityId ? getWorldEntity(this.entityId) : null;
     const level = entity?.level ?? 1;
     const allowed = this.currentCaps.allowedZones;
+    const target = failure.targetName ?? failure.targetId;
+    const detail = target ? `${target}: ${failure.reason}` : failure.reason;
 
-    // Path 1: Zone mismatch — build a level-band chain to a better zone.
-    const isZoneIssue =
+    const isCombatTargetIssue =
       failure.key.startsWith("quest-combat:no-targets")
       || failure.key.startsWith("quest-combat:no-safe-targets")
       || failure.key.startsWith("combat:no-targets")
       || failure.key.startsWith("combat:no-safe-targets")
       || failure.key.startsWith("combat:level-mismatch");
 
-    const target = failure.targetName ?? failure.targetId;
-    const detail = target ? `${target}: ${failure.reason}` : failure.reason;
+    const attempts = this.rescueAttemptByZone.get(zone) ?? 0;
+    this.rescueAttemptByZone.set(zone, attempts + 1);
+    this.lastRescueByZone.set(zone, Date.now());
 
-    if (isZoneIssue) {
+    const emitChat = (event: Parameters<typeof emitAgentChat>[0]["event"], chatDetail: string) => {
+      if (!this.entityId || !entity) return;
+      emitAgentChat({
+        entityId: this.entityId,
+        entityName: entity.name,
+        zoneId: zone,
+        origin: this.agentOrigin ?? undefined,
+        classId: entity.classId ?? undefined,
+        event,
+        detail: chatDetail,
+        force: true,
+      });
+    };
+
+    // ── Rung 1: relax strategy ────────────────────────────────────────────
+    // Most "no safe targets" failures are the strategy filter being too strict
+    // (defensive needs ≥70% HP and TTK ratio ≤0.65). Loosen by one notch and
+    // give combat another swing before bailing on the zone.
+    if (isCombatTargetIssue && attempts === 0) {
+      const config = await getAgentConfig(this.userWallet);
+      const currentStrategy = config?.strategy ?? "balanced";
+      const relaxed =
+        currentStrategy === "defensive" ? "balanced"
+        : currentStrategy === "balanced" ? "aggressive"
+        : null;
+      if (relaxed) {
+        console.log(`[agent:${this.walletTag}] Circuit breaker rung 1: relaxing strategy ${currentStrategy} → ${relaxed} in ${zone}`);
+        void this.logActivity(`[RELAX] ${currentType} blocked on ${detail} — strategy ${currentStrategy} → ${relaxed}`);
+        await patchAgentConfig(this.userWallet, { strategy: relaxed });
+        emitChat("strategy_relax", relaxed);
+        // Don't change script — keep the same focus, just with relaxed filter.
+        return true;
+      }
+    }
+
+    // ── Rung 2: zone rescue ───────────────────────────────────────────────
+    if (isCombatTargetIssue) {
       const chain = buildLevelBandChain(level, this.currentRegion, allowed);
       if (chain) {
         const rescueZone = chain[0].targetZone ?? "unknown";
-        console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} stuck ${failure.consecutive}x on "${detail}" → zone rescue ${rescueZone}`);
+        console.log(`[agent:${this.walletTag}] Circuit breaker rung 2: ${currentType} stuck ${failure.consecutive}x on "${detail}" → zone rescue ${rescueZone}`);
         void this.logActivity(`[ZONE RESCUE] ${this.currentRegion} has no targets for Lv${level} (${currentType} blocked on ${detail}) — heading to ${rescueZone}`);
         this.logError("action", `Zone rescue: ${currentType} → ${rescueZone} after ${failure.consecutive} blocks`, {
           fromScript: currentType,
@@ -1402,50 +1416,58 @@ export class AgentRunner {
           ...(failure.targetName ? { targetName: failure.targetName } : {}),
           ...(failure.targetId ? { targetId: failure.targetId } : {}),
         });
-        if (this.entityId && entity) {
-          emitAgentChat({
-            entityId: this.entityId,
-            entityName: entity.name,
-            zoneId: zone,
-            origin: this.agentOrigin ?? undefined,
-            classId: entity.classId ?? undefined,
-            event: "rescue_travel",
-            detail: rescueZone,
-            force: true,
-          });
-        }
-        this.lastRescueByZone.set(zone, Date.now());
+        emitChat("rescue_travel", rescueZone);
         await this.enqueueActions(chain, true);
         return true;
       }
     }
 
-    // Path 2: No better zone found — go idle instead of switching to gather/craft.
-    console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x on "${detail}" → switching to idle`);
-    void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x on ${detail} — switching to idle`);
-    this.logError("action", `Circuit breaker fired: ${currentType} → idle after ${failure.consecutive} blocks`, {
+    // ── Rung 3: pivot to gathering ────────────────────────────────────────
+    // Gather nodes don't care about agent level — we can mine/herb almost
+    // anywhere and still earn gold/materials. Far better than idling.
+    if (attempts < 3) {
+      console.log(`[agent:${this.walletTag}] Circuit breaker rung 3: ${currentType} stuck ${failure.consecutive}x on "${detail}" → pivot to gathering`);
+      void this.logActivity(`[PIVOT] ${currentType} blocked on ${detail} — gathering instead of idling`);
+      this.logError("action", `Focus rotation: ${currentType} → gathering after ${failure.consecutive} blocks`, {
+        fromScript: currentType,
+        toFocus: "gathering",
+        reason: failure.reason,
+        ...(failure.targetName ? { targetName: failure.targetName } : {}),
+        ...(failure.targetId ? { targetId: failure.targetId } : {}),
+      });
+      emitChat("try_gather", detail);
+      await patchAgentConfig(this.userWallet, {
+        focus: "gathering",
+        gatherNodeType: "both",
+        targetZone: undefined,
+      });
+      this.currentScript = { type: "gather", nodeType: "both", reason: `Pivoted: ${currentType} blocked` };
+      this.ticksOnCurrentScript = 0;
+      return true;
+    }
+
+    // ── Rung 4: idle (last resort, with loud escalation) ──────────────────
+    const msg = `Stuck in ${zone} — Lv${level} agent, ${currentType} keeps blocking on "${failure.reason}" after ${attempts} rescue attempts. Tell me where to go next.`;
+    console.warn(`[agent:${this.walletTag}] Rescue exhausted: ${msg}`);
+    void this.logActivity(`[STUCK] ${msg}`);
+    emitChat("stuck", `${currentType} keeps failing on ${failure.reason} — exhausted rescues`);
+    void sendAgentPush(this.userWallet, {
+      type: "agent_stuck",
+      agentName: entity?.name ?? "Agent",
+      detail: `Stuck in ${zone}: ${failure.reason}`,
+    });
+    this.logError("action", `Circuit breaker fired: ${currentType} → idle after ${failure.consecutive} blocks and ${attempts} rescue attempts`, {
       fromScript: currentType,
       toFocus: "idle",
       reason: failure.reason,
       ...(failure.targetName ? { targetName: failure.targetName } : {}),
       ...(failure.targetId ? { targetId: failure.targetId } : {}),
     });
-    if (this.entityId && entity) {
-      emitAgentChat({
-        entityId: this.entityId,
-        entityName: entity.name,
-        zoneId: zone,
-        origin: this.agentOrigin ?? undefined,
-        classId: entity.classId ?? undefined,
-        event: "give_up_idle",
-        detail: `${currentType} blocked on ${detail}`,
-        force: true,
-      });
-    }
-    this.lastRescueByZone.set(zone, Date.now());
+    emitChat("give_up_idle", `${currentType} blocked on ${detail}`);
     void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
-    this.currentScript = { type: "idle", reason: `Circuit breaker: ${currentType} blocked on ${detail}` };
+    this.currentScript = { type: "idle", reason: `Circuit breaker exhausted in ${zone}` };
     this.ticksOnCurrentScript = 0;
+    this.rescueAttemptByZone.delete(zone);
     return true;
   }
 
@@ -2406,6 +2428,9 @@ export class AgentRunner {
       if (newRegion !== this.currentRegion) {
         console.log(`[agent:${this.walletTag}] Region changed: ${this.currentRegion} -> ${newRegion}`);
         void this.logActivity(`Region transition: ${this.currentRegion} -> ${newRegion}`);
+        // Successfully changed zone → the prior zone's rescue attempts are
+        // resolved; reset so re-entry doesn't carry old idle escalation state.
+        this.rescueAttemptByZone.delete(this.currentRegion);
       }
       this.currentRegion = newRegion;
       await setAgentEntityRef(this.userWallet, {
