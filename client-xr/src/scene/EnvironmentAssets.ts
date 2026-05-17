@@ -429,7 +429,7 @@ export class EnvironmentAssets {
     ix: number,
     iz: number,
     isTreeTile?: (gx: number, gz: number) => boolean,
-  ): { asset: string; jitterX: number; jitterZ: number; scaleMul: number } | null {
+  ): { asset: string; jitterX: number; jitterZ: number; scaleMul: number; rotY: number } | null {
     // Poisson-style thinning: only spawn a tree if THIS tile's hash is the
     // strict minimum across its 5x5 neighborhood of tree-tiles. Guarantees
     // ≥2 empty tiles between trees regardless of how dense the tree-tile
@@ -464,15 +464,66 @@ export class EnvironmentAssets {
     else if (r < 0.85) scaleMul = 0.65 + hash01(ix, iz, 6) * 0.45; // 70% normal   (0.65–1.10)
     else               scaleMul = 1.10 + hash01(ix, iz, 6) * 0.40; // 15% giants   (1.10–1.50)
 
+    const rotY = hash01(ix, iz, 7) * Math.PI * 2;
     const townName = pickFrom(townPool);
     if (townName && this.cache.has(townName)) {
-      return { asset: townName, jitterX, jitterZ, scaleMul };
+      return { asset: townName, jitterX, jitterZ, scaleMul, rotY };
     }
     const envName = pickFrom(envPool);
     if (envName && this.cache.has(envName)) {
-      return { asset: envName, jitterX, jitterZ, scaleMul };
+      return { asset: envName, jitterX, jitterZ, scaleMul, rotY };
     }
     return null;
+  }
+
+  /**
+   * Return the flat sub-mesh list for a cached asset. Each entry shares
+   * the GLB's geometry/material (no clone) and carries the sub-mesh's local
+   * TRS as a matrix — match the flattening place() does so InstancedMesh
+   * placements visually equal cloned placements.
+   */
+  getAssetSubMeshes(assetName: string): { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[]; localMatrix: THREE.Matrix4 }[] | null {
+    const template = this.cache.get(assetName);
+    if (!template) return null;
+    const subs: { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[]; localMatrix: THREE.Matrix4 }[] = [];
+    template.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const local = new THREE.Matrix4().compose(
+          child.position,
+          new THREE.Quaternion().setFromEuler(child.rotation),
+          child.scale,
+        );
+        subs.push({ geometry: child.geometry, material: child.material, localMatrix: local });
+      }
+    });
+    return subs;
+  }
+
+  /**
+   * Compute the wrapper transform that place() would apply for this asset.
+   * Writes into `out` and returns true on success. Used by InstancedMesh
+   * placement so each instance matrix = wrapperMatrix * subMesh.localMatrix.
+   */
+  getAssetWrapperMatrix(
+    assetName: string,
+    x: number,
+    y: number,
+    z: number,
+    extraScale: number,
+    rotY: number,
+    out: THREE.Matrix4,
+  ): boolean {
+    const def = ASSET_DEFS[assetName] ?? TOWN_ASSET_DEFS[assetName];
+    if (!def) return false;
+    const s = def.scale * extraScale;
+    const groundLift = (this.groundOffsets.get(assetName) ?? 0) * s;
+    const extraLift = def.yOffset * s;
+    out.compose(
+      new THREE.Vector3(x, y + groundLift + extraLift, z),
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY),
+      new THREE.Vector3(s, s, s),
+    );
+    return true;
   }
 
   /* ───── Town assets (Kenney Fantasy Town Kit) ───── */

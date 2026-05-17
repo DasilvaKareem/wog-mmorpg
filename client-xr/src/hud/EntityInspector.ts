@@ -1,4 +1,5 @@
 import type { Entity } from "../types.js";
+import { getNodeResourceInfo } from "../data/professionCatalogs.js";
 
 type EquipmentItem = NonNullable<NonNullable<Entity["equipment"]>[string]>;
 
@@ -283,6 +284,27 @@ export class EntityInspector {
       if (this.actionFeedback) {
         html += `<div style="margin-top:8px; font-size:11px; color:#9edbff;">${esc(this.actionFeedback)}</div>`;
       }
+    }
+
+    // Resource info card — shows what a gather-node or corpse would yield,
+    // the profession + required skill level (red if the player is too low),
+    // and any tool-tier requirement. Independent of the gather button so
+    // corpses get the same UX even without the agent-gather wiring.
+    const info = getNodeResourceInfo(e);
+    if (info) {
+      const levelColor = info.meetsRequirement ? "#a0c8b0" : "#ff6a6a";
+      const playerSuffix = info.playerLevel > 0
+        ? ` <span style="color:#888;">(you: ${info.playerLevel})</span>`
+        : info.meetsRequirement ? "" : ` <span style="color:#888;">(not learned)</span>`;
+      const toolLine = info.requiredToolTier && info.requiredToolTier > 1
+        ? `<span style="color:#888;"> · ${esc(info.toolName ?? "Tool")} T${info.requiredToolTier}+</span>`
+        : "";
+      html += `
+        <div style="margin-top:10px; padding:6px 8px; border-radius:5px; background:rgba(40,70,55,0.35); border:1px solid rgba(120,220,160,0.20); font-size:11px;">
+          <div style="color:#d8f5e2; font-weight:bold;">${esc(info.label)}</div>
+          <div style="color:${levelColor}; margin-top:2px;">${esc(info.profession)} Lv ${info.requiredSkillLevel}${playerSuffix}${toolLine}</div>
+        </div>
+      `;
     }
 
     const gather = GATHER_TYPES[e.type];

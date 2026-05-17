@@ -6,9 +6,10 @@
 
 import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import {
+  getCharacterCustodialWallet,
+  setCharacterCustodialWallet,
+  clearCharacterCustodialWallet,
   getAgentCustodialWallet,
-  setAgentCustodialWallet,
-  clearAgentCustodialWallet,
   getAgentEntityRef,
   setAgentEntityRef,
   clearAgentEntityRef,
@@ -102,16 +103,29 @@ export async function setupAgentCharacter(
   calling?: "adventurer" | "farmer" | "merchant" | "craftsman",
   options?: { preventCreateIfMissing?: boolean }
 ): Promise<CharacterSetupResult> {
-  const existing = await getAgentCustodialWallet(userWallet);
   const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
 
-  // ── Step 1: Get or create custodial wallet ─────────────────────────────
+  // ── Step 1: Get or create per-character custodial wallet ──────────────
+  // Look up the wallet scoped to this specific character name first.
+  // Migration path: if no char-specific wallet exists yet, check the legacy
+  // single-wallet key and adopt it for this character so existing users keep
+  // their items/gold. Subsequent characters get a fresh wallet.
+  let existing = await getCharacterCustodialWallet(userWallet, characterName);
+  if (!existing) {
+    existing = await getAgentCustodialWallet(userWallet); // reads legacy key via entity ref / fallback
+    if (existing) {
+      // Adopt legacy wallet for this character and record it under the char-scoped key.
+      await setCharacterCustodialWallet(userWallet, characterName, existing);
+      console.log(`[agentSetup] Migrated legacy wallet ${existing} → ${characterName} for ${userWallet}`);
+    }
+  }
+
   let custodialAddress: string;
   if (existing) {
     try {
       await exportCustodialWallet(existing);
       custodialAddress = existing;
-      console.log(`[agentSetup] Reusing custodial wallet ${custodialAddress} for ${userWallet}`);
+      console.log(`[agentSetup] Reusing custodial wallet ${custodialAddress} for ${userWallet}/${characterName}`);
     } catch (err: any) {
       const msg = String(err?.message ?? err ?? "");
       const staleCipher =
@@ -121,18 +135,18 @@ export async function setupAgentCharacter(
       if (!staleCipher) {
         throw err;
       }
-      console.warn(`[agentSetup] Stale custodial wallet mapping for ${userWallet}: ${existing} (${msg.slice(0, 120)})`);
-      await clearAgentCustodialWallet(userWallet);
+      console.warn(`[agentSetup] Stale custodial wallet for ${userWallet}/${characterName}: ${existing} (${msg.slice(0, 120)})`);
+      await clearCharacterCustodialWallet(userWallet, characterName);
       const wallet = await createCustodialWallet();
       custodialAddress = wallet.address.toLowerCase();
-      await setAgentCustodialWallet(userWallet, custodialAddress);
-      console.log(`[agentSetup] Replaced broken custodial wallet with ${custodialAddress} for ${userWallet}`);
+      await setCharacterCustodialWallet(userWallet, characterName, custodialAddress);
+      console.log(`[agentSetup] Replaced broken custodial wallet with ${custodialAddress} for ${userWallet}/${characterName}`);
     }
   } else {
     const wallet = await createCustodialWallet();
     custodialAddress = wallet.address.toLowerCase();
-    await setAgentCustodialWallet(userWallet, custodialAddress);
-    console.log(`[agentSetup] Created custodial wallet ${custodialAddress} for ${userWallet}`);
+    await setCharacterCustodialWallet(userWallet, characterName, custodialAddress);
+    console.log(`[agentSetup] Created custodial wallet ${custodialAddress} for ${userWallet}/${characterName}`);
   }
 
   // ── Step 2: Check if entity already spawned ────────────────────────────

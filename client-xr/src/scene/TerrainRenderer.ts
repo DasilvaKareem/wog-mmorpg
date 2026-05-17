@@ -84,6 +84,7 @@ export class TerrainRenderer {
   private canopyMeshes: { mesh: THREE.Mesh; baseX: number; baseZ: number }[] = [];
   private bushMeshes: THREE.Mesh[] = [];
   private groundMeshes: THREE.Mesh[] = [];
+  private treeInstanced: THREE.InstancedMesh[] = [];
   private elapsed = 0;
   private built = false;
   private elevationData: number[] = [];
@@ -331,6 +332,11 @@ export class TerrainRenderer {
       return TREE_TILES.has(v);
     };
 
+    // Collected tree placements get rendered as one InstancedMesh per
+    // (asset, sub-mesh) at the end of the tile loop. Keep them out of the
+    // per-tile path so thousands of clones never enter the scene graph.
+    const treePlacements = new Map<string, { x: number; y: number; z: number; scale: number; rotY: number }[]>();
+
     for (let iz = 0; iz < H; iz++) {
       for (let ix = 0; ix < W; ix++) {
         const ti = iz * W + ix;
@@ -369,22 +375,25 @@ export class TerrainRenderer {
 
         // Try GLB model first
         if (useGlb) {
-          // Trees get zone-specific palette + thinning + jitter so a dense
-          // tree-tile block doesn't render as a wall of overlapping canopies.
+          // Trees collect into per-asset placement lists and render as one
+          // InstancedMesh per (asset, sub-mesh) below — cuts thousands of
+          // draw calls down to a few dozen.
           if (TREE_TILES.has(ov)) {
             const pick = this.envAssets!.getTreeAssetForZone(zoneId, ov, ix, iz, isTreeTileAt);
             if (pick) {
-              const obj = this.envAssets!.place(
-                pick.asset,
-                wx + pick.jitterX,
-                elev,
-                wz + pick.jitterZ,
-                pick.scaleMul,
-              );
-              if (obj) {
-                this.group.add(obj);
-                continue;
+              let list = treePlacements.get(pick.asset);
+              if (!list) {
+                list = [];
+                treePlacements.set(pick.asset, list);
               }
+              list.push({
+                x: wx + pick.jitterX,
+                y: elev,
+                z: wz + pick.jitterZ,
+                scale: pick.scaleMul,
+                rotY: pick.rotY,
+              });
+              continue;
             } else {
               continue; // thinned out — leave an empty tile
             }
@@ -503,7 +512,43 @@ export class TerrainRenderer {
       }
     }
 
+    // ── Tree InstancedMesh batches ──
+    if (useGlb && treePlacements.size > 0) {
+      this.buildTreeInstancedMeshes(treePlacements);
+    }
+
     this.built = true;
+  }
+
+  /** One InstancedMesh per (tree asset × sub-mesh). Cuts tree draw calls from
+   *  N×subMeshes down to (unique assets)×subMeshes. */
+  private buildTreeInstancedMeshes(
+    placements: Map<string, { x: number; y: number; z: number; scale: number; rotY: number }[]>,
+  ) {
+    const wrapperMat = new THREE.Matrix4();
+    const finalMat = new THREE.Matrix4();
+    for (const [asset, list] of placements) {
+      if (list.length === 0) continue;
+      const subs = this.envAssets!.getAssetSubMeshes(asset);
+      if (!subs || subs.length === 0) continue;
+      for (const sub of subs) {
+        const inst = new THREE.InstancedMesh(sub.geometry, sub.material, list.length);
+        inst.castShadow = true;
+        inst.receiveShadow = true;
+        // Per-zone bounds are unreliable for sparse forests; skip frustum
+        // culling — instanced draws are cheap enough to push through.
+        inst.frustumCulled = false;
+        for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          this.envAssets!.getAssetWrapperMatrix(asset, p.x, p.y, p.z, p.scale, p.rotY, wrapperMat);
+          finalMat.multiplyMatrices(wrapperMat, sub.localMatrix);
+          inst.setMatrixAt(i, finalMat);
+        }
+        inst.instanceMatrix.needsUpdate = true;
+        this.group.add(inst);
+        this.treeInstanced.push(inst);
+      }
+    }
   }
 
   /** Animate water, trees, bushes, and portals */
@@ -554,6 +599,10 @@ export class TerrainRenderer {
   }
 
   dispose() {
+    // Release instance buffers — geometry/material are shared with the
+    // envAssets cache so we deliberately do NOT dispose those here.
+    for (const inst of this.treeInstanced) inst.dispose();
+    this.treeInstanced = [];
     while (this.group.children.length > 0) {
       this.group.remove(this.group.children[0]);
     }

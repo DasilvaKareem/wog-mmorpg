@@ -38,6 +38,24 @@ const TYPE_ICONS: Record<string, string> = {
   broadcast: "\u{1F4E2}",
 };
 
+const ACTION_ICONS: Record<string, string> = {
+  quest_complete: "\u2705",  // ✅
+  level_up: "\u26A1",        // ⚡
+  agent_stuck: "\u26A0\uFE0F", // ⚠️
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  quest_complete: "Quest Complete",
+  level_up: "Level Up",
+  agent_stuck: "Agent Stuck",
+};
+
+const ACTION_COLORS: Record<string, string> = {
+  quest_complete: "#5dff9a",
+  level_up: "#ffd86b",
+  agent_stuck: "#ff8c42",
+};
+
 const TYPE_COLORS: Record<string, string> = {
   system: "#ffc24f",
   direct: "#8cc8ff",
@@ -85,6 +103,7 @@ export class InboxPanel {
   private listEl: HTMLDivElement;
   private footerEl: HTMLDivElement;
   private custodialWallet: string | null = null;
+  private currentCharacterName: string | null = null;
   private messages: InboxMessage[] = [];
   private serverUnread = 0;
   private onUnreadChange: (count: number) => void;
@@ -170,6 +189,11 @@ export class InboxPanel {
     this.render();
   }
 
+  setCharacterName(name: string | null) {
+    this.currentCharacterName = name;
+    this.render();
+  }
+
   getUnreadCount(): number {
     return this.serverUnread;
   }
@@ -203,11 +227,21 @@ export class InboxPanel {
         }
 
         this.messages = msgs;
-        const newUnread = Number(data.unread ?? msgs.filter((m) => !m.readAt).length);
-        if (newUnread > this.serverUnread) {
+        // Count unread only for visible (current-character) messages to keep
+        // badge accurate when multiple characters share one custodial wallet.
+        const visibleUnread = this.currentCharacterName
+          ? msgs.filter((m) =>
+              !m.readAt && (
+                m.type !== "system" ||
+                !m.fromName ||
+                m.fromName.toLowerCase() === this.currentCharacterName!.toLowerCase()
+              )
+            ).length
+          : msgs.filter((m) => !m.readAt).length;
+        if (visibleUnread > this.serverUnread) {
           playSoundEffect("ui_notification");
         }
-        this.serverUnread = newUnread;
+        this.serverUnread = visibleUnread;
         this.apiBase = base;
         this.render();
         this.onUnreadChange(this.serverUnread);
@@ -324,33 +358,59 @@ export class InboxPanel {
       this.footerEl.textContent = "";
       return;
     }
-    if (this.messages.length === 0) {
+    // Filter system messages to current character only — all characters on the
+    // same owner wallet share one custodial wallet (and thus one inbox).
+    // Non-system messages (trade, duel, party, direct) are always shown.
+    const visibleMessages = this.currentCharacterName
+      ? this.messages.filter((m) =>
+          m.type !== "system" ||
+          !m.fromName ||
+          m.fromName.toLowerCase() === this.currentCharacterName!.toLowerCase()
+        )
+      : this.messages;
+
+    if (visibleMessages.length === 0) {
       this.listEl.innerHTML = `<div class="ibx-empty">No messages yet. Your agent will log events here.</div>`;
       this.footerEl.textContent = "";
       return;
     }
 
     let html = "";
-    for (const m of this.messages) {
+    for (const m of visibleMessages) {
       const unread = !m.readAt;
-      const icon = TYPE_ICONS[m.type] ?? "\u2709";
-      const color = TYPE_COLORS[m.type] ?? "#9ab";
-      const sender = m.fromName || m.from.slice(0, 8) || "system";
       const time = formatTime(m.ts);
-      html += `<div class="ibx-row${unread ? " ibx-unread" : ""}">`;
-      html += `<div class="ibx-icon" style="color:${color}">${icon}</div>`;
-      html += `<div class="ibx-content">`;
-      html += `<div class="ibx-meta"><span class="ibx-from" style="color:${color}">${esc(sender)}</span><span class="ibx-time">${esc(time)}</span></div>`;
-      html += `<div class="ibx-body">${esc(m.body)}</div>`;
-      if (m.type === "trade-offer") {
-        html += this.renderTradeOfferControls(m);
-      } else if (m.type === "match-found") {
-        html += this.renderMatchFoundControls(m);
-      } else if (m.type === "duel-request") {
-        html += this.renderDuelRequestControls(m);
+      const agentAction = m.type === "system" ? (m.data?.action as string | undefined) : undefined;
+
+      if (agentAction && ACTION_LABELS[agentAction]) {
+        // Rich agent-event row: quest complete, level up, stuck — no redundant sender name
+        const icon = ACTION_ICONS[agentAction] ?? TYPE_ICONS.system;
+        const color = ACTION_COLORS[agentAction] ?? TYPE_COLORS.system;
+        const label = ACTION_LABELS[agentAction];
+        html += `<div class="ibx-row ibx-row-event${unread ? " ibx-unread" : ""}">`;
+        html += `<div class="ibx-icon" style="color:${color}">${icon}</div>`;
+        html += `<div class="ibx-content">`;
+        html += `<div class="ibx-meta"><span class="ibx-from" style="color:${color};font-weight:bold">${esc(label)}</span><span class="ibx-time">${esc(time)}</span></div>`;
+        html += `<div class="ibx-body">${esc(m.body)}</div>`;
+        html += `</div></div>`;
+      } else {
+        // Standard row: direct messages, trade, duel, party — show sender
+        const icon = TYPE_ICONS[m.type] ?? "\u2709";
+        const color = TYPE_COLORS[m.type] ?? "#9ab";
+        const sender = m.fromName || m.from.slice(0, 8) || "system";
+        html += `<div class="ibx-row${unread ? " ibx-unread" : ""}">`;
+        html += `<div class="ibx-icon" style="color:${color}">${icon}</div>`;
+        html += `<div class="ibx-content">`;
+        html += `<div class="ibx-meta"><span class="ibx-from" style="color:${color}">${esc(sender)}</span><span class="ibx-time">${esc(time)}</span></div>`;
+        html += `<div class="ibx-body">${esc(m.body)}</div>`;
+        if (m.type === "trade-offer") {
+          html += this.renderTradeOfferControls(m);
+        } else if (m.type === "match-found") {
+          html += this.renderMatchFoundControls(m);
+        } else if (m.type === "duel-request") {
+          html += this.renderDuelRequestControls(m);
+        }
+        html += `</div></div>`;
       }
-      html += `</div>`;
-      html += `</div>`;
     }
 
     this.listEl.innerHTML = html;

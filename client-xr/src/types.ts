@@ -40,6 +40,7 @@ export interface Entity {
   // Resource nodes
   oreType?: string;
   flowerType?: string;
+  nectarType?: string;
   cropType?: string;
   charges?: number;
   maxCharges?: number;

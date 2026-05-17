@@ -14,6 +14,8 @@ import {
   getAgentEntityRef,
   setAgentEntityRef,
   patchAgentConfig,
+  autoPatchAgentConfig,
+  USER_PINNED_FOCUSES,
   getAgentRuntimeState,
   setAgentRuntimeState,
   appendChatMessage,
@@ -181,6 +183,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "farming":    return "Harvest crops at farmland zones. Equip a hoe and gather produce.";
     case "dungeon":    return "Enter dungeon gates and clear all mobs inside for XP and loot.";
     case "idle":       return "Rest. Only act if something urgent happens.";
+    case "user":       return "Wait for the user's next command. Do not act autonomously.";
     default:           return "Be autonomous — quest and improve your character.";
   }
 }
@@ -212,6 +215,7 @@ function focusToScript(
     case "farming":    return { type: "farm",    reason: "User focus: farming" };
     case "dungeon":    return { type: "dungeon", reason: "User focus: dungeon" };
     case "idle":       return { type: "idle",    reason: "User focus: idle" };
+    case "user":       return { type: "idle",    reason: "User control — awaiting commands" };
     default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
   }
 }
@@ -264,6 +268,9 @@ export class AgentRunner {
    *  jump straight to idle when one path is exhausted. Reset when the
    *  agent successfully changes zone or after ~5 min idle. */
   private rescueAttemptByZone = new Map<string, number>();
+  /** Human-readable messages queued for the agent chat panel. Drained by
+   *  /agent/status so the client can surface them proactively. */
+  private proactiveMessages: string[] = [];
 
   /** Per-entity tick gate. Serializes the loop's tick body and any externally-
    *  invoked mutating methods (clearScript, enqueueActions, repairGear, etc.)
@@ -366,6 +373,11 @@ export class AgentRunner {
   public get wallet(): string { return this.userWallet; }
   public get custodial(): string | null { return this.custodialWallet; }
   public get mcp(): AgentMcpClient | null { return this.mcpClient; }
+  /** Returns queued proactive chat messages and clears the queue. */
+  public drainProactiveMessages(): string[] {
+    const msgs = this.proactiveMessages.splice(0);
+    return msgs;
+  }
 
   private ticksSinceLastDecision = 0;
   private cachedZoneState: { entities: Record<string, any>; me: any; recentEvents: ZoneEvent[] } | null = null;
@@ -1349,6 +1361,15 @@ export class AgentRunner {
       return false;
     }
 
+    // focus=idle / focus=user means the user explicitly wants the agent to do
+    // nothing autonomously. Never auto-travel, relax strategy, or pivot under
+    // a user-pinned focus — that would override the user's directive.
+    const cfg = await getAgentConfig(this.userWallet);
+    if (cfg && USER_PINNED_FOCUSES.has(cfg.focus)) {
+      console.log(`[agent:${this.walletTag}] Circuit breaker suppressed — focus=${cfg.focus}`);
+      return false;
+    }
+
     const zone = this.currentRegion;
     const entity = this.entityId ? getWorldEntity(this.entityId) : null;
     const level = entity?.level ?? 1;
@@ -1397,6 +1418,7 @@ export class AgentRunner {
         void this.logActivity(`[RELAX] ${currentType} blocked on ${detail} — strategy ${currentStrategy} → ${relaxed}`);
         await patchAgentConfig(this.userWallet, { strategy: relaxed });
         emitChat("strategy_relax", relaxed);
+        this.proactiveMessages.push(`I couldn't find safe targets with ${currentStrategy} settings, so I've switched to ${relaxed} strategy and will keep trying.`);
         // Don't change script — keep the same focus, just with relaxed filter.
         return true;
       }
@@ -1417,6 +1439,7 @@ export class AgentRunner {
           ...(failure.targetId ? { targetId: failure.targetId } : {}),
         });
         emitChat("rescue_travel", rescueZone);
+        this.proactiveMessages.push(`Nothing to fight in ${zone} at my level — heading to ${rescueZone.replace(/-/g, " ")} to find better targets.`);
         await this.enqueueActions(chain, true);
         return true;
       }
@@ -1436,6 +1459,7 @@ export class AgentRunner {
         ...(failure.targetId ? { targetId: failure.targetId } : {}),
       });
       emitChat("try_gather", detail);
+      this.proactiveMessages.push(`Can't progress with ${currentType} right now (${failure.reason}) — switching to gathering resources so I stay productive.`);
       await patchAgentConfig(this.userWallet, {
         focus: "gathering",
         gatherNodeType: "both",
@@ -1451,11 +1475,22 @@ export class AgentRunner {
     console.warn(`[agent:${this.walletTag}] Rescue exhausted: ${msg}`);
     void this.logActivity(`[STUCK] ${msg}`);
     emitChat("stuck", `${currentType} keeps failing on ${failure.reason} — exhausted rescues`);
+    this.proactiveMessages.push(`I'm stuck in ${zone.replace(/-/g, " ")} and I've run out of ideas. I've tried adjusting strategy, traveling, and gathering — nothing is working. Please tell me what to do next.`);
     void sendAgentPush(this.userWallet, {
       type: "agent_stuck",
       agentName: entity?.name ?? "Agent",
       detail: `Stuck in ${zone}: ${failure.reason}`,
     });
+    if (this.custodialWallet) {
+      void sendInboxMessage({
+        from: this.custodialWallet,
+        fromName: entity?.name ?? "Agent",
+        to: this.custodialWallet,
+        type: "system",
+        body: `Stuck in ${zone} — ${failure.reason}. Tell me what to do next.`,
+        data: { action: "agent_stuck", zone, reason: failure.reason },
+      });
+    }
     this.logError("action", `Circuit breaker fired: ${currentType} → idle after ${failure.consecutive} blocks and ${attempts} rescue attempts`, {
       fromScript: currentType,
       toFocus: "idle",
@@ -1464,7 +1499,7 @@ export class AgentRunner {
       ...(failure.targetId ? { targetId: failure.targetId } : {}),
     });
     emitChat("give_up_idle", `${currentType} blocked on ${detail}`);
-    void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
+    void autoPatchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
     this.currentScript = { type: "idle", reason: `Circuit breaker exhausted in ${zone}` };
     this.ticksOnCurrentScript = 0;
     this.rescueAttemptByZone.delete(zone);
@@ -1597,19 +1632,7 @@ export class AgentRunner {
         } else if (latest.type === "quest") {
           emitAgentChat({ ...dCtx, event: "quest_complete", detail: latest.message });
           void sendAgentPush(this.userWallet, { type: "quest_complete", agentName: entity.name, detail: latest.message });
-          // Notify summoner in inbox
-          if (this.custodialWallet) {
-            const questLine = pickLine(this.agentOrigin ?? undefined, entity.classId ?? undefined, "summon_quest_complete")
-              ?? `Just finished "${latest.message ?? "a quest"}"! What should I do next?`;
-            const questBody = questLine.replace(/\{detail\}/g, latest.message ?? "a quest");
-            void sendInboxMessage({
-              from: this.custodialWallet,
-              fromName: entity.name,
-              to: this.userWallet,
-              type: "direct",
-              body: questBody,
-            });
-          }
+          // Inbox notification handled by the diary hook (server.ts setDiaryInboxHook) to avoid duplicates.
 
           // After completing a farm "talk to Helga" quest, suggest buying land
           const FARM_LAND_QUESTS = [
@@ -1649,20 +1672,7 @@ export class AgentRunner {
     if (latest.type === "levelup") {
       const entity = this.entityId ? getWorldEntity(this.entityId) : null;
       void sendAgentPush(this.userWallet, { type: "level_up", agentName: entity?.name ?? "Agent", detail: latest.message });
-      // Notify summoner in inbox
-      if (this.custodialWallet) {
-        const lvl = String(entity?.level ?? "?");
-        const lvlLine = pickLine(this.agentOrigin ?? undefined, entity?.classId ?? undefined, "summon_level_up")
-          ?? `Just hit level ${lvl}! Should I keep going here or move to a new zone?`;
-        const lvlBody = lvlLine.replace(/\{detail\}/g, lvl);
-        void sendInboxMessage({
-          from: this.custodialWallet,
-          fromName: entity?.name ?? "Agent",
-          to: this.userWallet,
-          type: "direct",
-          body: lvlBody,
-        });
-      }
+      // Inbox notification handled by the diary hook (server.ts setDiaryInboxHook) to avoid duplicates.
       return { type: "level_up", detail: latest.message };
     }
     if (latest.type === "death") {
@@ -1681,7 +1691,7 @@ export class AgentRunner {
       if (deaths.length >= 3) {
         console.warn(`[agent:${this.walletTag}] Death loop in ${zone} (${deaths.length} deaths in 5min) — going idle`);
         void this.logActivity(`Died ${deaths.length}x in ${zone} — pausing. Tell me where to go next.`);
-        void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
+        void autoPatchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
         this.currentScript = { type: "idle", reason: `Death loop in ${zone}` };
         this.ticksOnCurrentScript = 0;
         // Drop the threshold for the next deadly cycle — once unstuck the user
@@ -2052,6 +2062,20 @@ export class AgentRunner {
       return; // let the new script execute on the next tick
     }
 
+    // ── User-pinned focus: never decide autonomously ──
+    // focus="user" means the human is driving. Don't run trigger detection,
+    // supervisor LLM calls, level-up auto-progress, or anything else that
+    // could change the script. Chat-driven supervisor calls (from /agent/chat)
+    // can still set scripts and enqueue actions; this only guards the loop's
+    // own autonomous reasoning.
+    if (config.focus === "user") {
+      if (!this.currentScript) {
+        this.currentScript = { type: "idle", reason: "User control — awaiting commands" };
+        this.ticksOnCurrentScript = 0;
+      }
+      return;
+    }
+
     // Increment counters before detection (detectTrigger is now pure)
     this.ticksSinceLastDecision++;
     this.ticksOnCurrentScript++;
@@ -2164,8 +2188,8 @@ export class AgentRunner {
         // Auto-progress: enqueue a travel→quest chain to the best zone we now
         // qualify for. Queued chains suppress autonomous triggers so the agent
         // actually completes the zone advance without getting yanked back.
-        // Previous code had a `+2` upper bound that blocked most level-ups.
-        if (autoProgressEnabled && !activeObj && !this.isUserQueueLocked()) {
+        // focus=idle is an explicit "do nothing" — never auto-progress over it.
+        if (autoProgressEnabled && !USER_PINNED_FOCUSES.has(config.focus) && !activeObj && !this.isUserQueueLocked()) {
           const allowed = this.currentCaps.allowedZones;
           const chain = buildProgressChain(lvl, this.currentRegion, allowed);
           if (chain) {
@@ -2202,7 +2226,7 @@ export class AgentRunner {
             const pick = accessibleNeighbors[Math.floor(Math.random() * accessibleNeighbors.length)];
             console.log(`[agent:${this.walletTag}] No targets in ${this.currentRegion}, moving to ${pick}`);
             void this.logActivity(`Zone cleared — exploring ${pick}`);
-            await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
+            await autoPatchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
             this.currentScript = { type: "travel", targetZone: pick, reason: "Zone cleared" };
             this.ticksOnCurrentScript = 0;
           } else {
@@ -2681,7 +2705,7 @@ export class AgentRunner {
               void this.logActivity(`Summoner approved travel — proceeding`);
             } else if (action === "travel" && qReply.reply.toLowerCase() === "no") {
               void this.logActivity(`Summoner declined travel — staying`);
-              await patchAgentConfig(this.userWallet, { focus: "combat", targetZone: undefined });
+              await autoPatchAgentConfig(this.userWallet, { focus: "combat", targetZone: undefined });
               this.currentScript = null;
             }
           }
@@ -2853,7 +2877,7 @@ export class AgentRunner {
                   if (config.targetZone !== leaderZone || focus !== "traveling") {
                     console.log(`[agent:${this.walletTag}] Following party leader to ${leaderZone}`);
                     void this.logActivity(`Following party leader to ${leaderZone.replace(/-/g, " ")}`);
-                    await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: leaderZone });
+                    await autoPatchAgentConfig(this.userWallet, { focus: "traveling", targetZone: leaderZone });
                     this.currentScript = { type: "travel", targetZone: leaderZone, reason: "Following party leader" };
                     this.ticksOnCurrentScript = 0;
                     await sleep(TICK_MS);
@@ -2892,7 +2916,7 @@ export class AgentRunner {
             await patchAgentConfig(this.userWallet, { targetZone: normalizedTargetZone });
           }
           if (normalizedTargetZone && normalizedTargetZone !== this.currentRegion && focus !== "traveling") {
-            await patchAgentConfig(this.userWallet, { focus: "traveling" });
+            await autoPatchAgentConfig(this.userWallet, { focus: "traveling" });
             this.currentScript = null;
           }
 
@@ -2903,7 +2927,7 @@ export class AgentRunner {
               const fallbackZone = allowed[0] ?? "village-square";
               console.log(`[agent:${this.walletTag}] Zone ${this.currentRegion} not allowed — forcing travel to ${fallbackZone}`);
               void this.logActivity(`Zone restricted — returning to ${fallbackZone}`);
-              await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: fallbackZone });
+              await autoPatchAgentConfig(this.userWallet, { focus: "traveling", targetZone: fallbackZone });
               this.currentScript = null;
             }
             if (normalizedTargetZone && !allowed.includes(normalizedTargetZone)) {
@@ -2940,7 +2964,7 @@ export class AgentRunner {
               console.log(`[agent:${this.walletTag}] Next objective: ${nextObj.label}`);
             } else {
               // All objectives done — fall back to questing
-              await patchAgentConfig(this.userWallet, { focus: "questing" });
+              await autoPatchAgentConfig(this.userWallet, { focus: "questing" });
               this.currentScript = null;
               this.ticksSinceLastDecision = MAX_STALE_TICKS;
               void this.logActivity("All objectives complete! Returning to questing.");

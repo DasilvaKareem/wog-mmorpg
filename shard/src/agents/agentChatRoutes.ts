@@ -702,6 +702,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     }
 
     const runner = agentManager.getRunner(authWallet);
+    const pendingMessages = runner?.drainProactiveMessages() ?? [];
     const currentActivity = runner?.currentActivity ?? null;
     const script = runner?.script ?? null;
     const currentScript = script
@@ -748,6 +749,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       activeOrder,
       actionQueue,
       recentActivities,
+      pendingMessages,
       telemetry,
     });
   });

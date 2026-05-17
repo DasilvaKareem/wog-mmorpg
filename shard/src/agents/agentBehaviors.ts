@@ -3,7 +3,7 @@
  * Each function runs one tick of the behavior and is called from AgentRunner.executeCurrentScript().
  */
 
-import { getAgentConfig, patchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
+import { getAgentConfig, patchAgentConfig, autoPatchAgentConfig, USER_PINNED_FOCUSES, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import {
   getEntity as getWorldEntity,
@@ -1002,7 +1002,7 @@ export async function doGathering(
 
         if (targetZone && targetZone !== ctx.currentRegion) {
           void ctx.logActivity(`Resource ${preferredItemName} not in ${ctx.currentRegion} — traveling to ${targetZone} to gather`);
-          await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+          await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
           ctx.setScript(null); // Force focus refresh
           return actionProgressed(`Traveling to ${targetZone} to gather ${preferredItemName}`);
         }
@@ -2260,7 +2260,7 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
     if (rawTargetZone && !targetZone) {
       console.log(`[agent:${ctx.walletTag}] Invalid travel target zone: ${rawTargetZone}`);
       void ctx.logActivity(`Unknown destination "${rawTargetZone}" — clearing travel target`);
-      await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
       ctx.setScript(null);
       return actionCompleted(`Cleared invalid destination ${rawTargetZone}`);
     }
@@ -2268,7 +2268,7 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
     if (!targetZone || targetZone === ctx.currentRegion) {
       console.log(`[agent:${ctx.walletTag}] Arrived at ${ctx.currentRegion}, switching to questing`);
       void ctx.logActivity(`Arrived at ${ctx.currentRegion}, resuming questing`);
-      await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
       ctx.setScript(null);
       return actionCompleted(`Arrived at ${ctx.currentRegion}`);
     }
@@ -2276,7 +2276,7 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
     const center = getRegionCenter(targetZone);
     if (!center) {
       console.log(`[agent:${ctx.walletTag}] Unknown region: ${targetZone}`);
-      await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
       return actionBlocked(`Unknown region: ${targetZone}`, {
         failureKey: `travel:unknown:${targetZone}`,
         targetName: targetZone,
@@ -2649,7 +2649,7 @@ export async function doQuesting(
           const targetZone = findZoneForNpc(npcName);
           if (targetZone && targetZone !== ctx.currentRegion) {
             void ctx.logActivity(`Quest NPC ${aq.quest?.npcId} not in ${ctx.currentRegion} — traveling to ${targetZone} to turn in`);
-            await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+            await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
             ctx.setScript(null); // Force focus refresh
             return actionProgressed(`Traveling to ${targetZone} to turn in "${aq.quest?.title}"`);
           }
@@ -2772,7 +2772,7 @@ export async function doQuesting(
             if (!ctx.isInteractionOnCooldown(cooldownKey)) {
               ctx.setInteractionCooldown(cooldownKey, 5_000);
               void ctx.logActivity(`Talk-quest NPC ${targetNpcDisplay} not in ${ctx.currentRegion} — traveling to ${targetZone} for "${tq.quest?.title}"`);
-              await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+              await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
               ctx.setScript(null);
               return actionProgressed(`Traveling to ${targetZone} for talk quest "${tq.quest?.title}"`);
             }
@@ -2853,11 +2853,20 @@ export async function doQuesting(
           }
         } else if (currentActive === 0) {
           const myLevel = me.level ?? 1;
+          // If the user pinned focus (idle / user), don't override it. Just
+          // idle the script and leave their saved focus alone — otherwise the
+          // cascade (questing → no quests → focus:=traveling) clobbers it.
+          const qCfg = await getAgentConfig(ctx.userWallet);
+          if (qCfg && USER_PINNED_FOCUSES.has(qCfg.focus)) {
+            void ctx.logActivity(`No quests remaining — staying put (user focus)`);
+            ctx.setScript({ type: "idle", reason: `User focus: ${qCfg.focus}` });
+            return actionIdle(`Focus is ${qCfg.focus} — not auto-traveling`);
+          }
           const nextZone = findNextZoneForLevel(myLevel);
           if (nextZone && nextZone !== ctx.currentRegion) {
             console.log(`[agent:${ctx.walletTag}] No quests left in ${ctx.currentRegion}, traveling to ${nextZone}`);
             void ctx.logActivity(`No quests remaining — traveling to ${nextZone}`);
-            await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: nextZone });
+            await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: nextZone });
             ctx.setScript(null);
             return actionProgressed(`Traveling to ${nextZone} for new quests`);
           }
@@ -2933,7 +2942,7 @@ export async function doQuesting(
         const targetZone = findZoneForQuestMobs(questMobNames);
         if (targetZone && targetZone !== ctx.currentRegion) {
           void ctx.logActivity(`Quest mob not in ${ctx.currentRegion} — traveling to ${targetZone} to hunt`);
-          await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+          await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
           ctx.setScript(null); // Force focus refresh
           return actionProgressed(`Traveling to ${targetZone} for quest targets`);
         }
@@ -3107,7 +3116,7 @@ async function questBlockedFallback(
     if (betterZone && betterZone !== ctx.currentRegion) {
       console.log(`[agent:${ctx.walletTag}] Quest combat blocked, underleveled (Lv${myLevel} in L${zoneReq} zone) — traveling to ${betterZone}`);
       void ctx.logActivity(`Too dangerous here (Lv${myLevel} in L${zoneReq} zone) — heading to ${betterZone}`);
-      await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: betterZone });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: betterZone });
       ctx.setScript(null);
       return actionProgressed(`Traveling to ${betterZone} — current zone too dangerous`);
     }

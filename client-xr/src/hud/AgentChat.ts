@@ -133,6 +133,7 @@ interface AgentStatus {
     nodeType?: string | null;
   }>;
   recentActivities: string[];
+  pendingMessages?: string[];
   running: boolean;
   entity?: { name: string; level: number; hp: number | null; maxHp: number | null } | null;
   zoneId?: string | null;
@@ -176,6 +177,7 @@ export class AgentChat {
   private activeTab: ActiveTab = "chat";
   private aiStatus: AgentStatus | null = null;
   private aiPollTimer: ReturnType<typeof setInterval> | null = null;
+  private bgPollTimer: ReturnType<typeof setInterval> | null = null;
 
   // PTT / Speech Recognition
   private recognition: any = null;
@@ -350,6 +352,46 @@ export class AgentChat {
     if (this.aiPollTimer) { clearInterval(this.aiPollTimer); this.aiPollTimer = null; }
   }
 
+  private startBgPoll() {
+    if (this.bgPollTimer) return;
+    this.bgPollTimer = setInterval(() => void this.checkPendingMessages(), 5000);
+  }
+
+  private stopBgPoll() {
+    if (this.bgPollTimer) { clearInterval(this.bgPollTimer); this.bgPollTimer = null; }
+  }
+
+  private async checkPendingMessages() {
+    if (!this.walletAddress) return;
+    const token = await getAuthToken(this.walletAddress);
+    if (!token) return;
+    for (const base of CANDIDATE_BASES) {
+      try {
+        const res = await fetch(toUrl(base, `/agent/status/${this.walletAddress}`), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const msgs: string[] = Array.isArray(data.pendingMessages) ? data.pendingMessages : [];
+        if (msgs.length > 0) {
+          for (const text of msgs) {
+            this.push({ role: "agent", text, time: Date.now(), color: "#7fd6be" });
+          }
+          this.show();
+          if (this.expanded) this.setTab("agent");
+        }
+        // Also update AI panel data if it's visible
+        if (this.activeTab === "ai" && this.expanded) {
+          this.aiStatus = data;
+          this.renderAiPanel();
+        }
+        return;
+      } catch {
+        // try next base
+      }
+    }
+  }
+
   private aiError: string | null = null;
 
   private async refreshAiStatus() {
@@ -458,6 +500,11 @@ export class AgentChat {
 
   setWallet(address: string | null) {
     this.walletAddress = address;
+    if (address) {
+      this.startBgPoll();
+    } else {
+      this.stopBgPoll();
+    }
   }
 
   setEntityId(id: string | null) {

@@ -28,10 +28,12 @@ export class ActionBar {
   private render() {
     let html = "";
     for (const btn of this.buttons) {
-      html += `<button class="ab-btn" data-id="${btn.id}" title="${btn.label} (${btn.key})">`;
+      const keyHint = btn.key ? ` <kbd class="ab-tt-key">${btn.key}</kbd>` : "";
+      html += `<button class="ab-btn" data-id="${btn.id}">`;
       html += `<span class="ab-icon">${btn.icon}</span>`;
       html += `<span class="ab-key">${btn.key}</span>`;
       html += `<span class="ab-badge" data-id="${btn.id}" hidden></span>`;
+      html += `<span class="ab-tooltip">${btn.label}${keyHint}</span>`;
       html += `</button>`;
     }
     this.container.innerHTML = html;
@@ -182,6 +184,55 @@ export class ActionBar {
       @keyframes ab-pulse {
         0%   { box-shadow: 0 0 0 0 rgba(255, 80, 80, 0.75); }
         100% { box-shadow: 0 0 0 16px rgba(255, 80, 80, 0); }
+      }
+
+      .ab-tooltip {
+        position: absolute;
+        bottom: calc(100% + 10px);
+        left: 50%;
+        transform: translateX(-50%) translateY(4px);
+        background: rgba(8, 14, 24, 0.97);
+        border: 1px solid rgba(68, 255, 136, 0.28);
+        border-radius: 6px;
+        padding: 5px 9px;
+        white-space: nowrap;
+        font: 11px/1.4 monospace;
+        color: #c8d8e8;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.14s ease, transform 0.14s ease;
+        z-index: 19;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.55);
+      }
+      /* small arrow pointing down */
+      .ab-tooltip::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: rgba(68, 255, 136, 0.28);
+      }
+      .ab-btn:hover .ab-tooltip {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      /* hide on mobile — touch users can't hover */
+      @media (max-width: 600px) {
+        .ab-tooltip { display: none; }
+      }
+
+      .ab-tt-key {
+        display: inline-block;
+        background: rgba(68, 255, 136, 0.1);
+        border: 1px solid rgba(68, 255, 136, 0.3);
+        border-radius: 3px;
+        padding: 0 4px;
+        font: bold 9px/15px monospace;
+        color: rgba(68, 255, 136, 0.85);
+        margin-left: 5px;
+        vertical-align: middle;
       }
     `;
     document.head.appendChild(style);

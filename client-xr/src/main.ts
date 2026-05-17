@@ -19,6 +19,7 @@ import { XRSessionManager } from "./xr/XRSessionManager.js";
 // XRControllers imported dynamically to avoid crashing non-XR browsers
 type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
+import { initProfessionCatalogs, setPlayerProfessionLevels } from "./data/professionCatalogs.js";
 import { ZoneNameBadge } from "./hud/IntentModeBadge.js";
 import { ZoneBanner } from "./hud/ZoneBanner.js";
 import { EventBanner } from "./hud/EventBanner.js";
@@ -42,6 +43,7 @@ import { InboxPanel } from "./hud/InboxPanel.js";
 import { TradeOfferDialog } from "./hud/TradeOfferDialog.js";
 import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
 import { BetsPanel } from "./hud/BetsPanel.js";
+import { TutorialOverlay } from "./hud/TutorialOverlay.js";
 import { NotificationsPanel } from "./hud/NotificationsPanel.js";
 import { installMobileResponsiveStyles } from "./hud/MobileResponsive.js";
 import { ActionBar } from "./hud/ActionBar.js";
@@ -109,6 +111,7 @@ if (isDisplayMode && !queryWallet && !followEntityId) {
 }
 document.body.dataset.appMode = isDisplayMode ? "display" : "controller";
 const API_BASE = import.meta.env.VITE_API_URL || "";
+void initProfessionCatalogs(API_BASE);
 // Resolve audio URLs against the Vite base (prod serves under /xr/, dev at /).
 // Hardcoded "/audio/..." would 404 on prod because the bucket path is /xr/audio.
 const AUDIO_BASE = new URL("audio/", new URL(import.meta.env.BASE_URL, window.location.href)).href;
@@ -484,6 +487,7 @@ const charSelect = !isAnimationLab
       ownEntityId = detail.entityId || null;
       void import("./scene/AnimationResolver.js").then(m => m.setAnimDebugSelfName(detail.characterName));
       inboxPanel.setCustodialWallet(ownCustodialWallet);
+      inboxPanel.setCharacterName(detail.characterName);
       playerPanel.setFriendIdentity(ownWalletAddress, ownCustodialWallet ?? ownWalletAddress);
       lastInboxPollTime = 0;
       lastFriendsPollTime = 0;
@@ -494,6 +498,10 @@ const charSelect = !isAnimationLab
       questPanel.setPlayer(ownWalletAddress, true);
       controls.setLandingMode(false);
       setGameplayHudVisible(true);
+      if (detail.zoneId === "village-square" && !localStorage.getItem("wog:tutorial-v1")) {
+        const tut = new TutorialOverlay((id) => togglePanel(id as ManagedPanelId));
+        tut.start();
+      }
       console.log("[enter] Character ready:", detail.characterName, "zone:", detail.zoneId);
 
       // Move camera to their zone and find the entity
@@ -2120,6 +2128,7 @@ async function pollProfessions() {
       }
       prevProfessionLevels.set(profId, summary.level);
     }
+    setPlayerProfessionLevels(data.skills);
     skillsPanel.updateProfessions(data);
   }
 }

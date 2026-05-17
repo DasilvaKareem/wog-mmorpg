@@ -1163,10 +1163,15 @@ const start = async () => {
       let body = "";
       if (action === "level_up") {
         const level = (entry.details.newLevel as number) ?? "?";
-        body = `${name} reached level ${level}!`;
+        body = `Reached level ${level}!`;
       } else if (action === "quest_complete") {
-        const quest = (entry.details.questName as string) ?? "a quest";
-        body = `${name} completed "${quest}"!`;
+        const title = (entry.details.questTitle as string) ?? (entry.details.questName as string) ?? "unknown quest";
+        const xp = (entry.details.xpReward as number) ?? 0;
+        const copper = (entry.details.copperReward as number) ?? 0;
+        const gold = Math.floor(copper / 100);
+        body = gold > 0
+          ? `Completed "${title}" · +${xp} XP · +${gold}g`
+          : `Completed "${title}" · +${xp} XP`;
       }
       if (body) {
         void sendSystemNotification(wallet, name, body, { action, ...entry.details });

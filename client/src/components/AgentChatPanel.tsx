@@ -104,6 +104,7 @@ const FOCUS_COLORS: Record<string, string> = {
   homestead: "#7dd3a7",
   enchanting: "#c792ea",
   idle: "#8b9abc",
+  user: "#f5d063",
 };
 
 const QUICK_SUGGESTIONS = [

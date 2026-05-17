@@ -132,12 +132,15 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
     const id = `pg-${ts}-${++memIdCounter}`;
     logEntry.id = id;
     await upsertInboxMessage(to, logEntry);
-    void appendToHistory(to, logEntry);
 
     const redis = getRedis();
     if (!redis) {
+      // No Redis — append history here (only path available).
+      void appendToHistory(to, logEntry);
       return id;
     }
+    // Redis is available — let the Redis block append history so we use
+    // the real stream ID and avoid a double-write to agent_inbox_history.
   }
 
   if (redis) {
@@ -150,7 +153,8 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
         ...Object.entries(fields).flat(),
       );
       logEntry.id = id;
-      // Persist to permanent history log (Redis LIST, capped)
+      // Single history append — Postgres block intentionally skips this
+      // when Redis is available to prevent duplicate rows.
       appendToHistory(to, logEntry);
       return id;
     } catch (err: any) {
@@ -524,7 +528,7 @@ export async function sendSystemNotification(
   try {
     await sendInboxMessage({
       from: "system",
-      fromName: "World of Geneva",
+      fromName: characterName,
       to: wallet,
       type: "system",
       body,
