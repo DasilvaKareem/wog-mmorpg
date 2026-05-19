@@ -33,6 +33,7 @@ export type InboxMessageType =
   | "duel-request"     // someone challenged you to a 1v1; carries { challengeId, challengerName, format, expiresAtMs }
   | "duel-result"      // your duel was accepted/declined/expired
   | "party-invite"     // "Join my party"
+  | "quest-approval"   // friend-sent quest pending accept/deny
   | "broadcast"        // zone-wide announcement
   | "system";          // game event notification (level-up, death, quest complete)
 

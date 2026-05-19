@@ -223,6 +223,49 @@ export function registerAgentInboxRoutes(server: FastifyInstance): void {
     return { ok: true, marked };
   });
 
+  // ── Quest approval ────────────────────────────────────────────────────────
+  // Called by the InboxDialog when a player accepts/denies a friend quest.
+  // Finds the original quest-approval message by questId, notifies the sender,
+  // and marks the message read.
+
+  server.post<{
+    Body: { questId: string; approved: boolean };
+  }>("/inbox/quest-approve", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const wallet: string = (request as any).walletAddress;
+    const { questId, approved } = request.body ?? {};
+
+    if (!questId) {
+      reply.code(400);
+      return { error: "questId is required" };
+    }
+
+    const { messages } = await getMessageHistory(wallet, 500, 0);
+    const questMsg = messages.find(
+      (m) => m.type === "quest-approval" && (m.data as any)?.questId === questId,
+    );
+
+    if (!questMsg) {
+      reply.code(404);
+      return { error: "Quest message not found" };
+    }
+
+    const recipientName = resolveEntityName(wallet) ?? wallet.slice(0, 8);
+    await sendInboxMessage({
+      from: wallet,
+      fromName: recipientName,
+      to: questMsg.from,
+      type: "system",
+      body: `${recipientName} has ${approved ? "accepted" : "declined"} your quest.`,
+      data: { questId, approved },
+    });
+
+    await markHistoryRead(wallet, [questMsg.id]);
+
+    return { ok: true, approved };
+  });
+
   // ── Clear inbox (hard-delete everything for a wallet) ──────────────────────
   // Unauthenticated like /history and /read — wallet scoping is the only access
   // control. Wipes Postgres history + inbox tables AND Redis history LIST +

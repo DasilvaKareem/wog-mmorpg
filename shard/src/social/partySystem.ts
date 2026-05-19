@@ -13,6 +13,7 @@ import {
 } from "../db/partyStore.js";
 import { listFreshPartyInvites, replacePartyInvites } from "../db/runtimeMetaStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
+import { sendInboxMessage } from "../agents/agentInbox.js";
 
 interface Party {
   id: string;
@@ -658,6 +659,21 @@ export function registerPartyRoutes(server: FastifyInstance): void {
     // Dedupe: remove any existing invite from same party
     const deduped = existing.filter((i) => i.partyId !== partyId || i.fromEntityId !== fromEntityId);
     await persistInvites(toCustodialWallet.toLowerCase(), [...deduped, invite]);
+
+    // Notify the invitee via inbox so they see an Accept/Deny prompt
+    sendInboxMessage({
+      from: (fromEntity.walletAddress ?? "").toLowerCase(),
+      fromName: fromEntity.name,
+      to: toCustodialWallet.toLowerCase(),
+      type: "party-invite",
+      body: `${fromEntity.name} has invited you to join their party!`,
+      data: {
+        inviteId: invite.id,
+        partyId,
+        fromEntityId,
+        fromName: fromEntity.name,
+      },
+    }).catch(() => {});
 
     return reply.send({ success: true, inviteId: invite.id });
   });

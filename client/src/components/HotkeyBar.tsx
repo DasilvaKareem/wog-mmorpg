@@ -14,6 +14,7 @@ interface HotkeyBarProps {
   onProfessions: () => void;
   onSettings: () => void;
   inboxActive?: boolean;
+  inboxUnread?: number;
   chatActive?: boolean;
   ranksActive?: boolean;
   walletActive?: boolean;
@@ -32,6 +33,7 @@ type Slot = {
 };
 
 const slots: Slot[] = [
+  { text: "\u{1F4EC}", key: "N", label: "Inbox", actionKey: "inbox", toggleable: true },
   { text: "\u{1F5E8}", key: "L", label: "Chat", actionKey: "chat", toggleable: true },
   { icon: "/icons/level.png", key: "R", label: "Ranks", actionKey: "ranks", toggleable: true },
   { icon: "/icons/gold.png", key: "W", label: "Wallet", actionKey: "wallet", toggleable: true },
@@ -50,6 +52,7 @@ export function HotkeyBar({
   onProfessions,
   onSettings,
   inboxActive = false,
+  inboxUnread = 0,
   chatActive = false,
   ranksActive = false,
   walletActive = false,
@@ -112,6 +115,11 @@ export function HotkeyBar({
               <span className="text-[20px] text-[#9aa7cc] font-bold leading-none">{slot.text}</span>
             )}
             <span className="text-[7px] leading-none text-[#9aa7cc] mt-[2px] font-bold">{slot.key}</span>
+            {slot.actionKey === "inbox" && inboxUnread > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#f25454] text-[7px] font-bold text-white animate-pulse">
+                {inboxUnread > 9 ? "9+" : inboxUnread}
+              </span>
+            )}
           </button>
         );
       })}

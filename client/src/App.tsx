@@ -296,6 +296,7 @@ function GameWorld(): React.ReactElement {
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [inboxOpen, setInboxOpen] = React.useState(false);
+  const [inboxUnread, setInboxUnread] = React.useState(0);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const [deferredDialogsReady, setDeferredDialogsReady] = React.useState(false);
@@ -597,6 +598,31 @@ function GameWorld(): React.ReactElement {
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, []);
 
+  // Poll for unread inbox messages every 15s; clear badge when inbox is opened
+  React.useEffect(() => {
+    if (!address) return;
+    const API_URL = (import.meta.env.VITE_API_URL || "http://127.0.0.1:3000").trim();
+
+    async function checkUnread() {
+      try {
+        const res = await fetch(`${API_URL}/inbox/${address}/history?limit=1`);
+        if (!res.ok) return;
+        const data = await res.json() as { unread?: number };
+        setInboxUnread(data.unread ?? 0);
+      } catch {
+        // silent — offline or server down
+      }
+    }
+
+    void checkUnread();
+    const timer = setInterval(() => { void checkUnread(); }, 15_000);
+    return () => clearInterval(timer);
+  }, [address]);
+
+  React.useEffect(() => {
+    if (inboxOpen) setInboxUnread(0);
+  }, [inboxOpen]);
+
   // Dynamic PWA theme color + title per zone
   useZoneTheme(currentZone);
 
@@ -854,6 +880,7 @@ function GameWorld(): React.ReactElement {
             onProfessions={toggleProfessions}
             onSettings={() => setSettingsOpen((s) => !s)}
             inboxActive={inboxOpen}
+            inboxUnread={inboxUnread}
             chatActive={showChat}
             ranksActive={showRanks}
             walletActive={showWallet}

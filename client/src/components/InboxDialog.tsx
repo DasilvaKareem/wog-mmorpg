@@ -57,6 +57,7 @@ function MessageRow({
   const [sending, setSending] = React.useState(false);
   const [sent, setSent] = React.useState(false);
   const [questDecision, setQuestDecision] = React.useState<"accepted" | "denied" | null>(null);
+  const [partyDecision, setPartyDecision] = React.useState<"accepted" | "declined" | null>(null);
 
   async function handleReply() {
     if (!replyText.trim() || !address || sending) return;
@@ -105,8 +106,34 @@ function MessageRow({
     }
   }
 
+  async function handlePartyInviteResponse(accepted: boolean) {
+    if (!address || sending) return;
+    const inviteId = msg.data?.inviteId as string;
+    if (!inviteId) return;
+    setSending(true);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) return;
+      const endpoint = accepted ? "/party/accept-invite" : "/party/decline-invite";
+      const res = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ custodialWallet: msg.to, inviteId }),
+      });
+      if (res.ok) {
+        setPartyDecision(accepted ? "accepted" : "declined");
+        onQuestResponded?.();
+      }
+    } catch {
+      // silent
+    } finally {
+      setSending(false);
+    }
+  }
+
   const isSelf = address && msg.from.toLowerCase() === address.toLowerCase();
   const isQuestApproval = msg.type === "quest-approval" && !!msg.data?.questId;
+  const isPartyInvite = msg.type === "party-invite" && !!msg.data?.inviteId;
   const questRewards = (msg.data?.rewards ?? {}) as { copper?: number; xp?: number };
   const questObjective = (msg.data?.objective ?? {}) as { type?: string; count?: number; targetMobName?: string };
 
@@ -114,8 +141,8 @@ function MessageRow({
     <div
       className="border p-2 space-y-1"
       style={{
-        borderColor: isQuestApproval ? "#e0af6844" : "#29334d",
-        backgroundColor: isQuestApproval ? "#1a160b" : "#11182b",
+        borderColor: isQuestApproval ? "#e0af6844" : isPartyInvite ? "#6ea8fe44" : "#29334d",
+        backgroundColor: isQuestApproval ? "#1a160b" : isPartyInvite ? "#0b1020" : "#11182b",
       }}
     >
       <div className="flex items-center justify-between">
@@ -197,6 +224,39 @@ function MessageRow({
                 className="flex-1 border border-[#f25454] bg-[#1a0a0a] px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-[#f25454] transition hover:bg-[#2a1010] disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {sending ? "..." : "Deny"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Party invite accept/decline */}
+      {isPartyInvite && (
+        <div className="pt-1">
+          {partyDecision ? (
+            <div
+              className="text-[9px] font-bold uppercase tracking-widest text-center py-1"
+              style={{ color: partyDecision === "accepted" ? "#54f28b" : "#f25454" }}
+            >
+              {partyDecision === "accepted" ? "Joined Party" : "Declined"}
+            </div>
+          ) : (
+            <div className="flex gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={() => void handlePartyInviteResponse(true)}
+                disabled={sending}
+                className="flex-1 border border-[#6ea8fe] bg-[#0a0f1e] px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-[#6ea8fe] transition hover:bg-[#101a2e] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sending ? "..." : "Join Party"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handlePartyInviteResponse(false)}
+                disabled={sending}
+                className="flex-1 border border-[#f25454] bg-[#1a0a0a] px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-[#f25454] transition hover:bg-[#2a1010] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sending ? "..." : "Decline"}
               </button>
             </div>
           )}
