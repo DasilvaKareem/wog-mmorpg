@@ -6,7 +6,7 @@ interface InboxMessage {
   from: string;
   fromName: string;
   to: string;
-  type: "direct" | "trade-request" | "trade-offer" | "trade-result" | "match-found" | "duel-request" | "duel-result" | "party-invite" | "broadcast" | "system";
+  type: "direct" | "trade-request" | "trade-offer" | "trade-result" | "match-found" | "duel-request" | "duel-result" | "party-invite" | "friend-request" | "quest-approval" | "broadcast" | "system";
   body: string;
   data?: Record<string, unknown>;
   ts: number;
@@ -94,6 +94,10 @@ export interface InboxPanelCallbacks {
   onAcceptDuel?: (challengeId: string) => Promise<{ ok: boolean; error?: string }>;
   /** Decline a duel challenge. */
   onDeclineDuel?: (challengeId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Accept a party invite. */
+  onAcceptPartyInvite?: (inviteId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Decline a party invite. */
+  onDeclinePartyInvite?: (inviteId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const COUNTDOWN_TICK_MS = 30_000;
@@ -117,6 +121,8 @@ export class InboxPanel {
   private seenMatchFoundIds = new Set<string>();
   /** challengeIds whose Accept/Decline buttons are pending or settled. */
   private duelActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
+  /** inviteIds whose Join/Decline buttons are pending or settled. */
+  private partyInviteActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
   /** Local timer that re-renders countdown chips while the panel is open. */
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -164,6 +170,15 @@ export class InboxPanel {
         const challengeId = duelBtn.dataset.challengeId;
         if (!challengeId) return;
         void this.handleDuelAction(action ?? "", challengeId);
+        return;
+      }
+
+      const partyBtn = (e.target as HTMLElement).closest("[data-party-action]") as HTMLElement | null;
+      if (partyBtn) {
+        const action = partyBtn.dataset.partyAction;
+        const inviteId = partyBtn.dataset.inviteId;
+        if (!inviteId) return;
+        void this.handlePartyInviteAction(action ?? "", inviteId);
         return;
       }
     });
@@ -408,6 +423,8 @@ export class InboxPanel {
           html += this.renderMatchFoundControls(m);
         } else if (m.type === "duel-request") {
           html += this.renderDuelRequestControls(m);
+        } else if (m.type === "party-invite") {
+          html += this.renderPartyInviteControls(m);
         }
         html += `</div></div>`;
       }
@@ -443,6 +460,7 @@ export class InboxPanel {
         this.seenMatchFoundIds.clear();
         this.tradeActionState.clear();
         this.duelActionState.clear();
+        this.partyInviteActionState.clear();
         this.render();
         this.onUnreadChange(0);
         return;
@@ -574,6 +592,47 @@ export class InboxPanel {
 
     if (this.duelActionState.get(challengeId) === "failed") {
       this.duelActionState.delete(challengeId);
+    }
+    this.render();
+  }
+
+  private renderPartyInviteControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { inviteId?: string; fromName?: string; partyId?: string };
+    if (!data.inviteId) return "";
+    const state = this.partyInviteActionState.get(data.inviteId);
+
+    if (state === "accepted") return `<div class="ibx-trade-result ibx-trade-success">Joined the party!</div>`;
+    if (state === "declined") return `<div class="ibx-trade-result ibx-trade-muted">Invite declined.</div>`;
+
+    const disabled = state === "pending";
+    const busy = state === "pending" ? ` <span class="ibx-trade-busy">working…</span>` : "";
+    return `<div class="ibx-trade-actions" style="border-left-color:rgba(180,140,255,0.5)">
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-party-action="accept" data-invite-id="${esc(data.inviteId)}"${disabled ? " disabled" : ""}>Join Party</button>
+        <button class="ibx-trade-btn ibx-trade-decline" data-party-action="decline" data-invite-id="${esc(data.inviteId)}"${disabled ? " disabled" : ""}>Decline</button>${busy}
+      </div>
+    </div>`;
+  }
+
+  private async handlePartyInviteAction(action: string, inviteId: string) {
+    if (this.partyInviteActionState.get(inviteId) === "pending") return;
+    this.partyInviteActionState.set(inviteId, "pending");
+    this.render();
+
+    try {
+      if (action === "accept") {
+        const result = await this.callbacks.onAcceptPartyInvite?.(inviteId);
+        this.partyInviteActionState.set(inviteId, result?.ok ? "accepted" : "failed");
+      } else if (action === "decline") {
+        const result = await this.callbacks.onDeclinePartyInvite?.(inviteId);
+        this.partyInviteActionState.set(inviteId, result?.ok ? "declined" : "failed");
+      }
+    } catch {
+      this.partyInviteActionState.set(inviteId, "failed");
+    }
+
+    if (this.partyInviteActionState.get(inviteId) === "failed") {
+      this.partyInviteActionState.delete(inviteId);
     }
     this.render();
   }

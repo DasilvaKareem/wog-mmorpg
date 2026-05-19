@@ -52,7 +52,7 @@ import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -1377,6 +1377,33 @@ const inboxPanel = new InboxPanel({
       return { ok: false, error: result.error };
     }
     agentChat.addSystemMessage("Duel declined.", "info");
+    return { ok: true };
+  },
+  onAcceptPartyInvite: async (inviteId) => {
+    if (!ownWalletAddress || !ownCustodialWallet) {
+      agentChat.addSystemMessage("Deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false };
+    const result = await acceptPartyInvite(token, ownCustodialWallet, inviteId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Party join failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage("Joined the party!", "success");
+    return { ok: true };
+  },
+  onDeclinePartyInvite: async (inviteId) => {
+    if (!ownWalletAddress || !ownCustodialWallet) return { ok: false };
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false };
+    const result = await declinePartyInvite(token, ownCustodialWallet, inviteId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage("Party invite declined.", "info");
     return { ok: true };
   },
 });
