@@ -2078,6 +2078,20 @@ export class AgentRunner {
       return;
     }
 
+    // ── Party-pinned focus: follow leader + fight; suppress LLM supervisor ──
+    // Only cross-zone travel (set by the party-follow block above) and same-zone
+    // leader-follow/combat are allowed. No quests, no zone-wandering, no LLM calls.
+    if (config.focus === "party") {
+      if (!this.currentScript) {
+        this.currentScript = { type: "idle", reason: "Party mode — near leader" };
+        this.ticksOnCurrentScript = 0;
+      }
+      const executedScript = this.currentScript;
+      const actionResult = await this.executeCurrentScript(entity, entities, strategy);
+      await this.handleActionResult(executedScript, actionResult);
+      return;
+    }
+
     // Increment counters before detection (detectTrigger is now pure)
     this.ticksSinceLastDecision++;
     this.ticksOnCurrentScript++;
@@ -2876,14 +2890,11 @@ export class AgentRunner {
                 const myLevel = entity.level ?? 1;
                 const zoneReq = ZONE_LEVEL_REQUIREMENTS[leaderZone] ?? 1;
                 if (myLevel >= zoneReq) {
-                  if (config.targetZone !== leaderZone || focus !== "traveling") {
+                  if (this.currentScript?.type !== "travel" || (this.currentScript as any).targetZone !== leaderZone) {
                     console.log(`[agent:${this.walletTag}] Following party leader to ${leaderZone}`);
                     void this.logActivity(`Following party leader to ${leaderZone.replace(/-/g, " ")}`);
-                    await autoPatchAgentConfig(this.userWallet, { focus: "traveling", targetZone: leaderZone });
                     this.currentScript = { type: "travel", targetZone: leaderZone, reason: "Following party leader" };
                     this.ticksOnCurrentScript = 0;
-                    await sleep(TICK_MS);
-                    continue;
                   }
                 }
               }
