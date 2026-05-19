@@ -13,6 +13,7 @@ import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getRedis } from "../redis.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { reputationManager } from "../economy/reputationManager.js";
+import { sendInboxMessage } from "../agents/agentInbox.js";
 import { reverseLookupOnChain, resolveNameOnChain } from "../blockchain/nameServiceChain.js";
 import { resolvePreferredAgentIdForWallet } from "../erc8004/agentResolution.js";
 import { isPostgresConfigured } from "../db/postgres.js";
@@ -316,6 +317,15 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       createdAt: Date.now(),
     };
     await persistRequests(to, [...deduped, request]);
+
+    sendInboxMessage({
+      from,
+      fromName,
+      to,
+      type: "friend-request",
+      body: `${fromName} wants to be your friend!`,
+      data: { requestId: request.id, fromName },
+    }).catch(() => {});
 
     return reply.send({ success: true, requestId: request.id });
   });

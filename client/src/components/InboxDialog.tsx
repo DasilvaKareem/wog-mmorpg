@@ -11,7 +11,7 @@ interface InboxMessage {
   from: string;
   fromName: string;
   to: string;
-  type: "direct" | "trade-request" | "party-invite" | "broadcast" | "quest-approval" | "system";
+  type: "direct" | "trade-request" | "party-invite" | "broadcast" | "quest-approval" | "friend-request" | "system";
   body: string;
   data?: Record<string, unknown>;
   ts: number;
@@ -23,6 +23,7 @@ const TYPE_LABELS: Record<string, string> = {
   "party-invite": "PARTY",
   broadcast: "ZONE",
   "quest-approval": "QUEST",
+  "friend-request": "FRIEND",
   system: "EVENT",
 };
 
@@ -32,6 +33,7 @@ const TYPE_COLORS: Record<string, string> = {
   "party-invite": "#6ea8fe",
   broadcast: "#c084fc",
   "quest-approval": "#e0af68",
+  "friend-request": "#c084fc",
   system: "#ff9f43",
 };
 
@@ -58,6 +60,7 @@ function MessageRow({
   const [sent, setSent] = React.useState(false);
   const [questDecision, setQuestDecision] = React.useState<"accepted" | "denied" | null>(null);
   const [partyDecision, setPartyDecision] = React.useState<"accepted" | "declined" | null>(null);
+  const [friendDecision, setFriendDecision] = React.useState<"accepted" | "declined" | null>(null);
 
   async function handleReply() {
     if (!replyText.trim() || !address || sending) return;
@@ -131,9 +134,35 @@ function MessageRow({
     }
   }
 
+  async function handleFriendRequestResponse(accepted: boolean) {
+    if (!address || sending) return;
+    const requestId = msg.data?.requestId as string;
+    if (!requestId) return;
+    setSending(true);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) return;
+      const endpoint = accepted ? "/friends/accept" : "/friends/decline";
+      const res = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ wallet: msg.to, requestId }),
+      });
+      if (res.ok) {
+        setFriendDecision(accepted ? "accepted" : "declined");
+        onQuestResponded?.();
+      }
+    } catch {
+      // silent
+    } finally {
+      setSending(false);
+    }
+  }
+
   const isSelf = address && msg.from.toLowerCase() === address.toLowerCase();
   const isQuestApproval = msg.type === "quest-approval" && !!msg.data?.questId;
   const isPartyInvite = msg.type === "party-invite" && !!msg.data?.inviteId;
+  const isFriendRequest = msg.type === "friend-request" && !!msg.data?.requestId;
   const questRewards = (msg.data?.rewards ?? {}) as { copper?: number; xp?: number };
   const questObjective = (msg.data?.objective ?? {}) as { type?: string; count?: number; targetMobName?: string };
 
@@ -141,8 +170,8 @@ function MessageRow({
     <div
       className="border p-2 space-y-1"
       style={{
-        borderColor: isQuestApproval ? "#e0af6844" : isPartyInvite ? "#6ea8fe44" : "#29334d",
-        backgroundColor: isQuestApproval ? "#1a160b" : isPartyInvite ? "#0b1020" : "#11182b",
+        borderColor: isQuestApproval ? "#e0af6844" : isPartyInvite ? "#6ea8fe44" : isFriendRequest ? "#c084fc44" : "#29334d",
+        backgroundColor: isQuestApproval ? "#1a160b" : isPartyInvite ? "#0b1020" : isFriendRequest ? "#120b1a" : "#11182b",
       }}
     >
       <div className="flex items-center justify-between">
@@ -253,6 +282,39 @@ function MessageRow({
               <button
                 type="button"
                 onClick={() => void handlePartyInviteResponse(false)}
+                disabled={sending}
+                className="flex-1 border border-[#f25454] bg-[#1a0a0a] px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-[#f25454] transition hover:bg-[#2a1010] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sending ? "..." : "Decline"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Friend request accept/decline */}
+      {isFriendRequest && (
+        <div className="pt-1">
+          {friendDecision ? (
+            <div
+              className="text-[9px] font-bold uppercase tracking-widest text-center py-1"
+              style={{ color: friendDecision === "accepted" ? "#54f28b" : "#f25454" }}
+            >
+              {friendDecision === "accepted" ? "Friends!" : "Declined"}
+            </div>
+          ) : (
+            <div className="flex gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={() => void handleFriendRequestResponse(true)}
+                disabled={sending}
+                className="flex-1 border border-[#c084fc] bg-[#0e0b16] px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-[#c084fc] transition hover:bg-[#1a1028] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {sending ? "..." : "Accept"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleFriendRequestResponse(false)}
                 disabled={sending}
                 className="flex-1 border border-[#f25454] bg-[#1a0a0a] px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-[#f25454] transition hover:bg-[#2a1010] disabled:opacity-40 disabled:cursor-not-allowed"
               >

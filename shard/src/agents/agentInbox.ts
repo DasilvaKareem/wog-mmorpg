@@ -34,6 +34,7 @@ export type InboxMessageType =
   | "duel-result"      // your duel was accepted/declined/expired
   | "party-invite"     // "Join my party"
   | "quest-approval"   // friend-sent quest pending accept/deny
+  | "friend-request"   // incoming friend request pending accept/decline
   | "broadcast"        // zone-wide announcement
   | "system";          // game event notification (level-up, death, quest complete)
 
