@@ -2906,6 +2906,8 @@ export class AgentRunner {
                   Number(leaderEntity?.y ?? 0) - Number(entity.y ?? 0),
                 );
                 if (distToLeader > PARTY_LEADER_FOLLOW_DISTANCE) {
+                  // Clear any script that would pull us away from the leader again
+                  if (focus === "party") this.currentScript = null;
                   const moving = await this.moveToEntity(entity, leaderEntity, PARTY_LEADER_STOP_DISTANCE);
                   if (moving) {
                     await sleep(TICK_MS);
