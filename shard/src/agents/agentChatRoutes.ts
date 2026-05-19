@@ -51,7 +51,7 @@ import { getLearnedTechniques, getTechniqueById } from "../combat/techniques.js"
 import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { buildPartyCoordinationReport } from "../social/partyReport.js";
-import { getPartyMemberIdsByPartyId } from "../social/partySystem.js";
+import { getPartyMemberIdsByPartyId, addEntityToParty, getPlayerPartyId, removeEntityFromParty } from "../social/partySystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
@@ -66,6 +66,35 @@ import { getPromoCode, hasRedeemedPromoCode, redeemPromoCode, upsertPromoCode } 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(5_000) });
+}
+
+type ChatActionStatus = "completed" | "queued" | "accepted" | "blocked" | "failed";
+
+interface ChatActionResult {
+  status: ChatActionStatus;
+  tool: string;
+  action: string;
+  completed: boolean;
+  message: string;
+  target?: string;
+  error?: string;
+  details?: unknown;
+}
+
+function actionStatusCompleted(status: ChatActionStatus): boolean {
+  return status === "completed";
+}
+
+function parseToolContent(content: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return { result: parsed };
+  } catch {
+    return { text: content };
+  }
 }
 
 // Gemini client is initialized in geminiClient.ts
@@ -342,6 +371,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
       tier?: AgentTier;
       paymentTx?: string;
+      partyLeaderEntityId?: string;
     };
   }>("/agent/deploy", {
     preHandler: authenticateRequest,
@@ -454,6 +484,14 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         { preventCreateIfMissing: deterministicSelection }
       );
 
+      // Join party if caller specified a leader entity
+      if (request.body.partyLeaderEntityId && result.entityId) {
+        const joined = addEntityToParty(request.body.partyLeaderEntityId, result.entityId, result.zoneId);
+        if (joined) {
+          server.log.info(`[agent/deploy] ${result.entityId} joined party ${joined} under leader ${request.body.partyLeaderEntityId}`);
+        }
+      }
+
       // Mint starter gold for brand-new custodial wallets (0 balance) so the agent
       // can buy a first weapon instead of being permanently stuck unarmed.
       if (!result.alreadyExisted) {
@@ -481,6 +519,9 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         config.tier = "free";
       }
       config.sessionStartedAt = Date.now();
+      if (request.body.partyLeaderEntityId) {
+        config.focus = "party";
+      }
       await setAgentConfig(authWallet, config);
 
       // Start agent loop — wait for first tick to verify it's actually alive.
@@ -533,6 +574,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         characterName: result.characterName,
         alreadyExisted: result.alreadyExisted,
         deployCount: newCount,
+        partyId: request.body.partyLeaderEntityId ? (getPlayerPartyId(result.entityId) ?? undefined) : undefined,
       });
     } catch (err: any) {
       server.log.error(`[agent/deploy] ${err.message}`);
@@ -600,6 +642,50 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     }
 
     return reply.send({ ok: true, despawned: !!ref });
+  });
+
+  // ── POST /agent/join-party ────────────────────────────────────────────────
+  server.post<{
+    Body: { partyLeaderEntityId: string };
+  }>("/agent/join-party", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { partyLeaderEntityId } = request.body;
+    if (!partyLeaderEntityId) {
+      return reply.code(400).send({ error: "partyLeaderEntityId is required" });
+    }
+
+    const ref = await getAgentEntityRef(authWallet);
+    if (!ref?.entityId) {
+      return reply.code(404).send({ error: "No deployed agent found. Deploy your agent first." });
+    }
+
+    const partyId = addEntityToParty(partyLeaderEntityId, ref.entityId, ref.zoneId);
+    if (!partyId) {
+      return reply.code(400).send({ error: "Could not join party. Party may be full (max 5) or leader entity not found." });
+    }
+
+    await patchAgentConfig(authWallet, { focus: "party" });
+    server.log.info(`[agent/join-party] ${ref.entityId} joined party ${partyId} under leader ${partyLeaderEntityId}`);
+    return reply.send({ ok: true, partyId, entityId: ref.entityId });
+  });
+
+  // ── POST /agent/leave-party ───────────────────────────────────────────────
+  server.post("/agent/leave-party", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+
+    const ref = await getAgentEntityRef(authWallet);
+    if (!ref?.entityId) {
+      return reply.code(404).send({ error: "No deployed agent found." });
+    }
+
+    removeEntityFromParty(ref.entityId);
+    await patchAgentConfig(authWallet, { focus: "combat" });
+    server.log.info(`[agent/leave-party] ${ref.entityId} left party`);
+    return reply.send({ ok: true });
   });
 
   // ── GET /agent/status/:walletAddress ─────────────────────────────────────
@@ -1701,6 +1787,7 @@ Strategy options: aggressive, balanced, defensive`;
     let configUpdated = false;
     let agentResponse = "";
     const actionsTaken: string[] = [];
+    const actionResults: ChatActionResult[] = [];
 
     const responseParts = geminiResponse.candidates?.[0]?.content?.parts ?? [];
 
@@ -1712,13 +1799,29 @@ Strategy options: aggressive, balanced, defensive`;
       server.log.info(`[agent/chat] tool_call: ${fc.functionCall!.name}(${JSON.stringify(fc.functionCall!.args)?.slice(0, 100)})`);
     }
 
-    // Capture first response content
-    if (textParts.length > 0 && textParts[0].text) {
+    // Capture first response content only when no tools are involved. If the
+    // model called tools, the server-owned tool results below become the source
+    // of truth; first-pass text may overclaim before validation/execution.
+    if (fnCallParts.length === 0 && textParts.length > 0 && textParts[0].text) {
       agentResponse = textParts[0].text;
     }
 
     // Execute all tool calls and collect results for potential follow-up
     const toolResults: { name: string; content: string }[] = [];
+    const addActionResult = (result: Omit<ChatActionResult, "completed">): ChatActionResult => {
+      const full: ChatActionResult = {
+        ...result,
+        completed: actionStatusCompleted(result.status),
+      };
+      actionResults.push(full);
+      actionsTaken.push(`[${full.message}]`);
+      return full;
+    };
+
+    const pushToolResult = (name: string, payload: unknown): void => {
+      toolResults.push({ name, content: JSON.stringify(payload) });
+    };
+
     if (fnCallParts.length > 0) {
       for (const toolCallPart of fnCallParts) {
         const fnName = toolCallPart.functionCall!.name!;
@@ -1923,6 +2026,7 @@ Strategy options: aggressive, balanced, defensive`;
               nodeType?: GatherPreference;
             };
             const patch: any = { focus: input.focus };
+            let outcome: ChatActionResult | null = null;
             if (input.strategy) patch.strategy = input.strategy;
             if (input.focus === "traveling") {
               const travelValidation = await validateTravelTargetForWallet(authWallet, input.targetZone);
@@ -1932,7 +2036,14 @@ Strategy options: aggressive, balanced, defensive`;
                 patch.focus = "idle";
                 patch.targetZone = undefined;
                 if (travelValidation.error) {
-                  actionsTaken.push(`[${travelValidation.error}]`);
+                  outcome = addActionResult({
+                    status: "blocked",
+                    tool: fnName,
+                    action: "travel",
+                    target: input.targetZone,
+                    message: `Travel blocked: ${travelValidation.error}`,
+                    error: travelValidation.error,
+                  });
                   // Speak the failure publicly so the player isn't stuck wondering
                   // why the agent didn't move.
                   void emitAgentDirectiveChat(authWallet, "travel_blocked", travelValidation.error);
@@ -1945,9 +2056,6 @@ Strategy options: aggressive, balanced, defensive`;
             patch.gatherNodeType = input.focus === "gathering" ? (input.nodeType ?? "both") : undefined;
             await patchAgentConfig(authWallet, patch);
             configUpdated = true;
-            actionsTaken.push(
-              `[switched to ${patch.focus}${patch.gatherNodeType ? `, ${patch.gatherNodeType}` : ""}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
-            );
             server.log.info(
               `[agent/chat] Config updated: focus=${patch.focus} gatherNodeType=${patch.gatherNodeType ?? "none"} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
             );
@@ -1968,9 +2076,29 @@ Strategy options: aggressive, balanced, defensive`;
               }
               await runner.clearScript();
             }
-            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, ...patch }) });
+            if (!outcome) {
+              const detail = `${patch.focus}${patch.gatherNodeType ? `, ${patch.gatherNodeType}` : ""}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}`;
+              outcome = addActionResult({
+                status: patch.focus === "traveling" && patch.targetZone ? "queued" : "accepted",
+                tool: fnName,
+                action: patch.focus === "traveling" ? "travel" : "update_focus",
+                target: patch.targetZone,
+                message: patch.focus === "traveling" && patch.targetZone
+                  ? `Queued travel to ${patch.targetZone}`
+                  : `Switched to ${detail}`,
+                details: patch,
+              });
+            }
+            pushToolResult(fnName, { ...outcome, config: patch });
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to update focus" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "update_focus",
+              message: "Failed to update focus",
+              error: "Failed to update focus",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -1982,7 +2110,14 @@ Strategy options: aggressive, balanced, defensive`;
               type?: "direct" | "trade-request" | "party-invite";
             };
             if (!input.toWallet || !input.body) {
-              toolResults.push({ name: fnName, content: JSON.stringify({ error: "toWallet and body are required" }) });
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "send_message",
+                message: "Message not sent: recipient wallet and body are required",
+                error: "toWallet and body are required",
+              });
+              pushToolResult(fnName, outcome);
             } else {
               const msgId = await sendInboxMessage({
                 from: authWallet,
@@ -1996,12 +2131,26 @@ Strategy options: aggressive, balanced, defensive`;
                 (p) => p.wallet.toLowerCase() === input.toWallet.toLowerCase()
               );
               const recipientName = recipientPlayer?.name ?? input.toWallet.slice(0, 10);
-              actionsTaken.push(`[sent ${input.type ?? "direct"} message to ${recipientName}]`);
+              const outcome = addActionResult({
+                status: "completed",
+                tool: fnName,
+                action: input.type ?? "direct",
+                target: recipientName,
+                message: `Sent ${input.type ?? "direct"} message to ${recipientName}`,
+                details: { messageId: msgId, to: recipientName },
+              });
               server.log.info(`[agent/chat] send_message to ${recipientName} (${input.toWallet.slice(0, 10)}): "${input.body.slice(0, 60)}"`);
-              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, messageId: msgId, to: recipientName }) });
+              pushToolResult(fnName, outcome);
             }
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to send message" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "send_message",
+              message: "Failed to send message",
+              error: "Failed to send message",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -2014,12 +2163,37 @@ Strategy options: aggressive, balanced, defensive`;
               quantity?: number;
               abilityDescription?: string;
             };
+            const toolActionResults: ChatActionResult[] = [];
+            const addTakeActionResult = (result: Omit<ChatActionResult, "completed" | "tool">): ChatActionResult => {
+              const full = addActionResult({ ...result, tool: fnName });
+              toolActionResults.push(full);
+              return full;
+            };
             if (input.action === "learn_profession" && input.professionId) {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const result = await runner.learnProfession(input.professionId);
-                actionsTaken.push(`[${result ? "learned" : "learning"} ${input.professionId}]`);
+                const failure = result ? null : runner.getLastLearnFailure(input.professionId);
+                addTakeActionResult({
+                  status: result ? "completed" : failure?.category === "strategic" ? "blocked" : "queued",
+                  action: "learn_profession",
+                  target: input.professionId,
+                  message: result
+                    ? `Learned ${input.professionId}`
+                    : failure
+                      ? `Could not learn ${input.professionId}: ${failure.reason}`
+                      : `Started learning ${input.professionId}`,
+                  error: failure?.reason,
+                });
                 server.log.info(`[agent/chat] learn_profession(${input.professionId}) → ${result}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "learn_profession",
+                  target: input.professionId,
+                  message: "Agent runner is unavailable, so I could not start learning that profession",
+                  error: "agent not running",
+                });
               }
               const focusMap: Record<string, AgentFocus> = {
                 alchemy: "alchemy",
@@ -2045,7 +2219,12 @@ Strategy options: aggressive, balanced, defensive`;
             } else if (input.action === "learn_technique") {
               const runner = agentManager.getRunner(authWallet);
               if (!runner) {
-                actionsTaken.push("[agent not running]");
+                addTakeActionResult({
+                  status: "failed",
+                  action: "learn_technique",
+                  message: "Agent runner is unavailable, so I could not learn a technique",
+                  error: "agent not running",
+                });
               } else {
                 // Find entity to get class info
                 const techRef = await getAgentEntityRef(authWallet);
@@ -2053,16 +2232,27 @@ Strategy options: aggressive, balanced, defensive`;
                 const techClassId = (techEntity?.classId ?? "").toLowerCase();
 
                 if (!techClassId) {
-                  actionsTaken.push("[no class found]");
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "learn_technique",
+                    message: "Could not learn a technique: no class found",
+                    error: "no class found",
+                  });
                 } else {
                   const available = getLearnedTechniques(techClassId, techEntity.level ?? 1);
                   const learnedIds: string[] = techEntity.learnedTechniques ?? [];
                   const nextToLearn = available.find((t: any) => !learnedIds.includes(t.id));
 
                   if (!nextToLearn) {
-                    actionsTaken.push(available.length > 0
-                      ? "[already learned all techniques at current level]"
-                      : `[no ${techClassId} techniques for level ${techEntity.level ?? 1}]`);
+                    const reason = available.length > 0
+                      ? "already learned all techniques at current level"
+                      : `no ${techClassId} techniques for level ${techEntity.level ?? 1}`;
+                    addTakeActionResult({
+                      status: "blocked",
+                      action: "learn_technique",
+                      message: `Could not learn a technique: ${reason}`,
+                      error: reason,
+                    });
                   } else {
                     // Find the class trainer nearby and navigate to them
                     let trainerId: string | null = null;
@@ -2084,7 +2274,13 @@ Strategy options: aggressive, balanced, defensive`;
                       // No trainer in zone — try learning directly
                       (runner as any).nextTechniqueCheckAt = 0;
                       const result = await runner.learnNextTechnique();
-                      actionsTaken.push(result.ok ? `[${result.reason}]` : `[no ${techClassId} trainer nearby]`);
+                      addTakeActionResult({
+                        status: result.ok ? "completed" : "blocked",
+                        action: "learn_technique",
+                        target: nextToLearn.name,
+                        message: result.ok ? result.reason : `No ${techClassId} trainer nearby`,
+                        error: result.ok ? undefined : `no ${techClassId} trainer nearby`,
+                      });
                     } else {
                       // Navigate to trainer and learn on arrival
                       const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
@@ -2115,7 +2311,13 @@ Strategy options: aggressive, balanced, defensive`;
                         { techniqueId: nextToLearn.id, techniqueName: nextToLearn.name },
                       );
                       configUpdated = true;
-                      actionsTaken.push(`[heading to ${trainerName} to learn ${nextToLearn.name}]`);
+                      addTakeActionResult({
+                        status: "queued",
+                        action: "learn_technique",
+                        target: nextToLearn.name,
+                        message: `Heading to ${trainerName} to learn ${nextToLearn.name}`,
+                        details: { trainerId, trainerName, techniqueId: nextToLearn.id },
+                      });
                       server.log.info(`[agent/chat] learn_technique: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
                     }
                   }
@@ -2124,7 +2326,12 @@ Strategy options: aggressive, balanced, defensive`;
             } else if (input.action === "forge_technique") {
               const runner = agentManager.getRunner(authWallet);
               if (!runner) {
-                actionsTaken.push("[agent not running]");
+                addTakeActionResult({
+                  status: "failed",
+                  action: "forge_technique",
+                  message: "Agent runner is unavailable, so I could not forge a technique",
+                  error: "agent not running",
+                });
               } else {
                 const techRef = await getAgentEntityRef(authWallet);
                 const techEntity = techRef?.entityId ? getWorldEntity(techRef.entityId) as any : null;
@@ -2132,11 +2339,26 @@ Strategy options: aggressive, balanced, defensive`;
                 const playerLevel = techEntity?.level ?? 1;
 
                 if (!techClassId) {
-                  actionsTaken.push("[no class found]");
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "forge_technique",
+                    message: "Could not forge a technique: no class found",
+                    error: "no class found",
+                  });
                 } else if (playerLevel < 30) {
-                  actionsTaken.push(`[must be level 30+ to forge custom techniques, currently level ${playerLevel}]`);
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "forge_technique",
+                    message: `Must be level 30+ to forge custom techniques; current level is ${playerLevel}`,
+                    error: `level ${playerLevel} is below 30`,
+                  });
                 } else if (!input.abilityDescription) {
-                  actionsTaken.push("[describe the ability you want to forge]");
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "forge_technique",
+                    message: "Describe the ability to forge first",
+                    error: "missing ability description",
+                  });
                 } else {
                   // Find the class trainer nearby
                   let trainerId: string | null = null;
@@ -2155,7 +2377,12 @@ Strategy options: aggressive, balanced, defensive`;
                   }
 
                   if (!trainerId) {
-                    actionsTaken.push(`[no ${techClassId} trainer nearby — travel to a L30+ zone with a class trainer]`);
+                    addTakeActionResult({
+                      status: "blocked",
+                      action: "forge_technique",
+                      message: `No ${techClassId} trainer nearby; travel to a level 30+ zone with a class trainer`,
+                      error: `no ${techClassId} trainer nearby`,
+                    });
                   } else {
                     // Call forge directly (server-side)
                     try {
@@ -2175,10 +2402,21 @@ Strategy options: aggressive, balanced, defensive`;
                       saveCh(techEntity.walletAddress, techEntity.name, {
                         learnedTechniques: techEntity.learnedTechniques,
                       } as any).catch(() => {});
-                      actionsTaken.push(`[forged custom technique: "${technique.name}" — ${technique.description}]`);
+                      addTakeActionResult({
+                        status: "completed",
+                        action: "forge_technique",
+                        target: technique.name,
+                        message: `Forged custom technique: "${technique.name}"`,
+                        details: { description: technique.description, techniqueId: technique.id },
+                      });
                       server.log.info(`[agent/chat] forge_technique: ${technique.name}`);
                     } catch (forgeErr: any) {
-                      actionsTaken.push(`[forge failed: ${forgeErr.message ?? "unknown error"}]`);
+                      addTakeActionResult({
+                        status: "failed",
+                        action: "forge_technique",
+                        message: `Forge failed: ${forgeErr.message ?? "unknown error"}`,
+                        error: forgeErr.message ?? "unknown error",
+                      });
                     }
                   }
                 }
@@ -2190,10 +2428,29 @@ Strategy options: aggressive, balanced, defensive`;
                 server.log.info(`[agent/chat] buy_item(${input.tokenId}) → ${bought}`);
                 if (bought) {
                   await runner.equipItem(input.tokenId);
-                  actionsTaken.push(`[bought & equipped item #${input.tokenId}]`);
+                  addTakeActionResult({
+                    status: "completed",
+                    action: "buy_item",
+                    target: `item #${input.tokenId}`,
+                    message: `Bought and equipped item #${input.tokenId}`,
+                  });
                 } else {
-                  actionsTaken.push(`[failed to buy item #${input.tokenId}]`);
+                  addTakeActionResult({
+                    status: "failed",
+                    action: "buy_item",
+                    target: `item #${input.tokenId}`,
+                    message: `Failed to buy item #${input.tokenId}`,
+                    error: "buy failed",
+                  });
                 }
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "buy_item",
+                  target: `item #${input.tokenId}`,
+                  message: "Agent runner is unavailable, so I could not buy that item",
+                  error: "agent not running",
+                });
               }
               await patchAgentConfig(authWallet, { focus: "shopping" });
               configUpdated = true;
@@ -2201,29 +2458,85 @@ Strategy options: aggressive, balanced, defensive`;
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const equipped = await runner.equipItem(input.tokenId);
-                actionsTaken.push(`[${equipped ? "equipped" : "failed to equip"} item #${input.tokenId}]`);
+                addTakeActionResult({
+                  status: equipped ? "completed" : "failed",
+                  action: "equip_item",
+                  target: `item #${input.tokenId}`,
+                  message: `${equipped ? "Equipped" : "Failed to equip"} item #${input.tokenId}`,
+                  error: equipped ? undefined : "equip failed",
+                });
                 server.log.info(`[agent/chat] equip_item(${input.tokenId}) → ${equipped}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "equip_item",
+                  target: `item #${input.tokenId}`,
+                  message: "Agent runner is unavailable, so I could not equip that item",
+                  error: "agent not running",
+                });
               }
             } else if (input.action === "repair_gear") {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const repaired = await runner.repairGear();
-                actionsTaken.push(`[${repaired ? "repaired gear" : "failed to repair gear"}]`);
+                addTakeActionResult({
+                  status: repaired ? "completed" : "failed",
+                  action: "repair_gear",
+                  message: repaired ? "Repaired gear" : "Failed to repair gear",
+                  error: repaired ? undefined : "repair failed",
+                });
                 server.log.info(`[agent/chat] repair_gear → ${repaired}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "repair_gear",
+                  message: "Agent runner is unavailable, so I could not repair gear",
+                  error: "agent not running",
+                });
               }
             } else if (input.action === "recycle_item" && input.tokenId != null) {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const result = await runner.recycleItem(input.tokenId, Math.max(1, Math.floor(input.quantity ?? 1)));
-                actionsTaken.push(result.ok
-                  ? `[recycled ${result.itemName ?? `item #${input.tokenId}`} for ${result.totalPayoutCopper ?? 0}c]`
-                  : `[failed to recycle item #${input.tokenId}: ${result.error ?? "unknown error"}]`);
+                addTakeActionResult({
+                  status: result.ok ? "completed" : "failed",
+                  action: "recycle_item",
+                  target: result.itemName ?? `item #${input.tokenId}`,
+                  message: result.ok
+                    ? `Recycled ${result.itemName ?? `item #${input.tokenId}`} for ${result.totalPayoutCopper ?? 0}c`
+                    : `Failed to recycle item #${input.tokenId}: ${result.error ?? "unknown error"}`,
+                  error: result.ok ? undefined : result.error ?? "unknown error",
+                  details: result,
+                });
                 server.log.info(`[agent/chat] recycle_item(${input.tokenId}, qty=${Math.max(1, Math.floor(input.quantity ?? 1))}) → ${result.ok}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "recycle_item",
+                  target: `item #${input.tokenId}`,
+                  message: "Agent runner is unavailable, so I could not recycle that item",
+                  error: "agent not running",
+                });
               }
             }
-            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, actions: actionsTaken }) });
+            if (toolActionResults.length === 0) {
+              addTakeActionResult({
+                status: "blocked",
+                action: input.action || "take_action",
+                message: "No valid action was provided",
+                error: "invalid action arguments",
+              });
+            }
+            pushToolResult(fnName, { results: toolActionResults });
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Action failed" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "take_action",
+              message: "Action failed",
+              error: "Action failed",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -2234,7 +2547,14 @@ Strategy options: aggressive, balanced, defensive`;
               clearExisting?: boolean;
             };
             if (!input.actions || input.actions.length === 0) {
-              toolResults.push({ name: fnName, content: JSON.stringify({ error: "At least one action is required" }) });
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "queue_actions",
+                message: "No actions were queued: at least one action is required",
+                error: "At least one action is required",
+              });
+              pushToolResult(fnName, outcome);
             } else {
               // Validate any travel destinations BEFORE queuing — if the LLM passed
               // a non-canonical zone string, normalize it; if it's bogus, drop the
@@ -2272,10 +2592,17 @@ Strategy options: aggressive, balanced, defensive`;
               }
 
               if (validatedScripts.length === 0) {
-                toolResults.push({ name: fnName, content: JSON.stringify({
+                const outcome = addActionResult({
+                  status: "blocked",
+                  tool: fnName,
+                  action: "queue_actions",
+                  message: `No actions were queued: ${blockedTravels.join(", ") || "all requested actions failed validation"}`,
                   error: "All requested actions failed validation",
-                  blocked: blockedTravels,
-                }) });
+                  details: {
+                    blocked: blockedTravels,
+                  },
+                });
+                pushToolResult(fnName, outcome);
               } else {
                 const summary = validatedScripts.map((s) => s.type + (s.targetZone ? `→${s.targetZone}` : "")).join(" → ");
                 let runner = agentManager.getRunner(authWallet);
@@ -2305,24 +2632,46 @@ Strategy options: aggressive, balanced, defensive`;
                 }
                 await runner.enqueueUserActions(validatedScripts, input.clearExisting !== false);
                 await runner.clearScript(); // start executing immediately
-                actionsTaken.push(`[queued ${validatedScripts.length} actions: ${summary}]`);
-                if (blockedTravels.length > 0) actionsTaken.push(`[blocked: ${blockedTravels.join(", ")}]`);
+                const outcome = addActionResult({
+                  status: "queued",
+                  tool: fnName,
+                  action: "queue_actions",
+                  target: summary,
+                  message: `Queued ${validatedScripts.length} action${validatedScripts.length === 1 ? "" : "s"}: ${summary}`,
+                  details: {
+                    queued: validatedScripts.length,
+                    plan: summary,
+                    agentRunning: true,
+                    blocked: blockedTravels,
+                  },
+                });
+                if (blockedTravels.length > 0) {
+                  addActionResult({
+                    status: "blocked",
+                    tool: fnName,
+                    action: "queue_actions",
+                    message: `Some requested travel was blocked: ${blockedTravels.join(", ")}`,
+                    error: blockedTravels.join(", "),
+                    details: { blocked: blockedTravels },
+                  });
+                }
                 server.log.info(`[agent/chat] queue_actions: ${summary}${blockedTravels.length ? ` (blocked: ${blockedTravels.join(", ")})` : ""}`);
                 // Speak the directive publicly so observers see the agent commit.
                 if (acceptedTravelZone) {
                   void emitAgentDirectiveChat(authWallet, "directive_accept", acceptedTravelZone);
                 }
-                toolResults.push({ name: fnName, content: JSON.stringify({
-                  ok: true,
-                  queued: validatedScripts.length,
-                  plan: summary,
-                  agentRunning: true,
-                  ...(blockedTravels.length ? { blocked: blockedTravels } : {}),
-                }) });
+                pushToolResult(fnName, outcome);
               }
             }
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to queue actions" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "queue_actions",
+              message: "Failed to queue actions",
+              error: "Failed to queue actions",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -2330,24 +2679,47 @@ Strategy options: aggressive, balanced, defensive`;
           try {
             if (!isExplicitClearQueueRequest(message)) {
               server.log.warn(`[agent/chat] clear_queue ignored for non-explicit request: ${message.slice(0, 80)}`);
-              toolResults.push({
-                name: fnName,
-                content: JSON.stringify({
-                  error: "clear_queue requires an explicit stop/cancel/clear request; queue the new directive instead",
-                }),
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "clear_queue",
+                message: "Queue was not cleared because the request was not an explicit stop/cancel/clear command",
+                error: "clear_queue requires an explicit stop/cancel/clear request; queue the new directive instead",
               });
+              pushToolResult(fnName, outcome);
               continue;
             }
             const runner = agentManager.getRunner(authWallet);
             if (runner) {
               await runner.clearQueue();
               await runner.clearScript();
+              const outcome = addActionResult({
+                status: "completed",
+                tool: fnName,
+                action: "clear_queue",
+                message: "Cleared action queue",
+              });
+              server.log.info("[agent/chat] clear_queue");
+              pushToolResult(fnName, outcome);
+            } else {
+              const outcome = addActionResult({
+                status: "failed",
+                tool: fnName,
+                action: "clear_queue",
+                message: "Agent runner is unavailable, so I could not clear the queue",
+                error: "agent not running",
+              });
+              pushToolResult(fnName, outcome);
             }
-            actionsTaken.push("[cleared action queue]");
-            server.log.info("[agent/chat] clear_queue");
-            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, message: "Queue cleared, returning to autonomous behavior" }) });
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to clear queue" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "clear_queue",
+              message: "Failed to clear queue",
+              error: "Failed to clear queue",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -2383,7 +2755,7 @@ Strategy options: aggressive, balanced, defensive`;
           {
             role: "user",
             parts: toolResults.map(tr => ({
-              functionResponse: { name: tr.name, response: JSON.parse(tr.content) },
+              functionResponse: { name: tr.name, response: parseToolContent(tr.content) },
             })),
           },
         ];
@@ -2392,7 +2764,13 @@ Strategy options: aggressive, balanced, defensive`;
           model: GEMINI_MODEL,
           contents: followUpContents,
           config: {
-            systemInstruction: fullSystemInstruction + "\n\nReply in 1-2 short sentences using the tool results. Be natural, specific, and brief. No internal tool names or bracket tags.",
+            systemInstruction: fullSystemInstruction + `\n\nReply in 1-2 short sentences using ONLY the tool results as truth.
+Truth contract:
+- status=completed means the action already happened.
+- status=queued means the command was accepted and started/queued, but is NOT done yet. Say "I'm starting", "I queued", or "I'm heading", never "I did" or "done".
+- status=accepted means settings changed, but no concrete action has completed.
+- status=blocked or status=failed means it did not happen; explain the concrete reason.
+- Do not mention internal tool names, JSON fields, statuses, or bracket tags.`,
             temperature: 0.5,
             maxOutputTokens: 150,
           },
@@ -2448,8 +2826,9 @@ Strategy options: aggressive, balanced, defensive`;
           },
         });
         const retryParts = retryResponse.candidates?.[0]?.content?.parts ?? [];
+        const retryFnCalls = retryParts.filter((p: Part) => p.functionCall);
         const retryText = retryParts.find((p: Part) => p.text)?.text;
-        if (retryText) {
+        if (retryFnCalls.length === 0 && retryText) {
           agentResponse = retryText;
         }
         for (const rp of retryParts) {
@@ -2461,7 +2840,13 @@ Strategy options: aggressive, balanced, defensive`;
               patch.targetZone = undefined;
               await patchAgentConfig(authWallet, patch);
               configUpdated = true;
-              actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}]`);
+              addActionResult({
+                status: "accepted",
+                tool: "update_focus",
+                action: "update_focus",
+                message: `Switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}`,
+                details: patch,
+              });
               const runner = agentManager.getRunner(authWallet);
               if (runner) await runner.clearScript();
               server.log.info(`[agent/chat] Retry succeeded: focus=${input.focus}`);
@@ -2480,8 +2865,8 @@ Strategy options: aggressive, balanced, defensive`;
           model: GEMINI_MODEL,
           contents: [
             { role: "user" as const, parts: [{ text: message }] },
-            { role: "model" as const, parts: [{ text: `[actions taken: ${actionsTaken.join(", ")}]` }] },
-            { role: "user" as const, parts: [{ text: "Now respond as yourself about what you just did. 1 sentence, in character, with personality. You ARE the character speaking in real time." }] },
+            { role: "model" as const, parts: [{ text: JSON.stringify({ actionResults }) }] },
+            { role: "user" as const, parts: [{ text: "Now respond as yourself about the action results. If an action is queued, say you're starting it, not that it's done. If blocked/failed, say why. 1 sentence, in character." }] },
           ],
           config: {
             systemInstruction: fullSystemInstruction,
@@ -2498,7 +2883,16 @@ Strategy options: aggressive, balanced, defensive`;
 
     // Absolute last-resort fallback
     if (!agentResponse && actionsTaken.length > 0) {
-      agentResponse = "Done. What’s next?";
+      const failedOrBlocked = actionResults.find((r) => r.status === "blocked" || r.status === "failed");
+      const queued = actionResults.find((r) => r.status === "queued");
+      const completed = actionResults.find((r) => r.status === "completed");
+      agentResponse = failedOrBlocked
+        ? failedOrBlocked.message
+        : queued
+          ? `${queued.message}. Starting now.`
+          : completed
+            ? `${completed.message}.`
+            : "I updated the plan.";
     } else if (!agentResponse) {
       agentResponse = "Not sure what you mean — tell me to fight, quest, gather, or explore and I’m on it.";
     }
@@ -2519,6 +2913,7 @@ Strategy options: aggressive, balanced, defensive`;
       response: agentResponse,
       configUpdated,
       agentRunning: agentManager.isRunning(authWallet),
+      actionResults,
     });
   });
 

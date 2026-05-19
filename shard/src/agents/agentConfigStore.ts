@@ -19,6 +19,7 @@ import type { Edict } from "../combat/edicts.js";
 export type AgentFocus =
   | "questing"
   | "combat"
+  | "party"
   | "enchanting"
   | "crafting"
   | "gathering"
@@ -39,7 +40,7 @@ export type AgentFocus =
 
 /** Focuses where the user is explicitly driving the agent — no autonomous
  *  patch should ever overwrite focus or targetZone while one of these is set. */
-export const USER_PINNED_FOCUSES: ReadonlySet<AgentFocus> = new Set(["user", "idle"]);
+export const USER_PINNED_FOCUSES: ReadonlySet<AgentFocus> = new Set(["user", "idle", "party"]);
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 export type GatherPreference = NonNullable<BotScript["nodeType"]>;

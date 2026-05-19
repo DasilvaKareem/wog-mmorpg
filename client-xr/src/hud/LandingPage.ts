@@ -540,8 +540,10 @@ export class LandingPage {
     try {
       await fn();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (trackMethod) trackXRAuthFailed(trackMethod, message);
+      const raw = error instanceof Error ? error.message : String(error);
+      try { if (trackMethod) trackXRAuthFailed(trackMethod, raw); } catch { /* analytics must not swallow auth errors */ }
+      const isTechnical = /TypeError|cannot read|undefined|null|toLowerCase|toLowercase/i.test(raw);
+      const message = isTechnical ? "Something went wrong. Please try again." : raw;
       this.setStatus(message || "Something went wrong.");
     } finally {
       this.busy = false;

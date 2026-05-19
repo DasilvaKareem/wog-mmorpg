@@ -189,7 +189,7 @@ export async function getAuthToken(walletAddress: string): Promise<string | null
 
       let signature: string | null = null;
       const inAppAccount = sharedInAppWallet.getAccount?.() ?? null;
-      if (inAppAccount && inAppAccount.address.toLowerCase() === walletAddress.toLowerCase()) {
+      if (inAppAccount && inAppAccount.address?.toLowerCase() === walletAddress.toLowerCase()) {
         signature = await inAppAccount.signMessage({ message });
       } else {
         signature = await signWithExternalWallet(message);

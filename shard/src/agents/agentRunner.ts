@@ -182,6 +182,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "jewelcrafting": return "Craft jewelry — rings and amulets at a jeweler's bench.";
     case "farming":    return "Harvest crops at farmland zones. Equip a hoe and gather produce.";
     case "dungeon":    return "Enter dungeon gates and clear all mobs inside for XP and loot.";
+    case "party":      return "Follow your party leader and assist them in combat. Attack whatever they attack.";
     case "idle":       return "Rest. Only act if something urgent happens.";
     case "user":       return "Wait for the user's next command. Do not act autonomously.";
     default:           return "Be autonomous — quest and improve your character.";
@@ -214,6 +215,7 @@ function focusToScript(
     case "jewelcrafting": return { type: "jewelcraft", reason: "User focus: jewelcrafting" };
     case "farming":    return { type: "farm",    reason: "User focus: farming" };
     case "dungeon":    return { type: "dungeon", reason: "User focus: dungeon" };
+    case "party":      return { type: "combat",  maxLevelOffset: levelOffset, reason: "Party swarm mode" };
     case "idle":       return { type: "idle",    reason: "User focus: idle" };
     case "user":       return { type: "idle",    reason: "User control — awaiting commands" };
     default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
@@ -2886,7 +2888,7 @@ export class AgentRunner {
                 }
               }
 
-              const shouldShadowLeader = focus === "combat" || focus === "questing" || this.currentScript?.type === "dungeon";
+              const shouldShadowLeader = focus === "combat" || focus === "questing" || focus === "party" || this.currentScript?.type === "dungeon";
               if (shouldShadowLeader && leaderZone === this.currentRegion) {
                 const distToLeader = Math.hypot(
                   Number(leaderEntity?.x ?? 0) - Number(entity.x ?? 0),
