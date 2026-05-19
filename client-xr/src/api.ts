@@ -672,6 +672,14 @@ export async function inviteToParty(
   return postJsonWithFallback("/party/invite-champion", token, { fromEntityId, fromZoneId, toCustodialWallet });
 }
 
+export async function fetchPartyStatus(custodialWallet: string): Promise<{
+  inParty: boolean;
+  partyId?: string;
+  members: Array<{ entityId: string; name: string; level: number; hp: number; maxHp: number; classId?: string; isLeader: boolean }>;
+} | null> {
+  return fetchJsonWithFallback(`/party/status/${custodialWallet}`);
+}
+
 export async function leaveParty(
   token: string,
   custodialWallet: string,

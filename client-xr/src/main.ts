@@ -52,7 +52,7 @@ import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, fetchPartyStatus, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -1207,6 +1207,8 @@ let lastLearnedTechPollTime = 0;
 let lastEdictsPollTime = 0;
 let lastInboxPollTime = 0;
 let lastFriendsPollTime = 0;
+let lastPartyPollTime = 0;
+const PARTY_POLL_INTERVAL = 5_000;
 const INVENTORY_POLL_INTERVAL = 10_000;
 const PROFESSION_POLL_INTERVAL = 15_000;
 const LEARNED_TECH_POLL_INTERVAL = 20_000;
@@ -2098,6 +2100,8 @@ async function pollNearbyZones() {
     void pollInbox();
     // Friends poll in background for request badges and online status.
     void pollFriends();
+    // Party status cross-zone so VitalsPanel shows members in other zones.
+    void pollPartyStatus();
   } finally {
     isPollingNearbyZones = false;
   }
@@ -2404,6 +2408,27 @@ async function pollFriends() {
   if (now - lastFriendsPollTime < FRIENDS_POLL_INTERVAL) return;
   lastFriendsPollTime = now;
   await playerPanel.refreshFriends();
+}
+
+async function pollPartyStatus() {
+  if (!ownCustodialWallet) return;
+  const now = Date.now();
+  if (now - lastPartyPollTime < PARTY_POLL_INTERVAL) return;
+  lastPartyPollTime = now;
+  const status = await fetchPartyStatus(ownCustodialWallet);
+  if (status?.inParty && status.members.length > 0) {
+    vitalsPanel.setPartyMembers(status.members.map((m) => ({
+      id: m.entityId,
+      name: m.name,
+      hp: m.hp,
+      maxHp: m.maxHp,
+      essence: 0,
+      maxEssence: 0,
+      level: m.level,
+    })));
+  } else {
+    vitalsPanel.setPartyMembers([]);
+  }
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────

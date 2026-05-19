@@ -28,7 +28,14 @@ export class VitalsPanel {
     this.injectStyles();
   }
 
-  /** Call every poll tick with the player entity + all zone entities to extract party */
+  private partyMembers: PartyMember[] = [];
+
+  /** Called from the party-status poll (cross-zone, authoritative). */
+  setPartyMembers(members: PartyMember[]) {
+    this.partyMembers = members;
+  }
+
+  /** Call every poll tick with the player entity + all zone entities. */
   update(own: Entity | null | undefined, allEntities: Record<string, Entity>) {
     if (!own) {
       if (this.root.style.display !== "none") this.root.style.display = "none";
@@ -36,9 +43,9 @@ export class VitalsPanel {
     }
     if (this.root.style.display === "none") this.root.style.display = "";
 
-    // Collect party members (excluding self)
-    const party: PartyMember[] = [];
-    if (own.partyId) {
+    // Prefer cross-zone party data; fall back to zone-entity scan
+    let party: PartyMember[] = this.partyMembers.filter((m) => m.id !== own.id);
+    if (party.length === 0 && own.partyId) {
       for (const ent of Object.values(allEntities)) {
         if (ent.id !== own.id && ent.partyId === own.partyId && ent.type === "player") {
           party.push({
