@@ -503,6 +503,7 @@ const charSelect = !isAnimationLab
       agentChat.setEntityId(detail.entityId || null);
       questPanel.setPlayer(ownWalletAddress, true);
       controls.setLandingMode(false);
+      autoLockEnabled = true;
       setGameplayHudVisible(true);
       gameSessionStartMs = Date.now();
       trackXRGameEntered({ walletAddress: detail.walletAddress, entityId: detail.entityId, zoneId: detail.zoneId, characterName: detail.characterName });
@@ -826,7 +827,7 @@ const playerPanel = new PlayerPanel({
     if (player.id) {
       const pos = entities.getEntityPosition(player.id);
       if (pos) {
-        lockOn(player.id);
+        // Pan to the player's location without locking — camera stays on own character
         controls.setTarget(pos.x, pos.y, pos.z);
       }
     }
@@ -875,7 +876,7 @@ function locateFriend(friend: FriendInfo) {
   if (online?.id) {
     const pos = entities.getEntityPosition(online.id);
     if (pos) {
-      lockOn(online.id);
+      // Pan to friend without locking — camera stays on own character
       controls.setTarget(pos.x, pos.y, pos.z);
       return;
     }
@@ -2494,8 +2495,8 @@ renderer.domElement.addEventListener("click", (e) => {
       } else if (GATHER_NODE_TYPES.has(entity.type)) {
         // Resource node — let the inspector's "gather" button drive the agent.
         // Do NOT auto-lock the camera; the user just wants to interact with it.
-      } else {
-        // Other non-hostile entity — lock camera to it
+      } else if (!ownEntityId) {
+        // Spectator / display mode — allow locking onto any entity
         lockOn(entity.id);
       }
     }
