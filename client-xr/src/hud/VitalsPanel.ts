@@ -13,11 +13,18 @@ interface PartyMember {
 export class VitalsPanel {
   private readonly root: HTMLDivElement;
   private lastHtml = "";
+  private onLeaveParty?: () => void;
 
-  constructor() {
+  constructor(callbacks?: { onLeaveParty?: () => void }) {
+    this.onLeaveParty = callbacks?.onLeaveParty;
     this.root = document.createElement("div");
     this.root.id = "vitals-panel";
     document.body.appendChild(this.root);
+    this.root.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).dataset.action === "leave-party") {
+        this.onLeaveParty?.();
+      }
+    });
     this.injectStyles();
   }
 
@@ -70,10 +77,13 @@ export class VitalsPanel {
       true,
     );
 
-    if (party.length > 0) {
-      out += `<div class="vp-party-label">Party</div>`;
+    if (own.partyId) {
+      out += `<div class="vp-party-label">Party <button class="vp-leave-btn" data-action="leave-party">Leave</button></div>`;
       for (const m of party) {
         out += this.buildFrame(m.name, m.level, m.hp, m.maxHp, m.essence, m.maxEssence, -1, -1, false);
+      }
+      if (party.length === 0) {
+        out += `<div class="vp-party-solo">Waiting for members…</div>`;
       }
     }
     return out;
@@ -222,6 +232,27 @@ export class VitalsPanel {
         letter-spacing: 0.1em;
         color: rgba(92, 168, 255, 0.7);
         margin-top: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        pointer-events: auto;
+      }
+      .vp-leave-btn {
+        pointer-events: auto;
+        background: rgba(200,60,60,0.25);
+        border: 1px solid rgba(200,60,60,0.6);
+        color: #ff8888;
+        font: 8px monospace;
+        padding: 1px 5px;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .vp-leave-btn:hover { background: rgba(200,60,60,0.45); }
+      .vp-party-solo {
+        font-size: 9px;
+        color: rgba(180,180,180,0.5);
+        font-style: italic;
       }
       @media (max-width: 480px) {
         #vitals-panel {

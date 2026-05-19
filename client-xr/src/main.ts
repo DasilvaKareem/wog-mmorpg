@@ -52,12 +52,13 @@ import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import { GauntletCursor } from "./hud/GauntletCursor.js";
+import { QuestProgressToast } from "./hud/QuestProgressToast.js";
 import type { ActivePlayer, Entity, FriendInfo, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 import { createSfxManager, playSoundEffect } from "./sfx.js";
 import { QualityManager } from "./quality/QualityManager.js";
@@ -300,17 +301,6 @@ class BgmManager {
 const equipTuner = getEquipmentTuner();
 (window as any).__equipTuner = equipTuner;
 
-// Live-update weapon meshes from tuner every frame — only when panel is open
-function syncWeaponsToTuner() {
-  if (!equipTuner.isVisible()) return;
-  const slot = equipTuner.getSlot("sword");
-  if (!slot) return;
-  for (const weapon of EntityManager.weaponInstances) {
-    weapon.position.set(slot.pos.x, slot.pos.y, slot.pos.z);
-    weapon.rotation.set(slot.rot.x, slot.rot.y, slot.rot.z);
-  }
-}
-
 // ── Config ──────────────────────────────────────────────────────────
 
 // Resolve quality tier before the renderer is constructed — antialias is
@@ -484,6 +474,7 @@ const inspector = new EntityInspector({
 const zoneNameBadge = new ZoneNameBadge();
 const zoneBanner = new ZoneBanner();
 const eventBanner = new EventBanner();
+const questProgressToast = new QuestProgressToast();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const worldMap = new WorldMap();
@@ -1196,7 +1187,19 @@ const skillsPanel = new SkillsPanel({
     });
   },
 });
-const vitalsPanel = new VitalsPanel();
+const vitalsPanel = new VitalsPanel({
+  onLeaveParty: async () => {
+    if (!ownWalletAddress || !ownCustodialWallet) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await leaveParty(token, ownCustodialWallet);
+    if (result.ok) {
+      agentChat.addSystemMessage("Left the party.", "info");
+    } else {
+      agentChat.addSystemMessage(`Leave failed: ${result.error ?? "unknown"}`, "error");
+    }
+  },
+});
 const buffBar = new BuffBar();
 let lastInventoryPollTime = 0;
 let lastProfessionPollTime = 0;
@@ -2129,6 +2132,17 @@ async function pollQuests() {
 
   const log = await fetchQuestLog(addr);
   if (log) {
+    // Detect progress increments to show floating toast
+    if (questLogData) {
+      const prevMap = new Map(questLogData.activeQuests.map(q => [q.questId, q.progress]));
+      for (const q of log.activeQuests) {
+        const prev = prevMap.get(q.questId) ?? 0;
+        if (q.progress > prev && !q.complete) {
+          const target = q.objective.targetMobName ?? q.objective.targetItemName ?? q.objective.targetNpcName ?? "";
+          questProgressToast.show(q.objective.type, q.progress, q.required, target);
+        }
+      }
+    }
     questLogData = log;
     questPanel.updateQuestLog(log);
 
@@ -2734,8 +2748,6 @@ function animate() {
   intentLines.update(dt);
   sky.tick(dt, camera.position);
   world.updateAnimations(dt, scene.fog instanceof THREE.FogExp2 ? scene.fog.color : undefined);
-  syncWeaponsToTuner();
-
   // Click-to-move marker
   clickMarker.update(dt);
   if (ownEntityId) {

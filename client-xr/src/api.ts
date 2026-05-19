@@ -672,6 +672,13 @@ export async function inviteToParty(
   return postJsonWithFallback("/party/invite-champion", token, { fromEntityId, fromZoneId, toCustodialWallet });
 }
 
+export async function leaveParty(
+  token: string,
+  custodialWallet: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/party/leave-wallet", token, { custodialWallet });
+}
+
 export async function acceptPartyInvite(
   token: string,
   custodialWallet: string,
