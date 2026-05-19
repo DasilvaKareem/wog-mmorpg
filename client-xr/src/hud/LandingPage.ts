@@ -1,3 +1,10 @@
+import {
+  trackXRSignupStarted,
+  trackXRAuthMethodSelected,
+  trackXRAuthCodeSent,
+  trackXRAuthFailed,
+} from "../analytics.js";
+
 interface LandingPageOptions {
   onEnterWorld: (detail: { walletAddress: string | null; mode: "guest" | "authenticated" }) => void;
 }
@@ -262,6 +269,7 @@ export class LandingPage {
         this.enterWorld(this.walletAddress, "authenticated");
         return;
       }
+      trackXRSignupStarted(this.authMode);
       this.authExpanded = true;
       this.refreshActionState();
       this.refreshAuthChooserUI();
@@ -270,11 +278,13 @@ export class LandingPage {
     this.panel.querySelector("[data-action='method-email']")?.addEventListener("click", () => {
       this.authMethod = "email";
       this.authStep = "entry";
+      trackXRAuthMethodSelected("email");
       this.refreshAuthChooserUI();
     });
     this.panel.querySelector("[data-action='method-sms']")?.addEventListener("click", () => {
       this.authMethod = "sms";
       this.authStep = "entry";
+      trackXRAuthMethodSelected("sms");
       this.refreshAuthChooserUI();
     });
     this.panel.querySelector("[data-action='auth-send']")?.addEventListener("click", () => {
@@ -310,12 +320,15 @@ export class LandingPage {
     });
 
     this.panel.querySelector("[data-action='provider-google']")?.addEventListener("click", () => {
+      trackXRAuthMethodSelected("google");
       void this.connectSocial("google");
     });
     this.panel.querySelector("[data-action='provider-discord']")?.addEventListener("click", () => {
+      trackXRAuthMethodSelected("discord");
       void this.connectSocial("discord");
     });
     this.panel.querySelector("[data-action='provider-wallet']")?.addEventListener("click", () => {
+      trackXRAuthMethodSelected("injected_wallet");
       void this.connectExternalWallet();
     });
   }
@@ -330,7 +343,7 @@ export class LandingPage {
       this.authExpanded = false;
       this.refreshActionState();
       this.setStatus(`Signed in as ${this.truncateAddress(address)}.`);
-    });
+    }, strategy);
   }
 
   private async connectExternalWallet() {
@@ -342,7 +355,7 @@ export class LandingPage {
       this.authExpanded = false;
       this.refreshActionState();
       this.setStatus(`Connected ${this.truncateAddress(address)}.`);
-    });
+    }, "injected_wallet");
   }
 
   private bindNavEvents() {
@@ -487,11 +500,12 @@ export class LandingPage {
       } else {
         await xrAuth.sendSmsCode(normalized);
       }
+      trackXRAuthCodeSent(this.authMethod);
       this.pendingContact = normalized;
       this.authStep = "otp";
       this.refreshAuthChooserUI();
       this.setStatus("Code sent. Check your messages.");
-    });
+    }, this.authMethod);
   }
 
   private async verifyCode() {
@@ -515,10 +529,10 @@ export class LandingPage {
       this.refreshActionState();
       const verb = this.authMode === "signup" ? "Signed up" : "Logged in";
       this.setStatus(`${verb} as ${this.truncateAddress(address)}.`);
-    });
+    }, this.authMethod);
   }
 
-  private async runBusy(label: string, fn: () => Promise<void>) {
+  private async runBusy(label: string, fn: () => Promise<void>, trackMethod?: string) {
     if (this.busy) return;
     this.busy = true;
     this.panel.classList.add("is-busy");
@@ -527,6 +541,7 @@ export class LandingPage {
       await fn();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (trackMethod) trackXRAuthFailed(trackMethod, message);
       this.setStatus(message || "Something went wrong.");
     } finally {
       this.busy = false;

@@ -2954,6 +2954,13 @@ export async function doQuesting(
             return supportResult;
           }
         }
+        // If quest mobs belong here (confirmed by global discovery), they're just
+        // temporarily dead and waiting to respawn (20s cooldown). Fight other mobs
+        // instead of triggering the circuit breaker with a blocked fallback.
+        if (targetZone === ctx.currentRegion) {
+          void ctx.logActivity(`Quest mobs respawning in ${ctx.currentRegion} — grinding other mobs while waiting`);
+          return fallbackToCombat(ctx, "Quest mobs respawning", strategy);
+        }
         // Missing from current zone means "wrong zone" or "cleared", not "stuck".
         // Reroute via the fallback path so the circuit breaker can find the right zone.
         return questBlockedFallback(ctx, strategy, "quest target not in zone", findNextZoneForLevel, me);

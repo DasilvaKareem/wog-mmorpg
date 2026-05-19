@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { fetchCharacters, fetchClasses, fetchRaces, createCharacter, deployAgent } from "../api.js";
 import { getAuthToken } from "../auth.js";
+import { trackXRCharacterSelected, trackXRCharacterCreated } from "../analytics.js";
 import type { CharacterAssets, CharacterInstance } from "../scene/CharacterAssets.js";
 import { AvatarAssets } from "../scene/AvatarAssets.js";
 import { getGradientMap } from "../scene/ToonPipeline.js";
@@ -637,6 +638,13 @@ export class CharacterSelect {
         throw new Error(deploy.error || "Deploy failed.");
       }
 
+      trackXRCharacterCreated({
+        walletAddress: this.walletAddress,
+        name: minted.name || name,
+        classId: minted.properties.class ?? this.selectedClass,
+        raceId: minted.properties.race ?? this.selectedRace,
+      });
+
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
         entityId: deploy.entityId,
@@ -663,6 +671,14 @@ export class CharacterSelect {
       if (!deploy.ok || !deploy.entityId) {
         throw new Error(deploy.error || "Deploy failed.");
       }
+
+      trackXRCharacterSelected({
+        walletAddress: this.walletAddress,
+        name: char.name,
+        classId: char.properties.class ?? "unknown",
+        raceId: char.properties.race ?? "unknown",
+        isReconnect: false,
+      });
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
@@ -691,6 +707,14 @@ export class CharacterSelect {
       if (!deploy.ok || !deploy.entityId) {
         throw new Error(deploy.error || "Reconnect failed.");
       }
+
+      trackXRCharacterSelected({
+        walletAddress: this.walletAddress,
+        name: char.name,
+        classId: char.properties.class ?? "unknown",
+        raceId: char.properties.race ?? "unknown",
+        isReconnect: true,
+      });
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,

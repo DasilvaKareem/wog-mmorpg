@@ -52,7 +52,7 @@ import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -61,6 +61,17 @@ import { GauntletCursor } from "./hud/GauntletCursor.js";
 import type { ActivePlayer, Entity, FriendInfo, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 import { createSfxManager, playSoundEffect } from "./sfx.js";
 import { QualityManager } from "./quality/QualityManager.js";
+import {
+  trackXRGameEntered,
+  trackXRPanelOpened,
+  trackXRVRSessionStarted,
+  trackXRVRSessionEnded,
+  trackXRNpcDialogOpened,
+  trackXRQuestAccepted,
+  trackXRQuestCompleted,
+  trackXRQuestAbandoned,
+  trackXRSessionDuration,
+} from "./analytics.js";
 
 let gauntletCursor: GauntletCursor | null = null;
 const urlParams = new URLSearchParams(window.location.search);
@@ -457,13 +468,17 @@ const inspector = new EntityInspector({
     if (!ownWalletAddress || !ownEntityId) throw new Error("Deploy your agent first");
     const token = await getAuthToken(ownWalletAddress);
     if (!token) throw new Error("You need to sign in first");
+    // Use deterministic slash commands — bypass the LLM entirely so the agent
+    // immediately switches focus without waiting for an AI round-trip.
+    const cmd = entity.type === "ore-node" ? "/focus mine"
+      : entity.type === "flower-node" || entity.type === "nectar-node" ? "/focus herb"
+      : "/focus gather";
     const verb = entity.type === "ore-node" ? "Mine"
       : entity.type === "crop-node" ? "Harvest"
       : "Gather";
-    const message = `${verb} the ${entity.name} at ${Math.round(entity.x)}, ${Math.round(entity.y)}${entity.zoneId ? ` in ${entity.zoneId.replace(/-/g, " ")}` : ""}.`;
-    const result = await sendAgentChat(token, message);
+    const result = await sendAgentChat(token, cmd);
     if (!result.ok) throw new Error(result.error ?? "Failed to message agent");
-    return `Told your agent: "${verb} ${entity.name}"`;
+    return `${verb}ing ${entity.name} — agent focus updated`;
   },
 });
 const zoneNameBadge = new ZoneNameBadge();
@@ -498,6 +513,8 @@ const charSelect = !isAnimationLab
       questPanel.setPlayer(ownWalletAddress, true);
       controls.setLandingMode(false);
       setGameplayHudVisible(true);
+      gameSessionStartMs = Date.now();
+      trackXRGameEntered({ walletAddress: detail.walletAddress, entityId: detail.entityId, zoneId: detail.zoneId, characterName: detail.characterName });
       if (detail.zoneId === "village-square" && !localStorage.getItem("wog:tutorial-v1")) {
         const tut = new TutorialOverlay((id) => togglePanel(id as ManagedPanelId));
         tut.start();
@@ -941,6 +958,7 @@ const questPanel = new QuestPanel({
     agentChat.addSystemMessage(`${label}: contacting ${npcLabel}...`, "info");
     const result = await acceptQuest(ctx.token, ownEntityId!, questId);
     if (result.ok) {
+      trackXRQuestAccepted(questId);
       agentChat.addSystemMessage(`Quest accepted from ${npcLabel}.`, "success");
       lastQuestPollTime = 0;
       void pollQuests();
@@ -971,6 +989,7 @@ const questPanel = new QuestPanel({
     agentChat.addSystemMessage(`${label}: contacting ${npcLabel}...`, "info");
     const result = await completeQuest(ctx.token, ownEntityId!, questId, npcEntityId);
     if (result.ok) {
+      trackXRQuestCompleted(questId, questTitle);
       agentChat.addSystemMessage(`Quest complete: "${questTitle}". Rewards granted.`, "success");
       eventBanner.show("quest-complete", questTitle);
       lastQuestPollTime = 0;
@@ -1036,6 +1055,7 @@ const questPanel = new QuestPanel({
     }
     const result = await abandonQuest(token, ownEntityId, questId);
     if (result.ok) {
+      trackXRQuestAbandoned(questId, questTitle);
       agentChat.addSystemMessage(`Quest abandoned: "${questTitle}".`, "info");
       eventBanner.show("quest-abandoned", questTitle);
       lastQuestPollTime = 0;
@@ -1116,6 +1136,51 @@ const bagPanel = new BagPanel({
   },
 });
 bagPanel.setPlayer(null, true);
+
+const CRAFT_STATION: Record<string, { endpoint: string; stationType: string; stationField: string }> = {
+  blacksmithing: { endpoint: "/crafting/forge",       stationType: "forge",          stationField: "forgeId"      },
+  alchemy:       { endpoint: "/alchemy/brew",         stationType: "alchemy-lab",    stationField: "alchemyLabId" },
+  cooking:       { endpoint: "/cooking/cook",         stationType: "campfire",       stationField: "campfireId"   },
+  leatherworking:{ endpoint: "/leatherworking/craft", stationType: "tanning-rack",   stationField: "stationId"    },
+  jewelcrafting: { endpoint: "/jewelcrafting/craft",  stationType: "jewelers-bench", stationField: "stationId"    },
+};
+
+async function craftRecipe(profId: string, recipeId: string): Promise<{ ok: boolean; message: string }> {
+  const cfg = CRAFT_STATION[profId];
+  if (!cfg) return { ok: false, message: "Crafting not available for this profession" };
+  if (!ownEntityId || !ownWalletAddress) return { ok: false, message: "Deploy your agent first" };
+
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, message: "Sign in to craft" };
+
+  const zoneId = entities.getEntity(ownEntityId)?.zoneId;
+  if (!zoneId) return { ok: false, message: "Entity not in any zone" };
+
+  const batch = await fetchZonesBatch([zoneId]);
+  const zoneData = batch[zoneId];
+  if (!zoneData) return { ok: false, message: "Zone data unavailable" };
+
+  const stationEntries = Object.entries(zoneData.entities).filter(([, e]) => (e as any).type === cfg.stationType);
+  if (stationEntries.length === 0) {
+    return { ok: false, message: `No ${cfg.stationType} in this zone — move to a crafting area` };
+  }
+
+  const ownEnt = zoneData.entities[ownEntityId] as any;
+  const px = ownEnt?.x ?? 0, pz = ownEnt?.y ?? 0;
+  stationEntries.sort(([, a], [, b]) => {
+    const ea = a as any, eb = b as any;
+    return Math.hypot(ea.x - px, (ea.y ?? 0) - pz) - Math.hypot(eb.x - px, (eb.y ?? 0) - pz);
+  });
+  const [stationId] = stationEntries[0];
+
+  const wallet = ownCustodialWallet ?? ownWalletAddress;
+  const body: Record<string, string> = { walletAddress: wallet, zoneId, entityId: ownEntityId, [cfg.stationField]: stationId, recipeId };
+  const result = await craftAtStation(token, cfg.endpoint, body);
+  return result.ok
+    ? { ok: true,  message: result.data?.message ?? "Crafted successfully!" }
+    : { ok: false, message: result.error ?? "Crafting failed" };
+}
+
 const recipesPanel = new RecipesPanel();
 const skillsPanel = new SkillsPanel({
   saveEdicts: (edicts) => saveEdictsToShard(edicts),
@@ -1124,7 +1189,12 @@ const skillsPanel = new SkillsPanel({
     else if (tab === "skills") { lastLearnedTechPollTime = 0; void pollLearnedTechniques(); }
     else if (tab === "edicts") { lastLearnedTechPollTime = 0; lastEdictsPollTime = 0; void pollLearnedTechniques(); void pollEdicts(); }
   },
-  onProfessionClick: (info) => { void recipesPanel.show(info); },
+  onProfessionClick: (info) => {
+    void recipesPanel.show({
+      ...info,
+      onCraft: info.profId in CRAFT_STATION ? (recipeId) => craftRecipe(info.profId, recipeId) : undefined,
+    });
+  },
 });
 const vitalsPanel = new VitalsPanel();
 const buffBar = new BuffBar();
@@ -1486,6 +1556,7 @@ function openPanel(id: ManagedPanelId) {
   const panel = managedPanels[id];
   panel.show();
   panel.onOpen?.();
+  trackXRPanelOpened(id);
   refreshActionBarActiveStates();
 }
 
@@ -1505,7 +1576,7 @@ function initDesktopPanelDragging() {
     { id: "bag-panel", handleSelector: ".bag-header" },
     { id: "skills-panel", handleSelector: ".sk-drag-handle" },
     { id: "quest-panel", handleSelector: ".qp-header" },
-    { id: "player-panel", handleSelector: ".pp-tabs" },
+    { id: "player-panel", handleSelector: ".pp-drag-handle" },
     { id: "inbox-panel", handleSelector: ".ibx-header" },
     { id: "outgoing-trades-panel", handleSelector: ".otp-header" },
     { id: "bets-panel", handleSelector: ".bp-header" },
@@ -2352,6 +2423,7 @@ renderer.domElement.addEventListener("click", (e) => {
     } else {
       // Non-hostile NPC — open dialog without locking camera
       if (NpcDialog.isNpcType(entity.type) && ownEntityId) {
+        trackXRNpcDialogOpened(entity.type, entity.name);
         npcDialog.open(entity);
       } else if (GATHER_NODE_TYPES.has(entity.type)) {
         // Resource node — let the inspector's "gather" button drive the agent.
@@ -2432,11 +2504,15 @@ window.addEventListener("resize", () => {
   toonPipeline.setSize(window.innerWidth, window.innerHeight);
 });
 
+let gameSessionStartMs = 0;
+
 window.addEventListener("pagehide", () => {
+  if (gameSessionStartMs) trackXRSessionDuration(Date.now() - gameSessionStartMs, ownWalletAddress);
   queueLogoutOnExit("pagehide");
 });
 
 window.addEventListener("beforeunload", () => {
+  if (gameSessionStartMs) trackXRSessionDuration(Date.now() - gameSessionStartMs, ownWalletAddress);
   queueLogoutOnExit("beforeunload");
   bgm.dispose();
 });
@@ -2456,8 +2532,11 @@ if (navigator.xr) {
           return;
         }
 
+        let vrStartTime = 0;
         await xrSession.enterVR({
           onStart: async () => {
+            vrStartTime = Date.now();
+            trackXRVRSessionStarted();
             vrButton.textContent = "Exit VR";
             const { XRControllers } = await import("./xr/XRControllers.js");
             xrControllers = new XRControllers(
@@ -2476,6 +2555,7 @@ if (navigator.xr) {
             };
           },
           onEnd: () => {
+            trackXRVRSessionEnded(vrStartTime ? Date.now() - vrStartTime : 0);
             vrButton.textContent = "Enter VR";
             xrControllers?.dispose();
             xrControllers = null;
@@ -2497,6 +2577,9 @@ window.addEventListener("keydown", (e) => {
   if (isDisplayMode) return;
   if (landing?.isActive()) return;
   if (charSelect?.isActive()) return;
+  // Don't intercept keys while typing in any input/textarea (e.g. Add Friends search)
+  const activeEl = document.activeElement;
+  if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
   // Don't intercept keys while typing in agent chat or NPC dialog
   if (agentChat.isFocused()) return;
   if (npcDialog.isOpen()) {

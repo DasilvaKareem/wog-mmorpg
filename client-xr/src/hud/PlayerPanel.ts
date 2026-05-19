@@ -57,6 +57,12 @@ export class PlayerPanel {
     this.container.id = "player-panel";
     this.container.style.display = "none";
 
+    // Drag handle
+    const dragHandle = document.createElement("div");
+    dragHandle.className = "pp-drag-handle";
+    dragHandle.textContent = "Players";
+    this.container.appendChild(dragHandle);
+
     // Tab bar
     this.tabBar = document.createElement("div");
     this.tabBar.className = "pp-tabs";
@@ -507,6 +513,19 @@ export class PlayerPanel {
         color: #ccc;
         backdrop-filter: blur(6px);
       }
+
+      .pp-drag-handle {
+        padding: 5px 10px 4px;
+        font: bold 11px monospace;
+        color: #4f8;
+        letter-spacing: 0.05em;
+        cursor: move;
+        user-select: none;
+        border-bottom: 1px solid rgba(68, 255, 136, 0.1);
+        background: rgba(68, 255, 136, 0.04);
+        border-radius: 8px 8px 0 0;
+      }
+      .pp-drag-handle:hover { background: rgba(68, 255, 136, 0.08); }
 
       .pp-tabs {
         display: flex;

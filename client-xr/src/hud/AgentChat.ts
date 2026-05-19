@@ -2,6 +2,7 @@ import type { ZoneEvent } from "../types.js";
 import { getAuthToken } from "../auth.js";
 import { CANDIDATE_BASES, toUrl } from "../api.js";
 import { playSoundEffect } from "../sfx.js";
+import { trackXRAgentTabSwitched, trackXRAgentInstructionSent } from "../analytics.js";
 
 declare global {
   interface Window {
@@ -300,6 +301,7 @@ export class AgentChat {
 
   setTab(tab: ActiveTab) {
     if (this.activeTab === tab) return;
+    trackXRAgentTabSwitched(tab);
     this.activeTab = tab;
     this.renderTabs();
     const isAi = tab === "ai";
@@ -754,6 +756,10 @@ export class AgentChat {
   private async send() {
     const text = this.input.value.trim();
     if (!text || this.sending) return;
+
+    const isSlash = text.startsWith("/");
+    const command = isSlash ? text.split(" ")[0] : undefined;
+    trackXRAgentInstructionSent({ isSlashCommand: isSlash, command });
 
     this.push({ role: "user", text, time: Date.now(), color: "#efc97f" });
     this.input.value = "";

@@ -19,6 +19,7 @@ interface ShowOpts {
   profIcon: string;
   skillLevel: number;
   learned: boolean;
+  onCraft?: (recipeId: string) => Promise<{ ok: boolean; message: string }>;
 }
 
 const RECIPE_ENDPOINT: Record<string, string | null> = {
@@ -113,8 +114,11 @@ export class RecipesPanel {
   private container: HTMLDivElement;
   private headerEl: HTMLDivElement;
   private bodyEl: HTMLDivElement;
+  private statusEl: HTMLDivElement;
   private current: ShowOpts | null = null;
   private fetchSeq = 0;
+  private craftInflight = false;
+  private craftStatusMsg = "";
 
   constructor() {
     this.container = document.createElement("div");
@@ -127,8 +131,15 @@ export class RecipesPanel {
     this.bodyEl = document.createElement("div");
     this.bodyEl.className = "rp-body";
 
+    this.statusEl = document.createElement("div");
+    this.statusEl.className = "rp-status";
+    this.statusEl.style.display = "none";
+
     this.container.appendChild(this.headerEl);
     this.container.appendChild(this.bodyEl);
+    this.container.appendChild(this.statusEl);
+
+    this.bodyEl.addEventListener("click", this.onBodyClick);
 
     document.body.appendChild(this.container);
 
@@ -137,10 +148,47 @@ export class RecipesPanel {
 
   async show(opts: ShowOpts) {
     this.current = opts;
+    this.craftInflight = false;
+    this.craftStatusMsg = "";
+    this.statusEl.style.display = "none";
     this.container.style.display = "flex";
     playSoundEffect("ui_dialog_open");
     this.renderHeader();
     await this.loadRecipes();
+  }
+
+  private onBodyClick = async (e: MouseEvent) => {
+    const btn = (e.target as HTMLElement).closest(".rp-craft-btn") as HTMLButtonElement | null;
+    if (!btn || this.craftInflight || !this.current?.onCraft) return;
+    const recipeId = btn.dataset.recipeId ?? "";
+    if (!recipeId) return;
+
+    this.craftInflight = true;
+    btn.disabled = true;
+    btn.textContent = "…";
+    this.showStatus("Crafting…", "");
+
+    const result = await this.current.onCraft(recipeId);
+    this.craftInflight = false;
+    btn.disabled = false;
+    btn.textContent = "Craft";
+    this.showStatus(result.message, result.ok ? "ok" : "err");
+
+    setTimeout(() => {
+      if (this.craftStatusMsg === result.message) this.clearStatus();
+    }, 4000);
+  };
+
+  private showStatus(msg: string, kind: "ok" | "err" | "") {
+    this.craftStatusMsg = msg;
+    this.statusEl.textContent = msg;
+    this.statusEl.className = `rp-status${kind === "ok" ? " rp-status-ok" : kind === "err" ? " rp-status-err" : ""}`;
+    this.statusEl.style.display = msg ? "block" : "none";
+  }
+
+  private clearStatus() {
+    this.craftStatusMsg = "";
+    this.statusEl.style.display = "none";
   }
 
   hide() {
@@ -220,7 +268,7 @@ export class RecipesPanel {
 
   private renderRecipes(recipes: NormalizedRecipe[]) {
     if (!this.current) return;
-    const { skillLevel } = this.current;
+    const { skillLevel, onCraft } = this.current;
 
     let html = "";
     for (const r of recipes) {
@@ -238,11 +286,16 @@ export class RecipesPanel {
       if (goldLabel) metaParts.push(`💰 ${goldLabel}`);
       if (r.hpRestoration) metaParts.push(`❤ ${r.hpRestoration} HP`);
 
+      const craftBtn = canCraft && onCraft && r.recipeId
+        ? `<button class="rp-craft-btn" data-recipe-id="${esc(r.recipeId)}">Craft</button>`
+        : "";
+
       html += `
         <div class="${rowClass}">
           <div class="rp-row-head">
             <span class="rp-output">${r.outputQuantity > 1 ? `${r.outputQuantity}× ` : ""}${esc(r.outputName)}</span>
             <span class="${lvlClass}">Lv ${r.requiredSkillLevel}</span>
+            ${craftBtn}
           </div>
           ${metaParts.length > 0 ? `<div class="rp-meta">${metaParts.join("  ·  ")}</div>` : ""}
           <ul class="rp-mats">${matsHtml}</ul>
@@ -333,6 +386,23 @@ export class RecipesPanel {
       }
       .rp-mats li { color: #998; font-size: 11px; }
       .rp-mat-qty { color: #aab; font-weight: bold; }
+      .rp-craft-btn {
+        margin-left: auto;
+        background: rgba(68, 255, 136, 0.15);
+        border: 1px solid rgba(68, 255, 136, 0.4);
+        color: #4f8; border-radius: 3px; padding: 2px 10px;
+        font: bold 11px monospace; cursor: pointer; white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .rp-craft-btn:hover { background: rgba(68, 255, 136, 0.28); }
+      .rp-craft-btn:disabled { opacity: 0.5; cursor: default; }
+      .rp-status {
+        flex-shrink: 0; padding: 6px 10px; font: 11px monospace;
+        border-top: 1px solid rgba(255, 204, 68, 0.15); color: #aaa;
+        text-align: center;
+      }
+      .rp-status-ok { color: #4f8; }
+      .rp-status-err { color: #f86; }
     `;
     document.head.appendChild(style);
   }
