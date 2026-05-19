@@ -368,11 +368,12 @@ cmd({
       dungeon: "dungeon", dungeons: "dungeon", gate: "dungeon",
       idle: "idle", rest: "idle", stop: "idle", afk: "idle",
       user: "user", manual: "user", control: "user", driver: "user", wait: "user",
+      party: "party", group: "party", team: "party",
     };
 
     const focus = VALID_FOCUSES[focusInput];
     if (!focus) {
-      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, skinning, enchanting, shopping, trading, traveling, learning, dungeon, idle, user` };
+      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, skinning, enchanting, shopping, trading, traveling, learning, dungeon, party, idle, user` };
     }
 
     const patch: Record<string, unknown> = { focus };
