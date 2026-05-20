@@ -165,6 +165,7 @@ export class AgentChat {
   private aiPanel: HTMLDivElement;
   private input: HTMLInputElement;
   private micBtn: HTMLButtonElement;
+  private sendBtn: HTMLButtonElement;
   private autocompleteEl: HTMLDivElement;
   private messages: ChatEntry[] = [];
   private seenEventIds = new Set<string>();
@@ -179,6 +180,7 @@ export class AgentChat {
   private aiStatus: AgentStatus | null = null;
   private aiPollTimer: ReturnType<typeof setInterval> | null = null;
   private bgPollTimer: ReturnType<typeof setInterval> | null = null;
+  private vvListener: (() => void) | null = null;
 
   // PTT / Speech Recognition
   private recognition: any = null;
@@ -212,6 +214,12 @@ export class AgentChat {
     this.input.spellcheck = false;
     this.input.autocomplete = "off";
 
+    this.sendBtn = document.createElement("button");
+    this.sendBtn.type = "button";
+    this.sendBtn.className = "agent-chat-send";
+    this.sendBtn.innerHTML = "&#x2191;"; // ↑
+    this.sendBtn.title = "Send message";
+
     this.micBtn = document.createElement("button");
     this.micBtn.type = "button";
     this.micBtn.className = "agent-chat-mic";
@@ -219,6 +227,7 @@ export class AgentChat {
     this.micBtn.title = "Push to Talk (Hold V)";
 
     inputWrap.appendChild(this.input);
+    inputWrap.appendChild(this.sendBtn);
     inputWrap.appendChild(this.micBtn);
 
     this.renderTabs();
@@ -561,12 +570,33 @@ export class AgentChat {
     this.expanded = true;
     this.root.classList.add("expanded");
     this.clampExpandedIntoViewport();
+    this.attachViewportListener();
     this.input.focus();
     this.scrollToBottom();
     if (this.activeTab === "ai") {
       this.startAiPolling();
       void this.refreshAiStatus();
     }
+  }
+
+  private attachViewportListener() {
+    if (!window.visualViewport || this.vvListener) return;
+    this.vvListener = () => {
+      const vv = window.visualViewport!;
+      const kbHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      this.root.style.bottom = (kbHeight > 50 ? kbHeight + 8 : 12) + "px";
+    };
+    window.visualViewport.addEventListener("resize", this.vvListener);
+    window.visualViewport.addEventListener("scroll", this.vvListener);
+  }
+
+  private detachViewportListener() {
+    if (window.visualViewport && this.vvListener) {
+      window.visualViewport.removeEventListener("resize", this.vvListener);
+      window.visualViewport.removeEventListener("scroll", this.vvListener);
+      this.vvListener = null;
+    }
+    this.root.style.bottom = "";
   }
 
   private clampExpandedIntoViewport() {
@@ -615,6 +645,7 @@ export class AgentChat {
     this.expanded = false;
     this.root.classList.remove("expanded");
     this.root.classList.add("chat-hidden");
+    this.detachViewportListener();
     this.input.blur();
     this.input.value = "";
     this.hideAutocomplete();
@@ -874,6 +905,12 @@ export class AgentChat {
   // ── Events ────────────────────────────────────────────────────────
 
   private bindEvents() {
+    this.sendBtn.addEventListener("click", () => {
+      if (this.input.value.trim()) {
+        void this.send();
+      }
+    });
+
     this.micBtn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       this.startListening();
@@ -1344,6 +1381,30 @@ export class AgentChat {
         outline: none;
       }
 
+      .agent-chat-send {
+        flex-shrink: 0;
+        background: rgba(239, 201, 127, 0.15);
+        border: 1px solid rgba(239, 201, 127, 0.35);
+        border-radius: 6px;
+        color: #efc97f;
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        margin: 4px 2px 4px 0;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        transition: background 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .agent-chat-send:hover,
+      .agent-chat-send:active {
+        background: rgba(239, 201, 127, 0.32);
+      }
+
       .agent-chat-mic {
         background: transparent;
         border: none;
@@ -1395,6 +1456,14 @@ export class AgentChat {
           right: 8px;
           width: auto;
           max-width: calc(100vw - 16px);
+        }
+        .agent-chat-input {
+          font-size: 16px;
+        }
+        .agent-chat-send {
+          width: 40px;
+          height: 40px;
+          margin: 4px 4px 4px 0;
         }
       }
     `;
