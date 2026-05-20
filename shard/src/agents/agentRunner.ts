@@ -47,6 +47,7 @@ import { getEntity as getWorldEntity, getEntitiesInRegion, isWalletSpawned, unre
 import { getPartyLeaderId, getPlayerPartyId } from "../social/partySystem.js";
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
 import { runSupervisor } from "./agentSupervisor.js";
+import { deductCost, type ActionType } from "../economy/sessionBudget.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
 import { AgentMcpClient } from "./mcpClient.js";
 import { type BotScript, type TriggerEvent } from "../types/botScriptTypes.js";
@@ -2314,6 +2315,14 @@ export class AgentRunner {
             void this.logActivity(`[utility] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
             return;
           }
+          // Deduct supervisor LLM cost — skip call (not pause) if budget gone
+          const supervisorBudget = await deductCost(this.userWallet, "supervisor");
+          if (!supervisorBudget.ok) {
+            this.currentScript = utilityDecision.winner.script;
+            this.ticksOnCurrentScript = 0;
+            void this.logActivity("[nanopay] Budget low — using utility decision, supervisor skipped");
+            return;
+          }
           const newScript = await runSupervisor(trigger, {
             entity, entities,
             entityId: this.entityId!,
@@ -2920,7 +2929,17 @@ export class AgentRunner {
                   Number(leaderEntity?.x ?? 0) - Number(entity.x ?? 0),
                   Number(leaderEntity?.y ?? 0) - Number(entity.y ?? 0),
                 );
-                if (distToLeader > PARTY_LEADER_FOLLOW_DISTANCE) {
+                // Skip the leash if we're actively attacking — engaging the
+                // leader's target naturally pulls us out of the 90-unit
+                // radius. Clearing the script + consuming the tick on a
+                // move-to-leader caused agents to oscillate, never landing
+                // an attack and dying to aggro. Combat will reposition us
+                // back near the leader once the target dies, since the
+                // leader's next target is usually right there.
+                const inCombat =
+                  (entity as any)?.order?.action === "attack" ||
+                  (entity as any)?.order?.action === "technique";
+                if (distToLeader > PARTY_LEADER_FOLLOW_DISTANCE && !inCombat) {
                   // Clear any script that would pull us away from the leader again
                   if (focus === "party") this.currentScript = null;
                   const moving = await this.moveToEntity(entity, leaderEntity, PARTY_LEADER_STOP_DISTANCE);
@@ -3029,6 +3048,19 @@ export class AgentRunner {
         }
 
         await this.withGate(() => this.decideAndAct(entity, zs.entities, config, strategy));
+
+        // Deduct nanopayment for this tick's action
+        const tickScriptType = this.currentScript?.type;
+        if (tickScriptType && tickScriptType !== "idle") {
+          const tickAction: ActionType = ["gather", "skin", "farm"].includes(tickScriptType) ? "gather" : "combat";
+          const tickBudget = await deductCost(this.userWallet, tickAction);
+          if (!tickBudget.ok) {
+            console.log(`[agent:${this.walletTag}] Budget exhausted — pausing agent`);
+            await patchAgentConfig(this.userWallet, { enabled: false });
+            this.running = false;
+            return;
+          }
+        }
       } catch (err: any) {
         console.warn(`[agent:${this.walletTag}] Loop error: ${err.message?.slice(0, 80)}`);
         this.logError("loop", `Loop error: ${err.message?.slice(0, 200) ?? "unknown"}`, { stack: err.stack?.slice(0, 300) ?? "" });
