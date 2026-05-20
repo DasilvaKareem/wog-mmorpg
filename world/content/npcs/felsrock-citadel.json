@@ -80,6 +80,13 @@
       "hp": 999
     },
     {
+      "type": "quest-giver",
+      "name": "Citadel Apothecary Rhea",
+      "x": 460,
+      "y": 400,
+      "hp": 999
+    },
+    {
       "type": "merchant",
       "name": "Citadel Quartermaster Ingrid",
       "x": 220,

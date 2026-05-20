@@ -62,6 +62,7 @@ import { QuestProgressToast } from "./hud/QuestProgressToast.js";
 import type { ActivePlayer, Entity, FriendInfo, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 import { createSfxManager, playSoundEffect } from "./sfx.js";
 import { QualityManager } from "./quality/QualityManager.js";
+import { playerSession } from "./state/PlayerSession.js";
 import {
   trackXRGameEntered,
   trackXRPanelOpened,
@@ -491,6 +492,15 @@ const charSelect = !isAnimationLab
       ownWalletAddress = detail.walletAddress.toLowerCase();
       ownCustodialWallet = detail.custodialWallet?.toLowerCase() ?? null;
       ownEntityId = detail.entityId || null;
+      playerSession.initWallet(ownWalletAddress, ownCustodialWallet);
+      entities.setOwnWallet(ownWalletAddress);
+      if (ownEntityId) {
+        playerSession.setSpawned(ownEntityId, detail.zoneId, {
+          level: 1,
+          characterTokenId: null,
+          agentId: null,
+        });
+      }
       void import("./scene/AnimationResolver.js").then(m => m.setAnimDebugSelfName(detail.characterName));
       inboxPanel.setCustodialWallet(ownCustodialWallet);
       inboxPanel.setCharacterName(detail.characterName);
@@ -534,6 +544,8 @@ const landing = !isAnimationLab
     onEnterWorld: ({ walletAddress }) => {
       if (walletAddress) {
         ownWalletAddress = walletAddress.toLowerCase();
+        playerSession.initWallet(ownWalletAddress);
+        entities.setOwnWallet(ownWalletAddress);
         void charSelect!.show(ownWalletAddress);
       } else {
         // Guest mode — skip character select, enter as spectator
@@ -607,6 +619,62 @@ function setGameplayHudVisible(visible: boolean) {
     el.style.pointerEvents = visible ? "" : "none";
   }
 }
+
+// ── PlayerSession-driven HUD + recovery ─────────────────────────────
+
+const PLAYER_PRESENT_STYLE = "background:rgba(30,60,40,0.9);border:1px solid #4f8;color:#4f8;text-shadow:0 0 6px rgba(68,255,136,0.4);";
+const PLAYER_REACQUIRING_STYLE = "background:rgba(80,60,20,0.9);border:1px solid #fc4;color:#fc4;text-shadow:0 0 6px rgba(255,204,68,0.4);";
+const PLAYER_LOST_STYLE = "background:rgba(80,20,20,0.9);border:1px solid #f44;color:#f88;text-shadow:0 0 6px rgba(255,68,68,0.4);";
+let lastFindOwnCharacterAt = 0;
+const FIND_OWN_BACKOFF_MS = 5000;
+function applyHudLockStyle(style: string) {
+  hudLock.style.cssText = hudLock.style.cssText.replace(/(background|border|color|text-shadow):[^;]+;?/g, "") + style;
+}
+
+let recoveryInFlight = false;
+async function triggerOwnRecovery() {
+  if (recoveryInFlight) return;
+  if (Date.now() - lastFindOwnCharacterAt < FIND_OWN_BACKOFF_MS) return;
+  if (playerSession.state !== "lost") return;
+  recoveryInFlight = true;
+  lastFindOwnCharacterAt = Date.now();
+  try {
+    await findOwnCharacter();
+  } catch (err) {
+    console.warn("[recovery] findOwnCharacter failed:", err);
+  } finally {
+    recoveryInFlight = false;
+    // If still lost, schedule another attempt.
+    if (playerSession.state === "lost") {
+      setTimeout(() => { void triggerOwnRecovery(); }, FIND_OWN_BACKOFF_MS);
+    }
+  }
+}
+
+playerSession.on((ev) => {
+  if (ev.type !== "state-changed") return;
+  switch (ev.to) {
+    case "reacquiring":
+      if (hudLock.style.display !== "none") {
+        applyHudLockStyle(PLAYER_REACQUIRING_STYLE);
+        hudLock.textContent = "REACQUIRING…";
+        hudLock.style.display = "block";
+      }
+      break;
+    case "lost":
+      applyHudLockStyle(PLAYER_LOST_STYLE);
+      hudLock.textContent = "RECONNECTING…";
+      hudLock.style.display = "block";
+      void triggerOwnRecovery();
+      break;
+    case "present":
+      applyHudLockStyle(PLAYER_PRESENT_STYLE);
+      // text is rewritten by lock-indicator block in pollNearbyZones
+      break;
+    default:
+      break;
+  }
+});
 
 // ── State ───────────────────────────────────────────────────────────
 
@@ -720,6 +788,7 @@ function tryLockOwnCharacter(activePlayers: ActivePlayer[]) {
   if (!me) return;
 
   ownEntityId = me.id;
+  playerSession.setSpawned(me.id, me.zoneId, playerSession.characterInfo);
 
   // Move camera to the player's zone so zone polling picks it up
   const zoneCenter = world.getZoneCenter(me.zoneId);
@@ -746,6 +815,7 @@ function tryFollowDisplayTarget(activePlayers: ActivePlayer[]) {
   if (!target) return;
 
   ownEntityId = target.id;
+  playerSession.setSpawned(target.id, target.zoneId, playerSession.characterInfo);
 
   const zoneCenter = world.getZoneCenter(target.zoneId);
   if (zoneCenter) {
@@ -791,6 +861,7 @@ async function findOwnCharacter() {
       characterTokenId: liveEntity.characterTokenId ?? null,
       agentId: liveEntity.agentId ?? null,
     };
+    playerSession.setSpawned(liveEntity.id, liveEntity.zoneId, ownCharacterInfo);
     agentChat.setEntityId(liveEntity.id);
     hudLock.textContent = `FINDING: ${liveEntity.name ?? "character"}`;
     hudLock.style.display = "block";
@@ -2024,8 +2095,14 @@ async function pollNearbyZones() {
     // into this tick's HP-delta damage numbers via preSync().
     const newEvents = filterNewZoneEvents(allEvents);
     entities.setOwnEntityId(ownEntityId);
+    entities.setOwnWallet(ownWalletAddress);
     entities.preSync(newEvents);
     entities.sync(merged, visibleIntents);
+    // sync() may have healed ownEntityId via wallet match (relogin case).
+    if (playerSession.entityId && playerSession.entityId !== ownEntityId) {
+      ownEntityId = playerSession.entityId;
+      agentChat.setEntityId(ownEntityId);
+    }
     intentLines.sync(merged, visibleIntents);
     intentTooltip.setText(intentLines.getPrimaryIntentLabel());
 
@@ -2065,12 +2142,17 @@ async function pollNearbyZones() {
       lockOn(ownEntityId);
     }
 
-    // Update lock indicator
+    // Update lock indicator. If locked to own-player, don't silently unlock when
+    // the entity drops from a snapshot — PlayerSession drives Reacquiring HUD instead.
     if (lockedEntityId) {
       if (merged[lockedEntityId]) {
         hudLock.textContent = merged[lockedEntityId].name;
       } else {
-        unlockCamera();
+        const isOwnLock = lockedEntityId === ownEntityId
+          || (playerSession.wallet && playerSession.entityId === lockedEntityId);
+        if (!isOwnLock) {
+          unlockCamera();
+        }
       }
     }
 
@@ -2755,12 +2837,19 @@ function animate() {
   if (xrSession.isPresenting) {
     xrControllers?.update();
   } else {
-    // Follow own character
+    // Follow own character. Resolve by PlayerSession.entityId (auto-heals across
+    // relogin) when locked to self. During REACQUIRING, hold last target — don't
+    // silently freeze the world.
     if (lockedEntityId) {
-      const pos = entities.getEntityPosition(lockedEntityId);
+      const liveId = (lockedEntityId === ownEntityId && playerSession.entityId)
+        ? playerSession.entityId
+        : lockedEntityId;
+      const pos = entities.getEntityPosition(liveId);
       if (pos) {
         controls.setTarget(pos.x, pos.y, pos.z);
+        if (liveId !== lockedEntityId) lockedEntityId = liveId;
       }
+      // else: hold last setTarget — Reacquiring HUD tells the user what's happening.
     }
     controls.update(dt);
   }
@@ -2867,6 +2956,8 @@ async function init() {
       if (!followWalletAddress) return;
       if (ownEntityId) return;
       ownWalletAddress = followWalletAddress;
+      playerSession.initWallet(ownWalletAddress);
+      entities.setOwnWallet(ownWalletAddress);
       await findOwnCharacter();
     };
     void tryResolve();

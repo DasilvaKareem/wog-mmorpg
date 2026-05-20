@@ -107,13 +107,20 @@ const FOCUS_COLORS: Record<string, string> = {
   user: "#f5d063",
 };
 
-const QUICK_SUGGESTIONS = [
-  "fight stronger mobs",
-  "go gather herbs",
-  "play it safe",
-  "head to the next zone",
-  "buy better gear",
-  "do some quests",
+const FOCUS_SUGGESTIONS = [
+  "combat",
+  "questing",
+  "gathering",
+  "crafting",
+  "alchemy",
+  "cooking",
+  "enchanting",
+  "shopping",
+  "trading",
+  "traveling",
+  "party",
+  "idle",
+  "user",
 ];
 
 // ── Slash command registry (for autocomplete + highlighting) ──────────────
@@ -1106,19 +1113,29 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       </div>
       )}
 
-      {/* ── Quick suggestions ──────────────────────────────────────── */}
-      {viewMode === "chat" && isDeployed && !sending && !replyTarget && messages.length < 3 && (
+      {/* ── Focus mode chips ───────────────────────────────────────── */}
+      {viewMode === "chat" && isDeployed && !sending && !replyTarget && (
         <div className="flex gap-1 px-3 py-1.5 overflow-x-auto border-t border-[#1a2a18]" style={{ scrollbarWidth: "none" }}>
-          {QUICK_SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              onClick={() => void handleSend(s)}
-              disabled={!token || sending}
-              className="shrink-0 border border-[#1a2a18] bg-[#080f0a] px-2 py-0.5 text-[11px] text-[#7ab893] rounded-sm transition hover:border-[#2d5a3d] hover:text-[#54f28b] hover:bg-[#0a1a0e] disabled:opacity-40"
-            >
-              {s}
-            </button>
-          ))}
+          {FOCUS_SUGGESTIONS.map((f) => {
+            const color = FOCUS_COLORS[f] ?? "#8b9abc";
+            const active = (status?.config?.focus ?? "") === f;
+            return (
+              <button
+                key={f}
+                onClick={() => void handleSend(`/focus ${f}`)}
+                disabled={!token || sending}
+                title={f === "user" ? "Sovereign mode — you drive, agent stays idle" : `Set focus to ${f}`}
+                className="shrink-0 border px-2 py-0.5 text-[11px] rounded-sm transition disabled:opacity-40"
+                style={{
+                  borderColor: active ? color : "#1a2a18",
+                  backgroundColor: active ? `${color}22` : "#080f0a",
+                  color: active ? color : `${color}cc`,
+                }}
+              >
+                {f}
+              </button>
+            );
+          })}
         </div>
       )}
 

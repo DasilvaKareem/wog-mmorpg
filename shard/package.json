@@ -18,7 +18,8 @@
     "test:character-bootstrap": "tsx tests/characterBootstrapOutbox.test.ts",
     "test:chain-ops": "tsx tests/chainOperationStoreRecovery.test.ts",
     "test:chain-recovery": "tsx tests/chainReconciliationRecovery.test.ts",
-    "test:blockchain-writes": "tsx tests/blockchainWriteProcessorRecovery.test.ts"
+    "test:blockchain-writes": "tsx tests/blockchainWriteProcessorRecovery.test.ts",
+    "test:quest-audit": "tsx tests/questNpcAudit.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.77.0",

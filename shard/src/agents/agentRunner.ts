@@ -2054,6 +2054,20 @@ export class AgentRunner {
       maxStaleTicks: MAX_STALE_TICKS,
     };
 
+    // ── User-pinned focus: never decide autonomously ──
+    // focus="user" means the human is driving. Don't dequeue stale queued
+    // actions, don't run trigger detection, supervisor LLM calls, level-up
+    // auto-progress, or anything else that could change the script.
+    // MUST come BEFORE the action-queue dequeue below — otherwise pre-queued
+    // quest/travel actions slip into currentScript and the guard is bypassed.
+    if (config.focus === "user") {
+      if (!this.currentScript) {
+        this.currentScript = { type: "idle", reason: "User control — awaiting commands" };
+        this.ticksOnCurrentScript = 0;
+      }
+      return;
+    }
+
     // ── Action queue: dequeue next if idle ──
     if (!this.currentScript && this.actionQueue.length > 0) {
       this.recordUtilityQueueAbstain("queue_dequeue");
@@ -2062,20 +2076,6 @@ export class AgentRunner {
       );
       this.dequeueNext();
       return; // let the new script execute on the next tick
-    }
-
-    // ── User-pinned focus: never decide autonomously ──
-    // focus="user" means the human is driving. Don't run trigger detection,
-    // supervisor LLM calls, level-up auto-progress, or anything else that
-    // could change the script. Chat-driven supervisor calls (from /agent/chat)
-    // can still set scripts and enqueue actions; this only guards the loop's
-    // own autonomous reasoning.
-    if (config.focus === "user") {
-      if (!this.currentScript) {
-        this.currentScript = { type: "idle", reason: "User control — awaiting commands" };
-        this.ticksOnCurrentScript = 0;
-      }
-      return;
     }
 
     // ── Party-pinned focus: follow leader + fight; suppress LLM supervisor ──

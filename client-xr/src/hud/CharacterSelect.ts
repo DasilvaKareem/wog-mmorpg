@@ -592,15 +592,36 @@ export class CharacterSelect {
 
   // ── Actions ────────────────────────────────────────────────────────
 
+  private flashError(el: HTMLElement) {
+    el.classList.remove("cs-error-flash");
+    void el.offsetWidth; // force reflow to restart animation
+    el.classList.add("cs-error-flash");
+    setTimeout(() => el.classList.remove("cs-error-flash"), 1000);
+  }
+
   private async handleCreate() {
     const nameInput = this.createContainer.querySelector("input[name='charName']") as HTMLInputElement;
     const name = nameInput.value.trim();
     if (!name || name.length < 2) {
       this.setStatus("Name must be at least 2 characters.");
+      const field = nameInput.closest(".cs-field") as HTMLElement ?? nameInput;
+      this.flashError(field);
+      field.scrollIntoView({ behavior: "smooth", block: "center" });
+      nameInput.focus();
       return;
     }
-    if (!this.selectedClass || !this.selectedRace) {
-      this.setStatus("Select a class and race.");
+    if (!this.selectedClass) {
+      this.setStatus("Select a class.");
+      const picker = this.createContainer.querySelector("[data-picker='class']") as HTMLElement;
+      this.flashError(picker);
+      picker.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (!this.selectedRace) {
+      this.setStatus("Select a race.");
+      const picker = this.createContainer.querySelector("[data-picker='race']") as HTMLElement;
+      this.flashError(picker);
+      picker.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
 
@@ -1207,6 +1228,20 @@ export class CharacterSelect {
         font: 600 11px/1.35 "Courier New", monospace;
         letter-spacing: 0.08em;
         text-transform: uppercase;
+      }
+
+      @keyframes cs-shake {
+        0%, 100% { transform: translateX(0); }
+        20%       { transform: translateX(-5px); }
+        40%       { transform: translateX(5px); }
+        60%       { transform: translateX(-3px); }
+        80%       { transform: translateX(3px); }
+      }
+
+      .cs-error-flash {
+        animation: cs-shake 0.35s ease;
+        border-color: rgba(255, 90, 70, 0.7) !important;
+        box-shadow: 0 0 0 3px rgba(255, 90, 70, 0.18) !important;
       }
 
       @media (max-width: 768px) {

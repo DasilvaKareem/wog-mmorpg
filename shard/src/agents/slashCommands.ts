@@ -394,7 +394,12 @@ cmd({
 
     await patchAgentConfig(ctx.authWallet, patch);
     const runner = agentManager.getRunner(ctx.authWallet);
-    if (runner) await runner.clearScript();
+    if (runner) {
+      await runner.clearScript();
+      if (focus === "user" || focus === "idle") {
+        await runner.clearQueue();
+      }
+    }
 
     const zoneMsg = patch.targetZone ? ` → ${patch.targetZone}` : "";
     return { response: `Focus set to: ${focus}${zoneMsg}`, configChanged: true };

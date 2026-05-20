@@ -80,6 +80,13 @@
       "hp": 999
     },
     {
+      "type": "quest-giver",
+      "name": "Tidal Herbalist Wren",
+      "x": 460,
+      "y": 350,
+      "hp": 999
+    },
+    {
       "type": "merchant",
       "name": "Solaris Outfitter Caius",
       "x": 350,

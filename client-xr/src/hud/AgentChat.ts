@@ -23,6 +23,38 @@ interface ChatEntry {
   color: string;
 }
 
+const FOCUS_SUGGESTIONS = [
+  "combat",
+  "questing",
+  "gathering",
+  "crafting",
+  "alchemy",
+  "cooking",
+  "enchanting",
+  "shopping",
+  "trading",
+  "traveling",
+  "party",
+  "idle",
+  "user",
+];
+
+const FOCUS_COLORS: Record<string, string> = {
+  questing: "#5dadec",
+  combat: "#f25454",
+  gathering: "#54f28b",
+  traveling: "#e0af68",
+  shopping: "#ffcc00",
+  crafting: "#b48efa",
+  alchemy: "#54dbb8",
+  cooking: "#f2a854",
+  enchanting: "#c792ea",
+  trading: "#ffd479",
+  party: "#7dd3a7",
+  idle: "#8b9abc",
+  user: "#f5d063",
+};
+
 const SLASH_COMMANDS = [
   { cmd: "/help",     desc: "List all commands" },
   { cmd: "/status",   desc: "Your stats, HP, gear" },
@@ -138,6 +170,7 @@ interface AgentStatus {
   running: boolean;
   entity?: { name: string; level: number; hp: number | null; maxHp: number | null } | null;
   zoneId?: string | null;
+  config?: { focus?: string; strategy?: string } | null;
 }
 
 function humanizeOrder(order: NonNullable<AgentStatus["activeOrder"]>): string {
@@ -167,6 +200,7 @@ export class AgentChat {
   private micBtn: HTMLButtonElement;
   private sendBtn: HTMLButtonElement;
   private autocompleteEl: HTMLDivElement;
+  private focusChipsEl: HTMLDivElement;
   private messages: ChatEntry[] = [];
   private seenEventIds = new Set<string>();
   private expanded = false;
@@ -204,6 +238,9 @@ export class AgentChat {
     this.autocompleteEl.className = "agent-chat-autocomplete";
     this.autocompleteEl.hidden = true;
 
+    this.focusChipsEl = document.createElement("div");
+    this.focusChipsEl.className = "agent-chat-focus-chips";
+
     const inputWrap = document.createElement("div");
     inputWrap.className = "agent-chat-input-wrap";
 
@@ -236,13 +273,57 @@ export class AgentChat {
     this.root.appendChild(this.log);
     this.root.appendChild(this.aiPanel);
     this.root.appendChild(this.autocompleteEl);
+    this.root.appendChild(this.focusChipsEl);
     this.root.appendChild(inputWrap);
     document.body.appendChild(this.root);
 
     this.initSpeechRecognition();
     this.injectStyles();
     this.bindEvents();
+    this.renderFocusChips();
     this.collapse();
+  }
+
+  private renderFocusChips() {
+    const activeFocus = this.aiStatus?.config?.focus ?? "";
+    this.focusChipsEl.innerHTML = "";
+    for (const focus of FOCUS_SUGGESTIONS) {
+      const color = FOCUS_COLORS[focus] ?? "#8b9abc";
+      const active = activeFocus === focus;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "agent-chat-focus-chip" + (active ? " active" : "");
+      btn.textContent = focus;
+      btn.title = focus === "user"
+        ? "Sovereign mode — you drive, agent stays idle"
+        : `Set focus to ${focus}`;
+      btn.style.setProperty("--chip-color", color);
+      btn.addEventListener("click", () => {
+        void this.handleFocusChipClick(focus);
+      });
+      this.focusChipsEl.appendChild(btn);
+    }
+  }
+
+  private async handleFocusChipClick(focus: string) {
+    if (this.sending) return;
+    if (!this.walletAddress) {
+      this.push({ role: "system", text: "Not signed in.", time: Date.now(), color: "#ff8866" });
+      return;
+    }
+    const token = await getAuthToken(this.walletAddress);
+    if (!token) {
+      this.push({ role: "system", text: "Auth failed — try signing in again.", time: Date.now(), color: "#ff8866" });
+      return;
+    }
+    const message = `/focus ${focus}`;
+    trackXRAgentInstructionSent({ isSlashCommand: true, command: "/focus" });
+    this.push({ role: "user", text: message, time: Date.now(), color: "#efc97f" });
+    // Optimistic highlight — refreshAiStatus will reconfirm on next poll
+    if (this.aiStatus?.config) this.aiStatus.config.focus = focus;
+    this.renderFocusChips();
+    await this.sendChat(token, message);
+    void this.refreshAiStatus();
   }
 
   // ── PTT / Speech Recognition ────────────────────────────────────
@@ -365,7 +446,13 @@ export class AgentChat {
 
   private startBgPoll() {
     if (this.bgPollTimer) return;
-    this.bgPollTimer = setInterval(() => void this.checkPendingMessages(), 5000);
+    this.bgPollTimer = setInterval(() => {
+      void this.checkPendingMessages();
+      // Keep focus-chip active state fresh even when not on the AI tab,
+      // so the chip row reflects external focus changes (slash commands
+      // typed in chat, supervisor decisions, party transitions, etc.).
+      if (this.activeTab !== "ai") void this.refreshAiStatus();
+    }, 5000);
   }
 
   private stopBgPoll() {
@@ -431,6 +518,7 @@ export class AgentChat {
         this.aiStatus = await res.json();
         this.aiError = null;
         this.renderAiPanel();
+        this.renderFocusChips();
         return;
       } catch (err) {
         lastErr = err instanceof Error ? err.message : String(err);
@@ -1327,6 +1415,45 @@ export class AgentChat {
         overflow-y: auto;
         border-top: 1px solid rgba(239, 201, 127, 0.12);
         background: rgba(12, 10, 8, 0.95);
+      }
+
+      .agent-chat-focus-chips {
+        display: none;
+        gap: 4px;
+        padding: 6px 8px;
+        overflow-x: auto;
+        border-top: 1px solid rgba(239, 201, 127, 0.12);
+        background: rgba(0, 0, 0, 0.3);
+        scrollbar-width: none;
+      }
+      .agent-chat-focus-chips::-webkit-scrollbar { display: none; }
+
+      #agent-chat.expanded .agent-chat-focus-chips {
+        display: flex;
+      }
+
+      .agent-chat-focus-chip {
+        flex-shrink: 0;
+        padding: 3px 8px;
+        border: 1px solid rgba(239, 201, 127, 0.18);
+        background: rgba(8, 15, 10, 0.9);
+        color: color-mix(in srgb, var(--chip-color) 80%, transparent);
+        font: 11px/1.2 'Courier New', monospace;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: border-color 0.12s, background 0.12s, color 0.12s;
+      }
+
+      .agent-chat-focus-chip:hover {
+        border-color: var(--chip-color);
+        color: var(--chip-color);
+      }
+
+      .agent-chat-focus-chip.active {
+        border-color: var(--chip-color);
+        background: color-mix(in srgb, var(--chip-color) 18%, transparent);
+        color: var(--chip-color);
+        font-weight: bold;
       }
 
       #agent-chat.expanded .agent-chat-autocomplete:not([hidden]) {

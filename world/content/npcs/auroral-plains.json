@@ -73,6 +73,13 @@
       "hp": 999
     },
     {
+      "type": "quest-giver",
+      "name": "Plains Herbalist Zara",
+      "x": 340,
+      "y": 180,
+      "hp": 999
+    },
+    {
       "type": "merchant",
       "name": "Auroral Trader Fenwick",
       "x": 220,

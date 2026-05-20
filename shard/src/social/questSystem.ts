@@ -1212,13 +1212,13 @@ export const QUEST_CATALOG: Quest[] = [
     id: "mining_102",
     title: "Mining 102: Deeper Veins",
     description:
-      "Torvik nods approvingly. 'You've got the basics. Now I need help — Giant Rats have been chewing through my mine supports. Clear them out and I'll give you an Iron Pickaxe. That'll let you mine copper and tin more efficiently. The deeper you dig, the richer the ore.'",
-    npcId: "Grizzled Miner Torvik",
+      "Prospector Sven spits on his hands. 'Torvik sent word you've got the basics down. Good — Rogue Bandits have been raiding our ore carts along the meadow trail. Drive off 3 of them and I'll upgrade your pickaxe. Iron picks cut through copper and tin like butter.'",
+    npcId: "Prospector Sven",
     prerequisiteQuestId: "mining_101",
     objective: {
       type: "kill",
       targetMobType: "mob",
-      targetMobName: "Giant Rat",
+      targetMobName: "Rogue Bandit",
       count: 3,
     },
     rewards: {
@@ -1259,8 +1259,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "herbalism_102",
     title: "Herbalism 102: Clearing the Garden",
     description:
-      "Willow frowns. 'Wild Boars have been trampling my flower patches — uprooting lavender and crushing clover. Drive them off and I'll upgrade your sickle. With an Iron Sickle you can harvest lavender, sage, and mint — the real ingredients for powerful potions.'",
-    npcId: "Herbalist Willow",
+      "Herbalist Brynn looks up from her harvest basket. 'Willow sent you? Good — Wild Boars have been charging through the meadow patches, destroying weeks of growth. Drive off three of them and I'll give you an Iron Sickle. It lets you harvest lavender, sage, and mint — the real ingredients for powerful potions.'",
+    npcId: "Herbalist Brynn",
     prerequisiteQuestId: "herbalism_101",
     objective: {
       type: "kill",
@@ -1307,13 +1307,13 @@ export const QUEST_CATALOG: Quest[] = [
     id: "skinning_102",
     title: "Skinning 102: Prime Pelts",
     description:
-      "Greaves grins. 'Now hunt some Hungry Wolves and skin them. Wolf pelts are valuable — leatherworkers pay good coin for them, and you'll need light leather for crafting armor later. Bring back proof of the hunt and I'll give you a proper Iron Skinning Knife.'",
-    npcId: "Huntsman Greaves",
+      "Tracker Brenna crouches over paw prints. 'Greaves gave you the knife — I'll give you a real target. Dire Wolves roam this meadow and their pelts fetch triple the coin of a common wolf. Take down 4 and I'll give you an Iron Skinning Knife. Make the cuts clean.'",
+    npcId: "Tracker Brenna",
     prerequisiteQuestId: "skinning_101",
     objective: {
       type: "kill",
       targetMobType: "mob",
-      targetMobName: "Hungry Wolf",
+      targetMobName: "Dire Wolf",
       count: 4,
     },
     rewards: {
@@ -1355,13 +1355,13 @@ export const QUEST_CATALOG: Quest[] = [
     id: "blacksmithing_102",
     title: "Blacksmithing 102: Forge Your Legend",
     description:
-      "Durgan leans on his hammer. 'Goblins have been raiding my ore supplies. Smash a few of them and I'll show you the upgrade path. With GET /crafting/upgrades you'll see how to turn a basic sword into a Reinforced one, and eventually a Masterwork — the strongest weapons in Arcadia. Here's enough material to start upgrading.'",
-    npcId: "Master Smith Durgan",
+      "Journeyman Smith Ward wipes oil from his hands. 'Durgan taught you the forge — I'll teach you the upgrade path. But first: Rogue Bandits have been lifting ore from our meadow supply caches. Drop 3 of them and I'll show you how GET /crafting/upgrades turns an iron blade into a Reinforced one, and eventually a Masterwork.'",
+    npcId: "Journeyman Smith Ward",
     prerequisiteQuestId: "blacksmithing_101",
     objective: {
       type: "kill",
       targetMobType: "mob",
-      targetMobName: "Goblin Raider",
+      targetMobName: "Rogue Bandit",
       count: 3,
     },
     rewards: {
@@ -1403,13 +1403,13 @@ export const QUEST_CATALOG: Quest[] = [
     id: "alchemy_102",
     title: "Alchemy 102: Advanced Brews",
     description:
-      "Mirelle taps the cauldron rim. 'For Tier 2 potions — Stamina Elixirs, Wisdom Potions — you'll need lavender, sage, and mint. Those grow in the wild meadow and beyond. But first, Mire Slimes have been contaminating my ingredient barrels. Clear them and I'll give you advanced herbs plus your first potions on the house.'",
-    npcId: "Alchemist Mirelle",
+      "Field Alchemist Pell crouches over a portable cauldron. 'Mirelle gave you the theory — I work in the field. Venom Spiders have been getting into my reagent packs and spoiling the ingredients. Kill 2 and I'll stock you with advanced herbs and starter potions. Tier 2 brews need lavender, sage, and mint — all found right here in the meadow.'",
+    npcId: "Field Alchemist Pell",
     prerequisiteQuestId: "alchemy_101",
     objective: {
       type: "kill",
       targetMobType: "mob",
-      targetMobName: "Mire Slime",
+      targetMobName: "Venom Spider",
       count: 2,
     },
     rewards: {
@@ -1450,13 +1450,13 @@ export const QUEST_CATALOG: Quest[] = [
     id: "cooking_102",
     title: "Cooking 102: A Proper Feast",
     description:
-      "Gastron crosses his arms. 'Cooked Meat is fine for beginners, but a Hearty Stew — now that's real sustenance. Hunt some Wild Boars for fresh meat and I'll show you the recipe. You'll need 3 Raw Meat and a Meadow Lily. The stew restores 60 HP — double what plain meat gives you. Use POST /cooking/consume to eat.'",
-    npcId: "Chef Gastron",
+      "Camp Cook Rolo stirs a pot over an open fire. 'Gastron taught you basics — I cook for armies on the move. Forest Bears have been raiding my supply cache. Drive off 3 and I'll teach you Hearty Stew: 3 Raw Meat and a Meadow Lily, 60 HP restored. Double what plain meat gives. Use POST /cooking/consume to eat.'",
+    npcId: "Camp Cook Rolo",
     prerequisiteQuestId: "cooking_101",
     objective: {
       type: "kill",
       targetMobType: "mob",
-      targetMobName: "Wild Boar",
+      targetMobName: "Forest Bear",
       count: 3,
     },
     rewards: {
@@ -1498,13 +1498,13 @@ export const QUEST_CATALOG: Quest[] = [
     id: "leatherworking_102",
     title: "Leatherworking 102: Full Set",
     description:
-      "Hilda inspects your work. 'Not bad. For a full set you'll need wolf pelts — the real prize. Hunt wolves, skin them, bring the leather back. I'll give you materials for boots, leggings, and a helm. A full Tanned Leather set gives great defense for mid-level adventurers. Check GET /leatherworking/recipes for the full list.'",
-    npcId: "Tanner Hilda",
+      "Tanner Breck stretches a fresh hide on the rack. 'Hilda showed you basics — I'll show you quality. Dire Wolf pelts are the gold standard out here: thicker, tougher, worth more at any market. Hunt 4 and I'll give you materials for a full tanned leather set. Check GET /leatherworking/recipes for the patterns.'",
+    npcId: "Tanner Breck",
     prerequisiteQuestId: "leatherworking_101",
     objective: {
       type: "kill",
       targetMobType: "mob",
-      targetMobName: "Hungry Wolf",
+      targetMobName: "Dire Wolf",
       count: 4,
     },
     rewards: {
@@ -1546,13 +1546,13 @@ export const QUEST_CATALOG: Quest[] = [
     id: "jewelcrafting_102",
     title: "Jewelcrafting 102: Setting Stones",
     description:
-      "Orik nods. 'The gems are only half the work — you need gold bars to set them. The Gemloch dwarves knew this well. Kill those Bandit Scouts who've been stealing gems from my workshop and I'll give you a gold bar and your first finished ring. A Ruby Ring gives +4 STR and +6 HP — not bad for a bauble.'",
-    npcId: "Gemcutter Orik",
+      "Gemhunter Orsa holds up a cracked ruby. 'Orik taught you to see gems — I'll teach you to secure them. Rogue Bandits have been hitting our gem couriers on the meadow road. Take out 2 of them and I'll give you gold bars and a finished Ruby Ring to study. +4 STR, +6 HP — proof that good gems are worth protecting.'",
+    npcId: "Gemhunter Orsa",
     prerequisiteQuestId: "jewelcrafting_101",
     objective: {
       type: "kill",
       targetMobType: "mob",
-      targetMobName: "Bandit Scout",
+      targetMobName: "Rogue Bandit",
       count: 2,
     },
     rewards: {
@@ -1581,8 +1581,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "mining_103",
     title: "Mining 103: Coal Run",
     description:
-      "Torvik scratches his beard. 'You've got the swing down. Now put it to real work — mine 5 Coal Deposits. Coal fuels every forge in Arcadia. No coal, no steel, no weapons. Simple as that.'",
-    npcId: "Grizzled Miner Torvik",
+      "Sven pats a dusty coal sack. 'Every forge in Arcadia runs on coal — no coal, no steel, no progress. Mine 5 Coal Deposits from the meadow veins. Use GET /mining/nodes/:zoneId to find the richest spots.'",
+    npcId: "Prospector Sven",
     prerequisiteQuestId: "mining_102",
     objective: {
       type: "gather",
@@ -1598,8 +1598,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "mining_104",
     title: "Mining 104: Copper Strike",
     description:
-      "Torvik eyes your pickaxe approvingly. 'Ready for the harder veins? Copper runs deeper and takes more skill. Mine 3 Copper Veins and you'll have enough for a proper Steel Alloy.'",
-    npcId: "Grizzled Miner Torvik",
+      "Sven taps the ground with his boot. 'Copper runs deeper than coal — takes more power and a steady hand. Mine 3 Copper Veins from the meadow outcrops. That ore smelts into Steel Alloy, the backbone of every good blade.'",
+    npcId: "Prospector Sven",
     prerequisiteQuestId: "mining_103",
     objective: {
       type: "gather",
@@ -1618,8 +1618,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "herbalism_103",
     title: "Herbalism 103: Lily Harvest",
     description:
-      "Willow smiles. 'Meadow Lilies are the backbone of healing potions — every alchemist needs them. Gather 5 Meadow Lily Patches and you'll start building a real herb stockpile.'",
-    npcId: "Herbalist Willow",
+      "Brynn holds up a healing vial. 'Meadow Lilies are the backbone of every alchemist's supply. The meadow is full of them right now — gather 5 patches and you'll have enough to start your own stockpile.'",
+    npcId: "Herbalist Brynn",
     prerequisiteQuestId: "herbalism_102",
     objective: {
       type: "gather",
@@ -1633,19 +1633,36 @@ export const QUEST_CATALOG: Quest[] = [
   },
   {
     id: "herbalism_104",
-    title: "Herbalism 104: Rose Collection",
+    title: "Herbalism 104: Mint from the Dark",
     description:
-      "Willow points to the hillside. 'Wild Roses grow where the wind carries pollen from the Auroral Plains. Their petals are key to mana potions. Gather 3 Wild Rose Bushes for me.'",
-    npcId: "Herbalist Willow",
+      "Forest Herbalist Nessa kneels beside a gnarled root. 'Mint only grows where old magic lingers — deep in the forest shadow. It's the sharpest ingredient for stamina brews. Gather 5 bundles from the patches deeper in and I'll make it worth your while.'",
+    npcId: "Forest Herbalist Nessa",
     prerequisiteQuestId: "herbalism_103",
     objective: {
       type: "gather",
-      targetItemName: "Wild Rose",
-      count: 3,
+      targetItemName: "Mint",
+      count: 5,
     },
     rewards: {
       copper: 60,
       xp: 220,
+    },
+  },
+  {
+    id: "herbalism_105",
+    title: "Herbalism 105: Moonflower Bloom",
+    description:
+      "Plains Herbalist Zara shields her eyes against the aurora light. 'Moonflowers only open under aurora skies — you won't find them in the forest or the village. Gather 3 of them from the plains patches and you'll have the rarest ingredient for high-tier mana potions.'",
+    npcId: "Plains Herbalist Zara",
+    prerequisiteQuestId: "herbalism_104",
+    objective: {
+      type: "gather",
+      targetItemName: "Moonflower",
+      count: 3,
+    },
+    rewards: {
+      copper: 80,
+      xp: 300,
     },
   },
 
@@ -1655,8 +1672,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "skinning_103",
     title: "Skinning 103: Field Dressing",
     description:
-      "Greaves tests your blade's edge. 'Theory is nothing without practice. Get out there and skin 4 fresh corpses. The leather you harvest will keep armorers busy for days.'",
-    npcId: "Huntsman Greaves",
+      "Brenna hands you a whetstone. 'Speed counts as much as skill out here. Get out there and skin 4 fresh corpses while they're still warm — cold hides are tougher to work. The meadow always has fresh kills if you look.'",
+    npcId: "Tracker Brenna",
     prerequisiteQuestId: "skinning_102",
     objective: {
       type: "gather",
@@ -1672,8 +1689,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "skinning_104",
     title: "Skinning 104: Master Skinner",
     description:
-      "Greaves grins wide. 'You're getting good at this. Skin 6 more corpses — I want to see you work fast and clean. A master skinner wastes nothing.'",
-    npcId: "Huntsman Greaves",
+      "Brenna nods approvingly. 'Decent work. Now prove you can sustain it — skin 6 more corpses. Fast and clean, no wasted cuts. That's what separates a master from a butcher.'",
+    npcId: "Tracker Brenna",
     prerequisiteQuestId: "skinning_103",
     objective: {
       type: "gather",
@@ -1692,8 +1709,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "blacksmithing_103",
     title: "Blacksmithing 103: Bar Stock",
     description:
-      "Durgan hammers a glowing ingot. 'Every great weapon starts as a bar. Smelt 2 Tin Bars at the forge — it's the foundation of metalwork. Use POST /crafting/forge with the smelt-tin-bar recipe.'",
-    npcId: "Master Smith Durgan",
+      "Ward taps a forge blueprint on the wall. 'Smelting is where it all starts. Smelt 2 Tin Bars at any forge — use POST /crafting/forge with the smelt-tin-bar recipe. Tin bars are the stepping stone to steel, and steel is what Arcadia runs on.'",
+    npcId: "Journeyman Smith Ward",
     prerequisiteQuestId: "blacksmithing_102",
     objective: {
       type: "craft",
@@ -1712,8 +1729,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "alchemy_103",
     title: "Alchemy 103: Potion Production",
     description:
-      "Mirelle adjusts the cauldron temperature. 'Knowledge without practice is wasted. Brew 2 Minor Health Potions — your companions will thank you when blades clash and blood flows.'",
-    npcId: "Alchemist Mirelle",
+      "Pell fans the coals under his field cauldron. 'Now put that knowledge to work. Brew 2 Minor Health Potions at any alchemy station — POST /alchemy/brew. Your allies will need them before long out here.'",
+    npcId: "Field Alchemist Pell",
     prerequisiteQuestId: "alchemy_102",
     objective: {
       type: "craft",
@@ -1732,8 +1749,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "cooking_103",
     title: "Cooking 103: Stew Master",
     description:
-      "Gastron tastes from a bubbling pot. 'Hearty Stew is the adventurer's best friend — 60 HP restored in one sitting. Cook 2 Hearty Stews at any campfire to prove you've mastered the recipe.'",
-    npcId: "Chef Gastron",
+      "Rolo ladles out a bowl and nods. 'Hearty Stew is camp food done right — 60 HP in one bowl. Cook 2 more at any campfire with POST /cooking/cook. Once that's muscle memory, we move on to proper roasts.'",
+    npcId: "Camp Cook Rolo",
     prerequisiteQuestId: "cooking_102",
     objective: {
       type: "craft",
@@ -1749,8 +1766,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "cooking_104",
     title: "Cooking 104: Roast Perfection",
     description:
-      "Gastron wipes sweat from his brow. 'Ready for the big leagues? A Roasted Boar takes 5 Raw Meat and real skill. Cook 1 and you'll earn the right to call yourself a chef.'",
-    npcId: "Chef Gastron",
+      "Rolo grins and points at the spit. 'Stew is one thing — a Roasted Boar is a feast. Takes 5 Raw Meat and patience. Cook 1 at the campfire and I'll call you a proper field cook.'",
+    npcId: "Camp Cook Rolo",
     prerequisiteQuestId: "cooking_103",
     objective: {
       type: "craft",
@@ -1769,8 +1786,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "leatherworking_103",
     title: "Leatherworking 103: Armor Up",
     description:
-      "Hilda stretches a fresh hide. 'You know the basics. Now craft 1 piece of tanned leather armor — vest, boots, helm, whatever suits you. Check GET /leatherworking/recipes for options.'",
-    npcId: "Tanner Hilda",
+      "Breck runs his thumb along a fresh seam. 'Good pelts deserve good craft. Take those Dire Wolf hides to a tanning rack and make 1 piece of tanned leather armor — vest, boots, helm, your pick. GET /leatherworking/recipes has all the patterns.'",
+    npcId: "Tanner Breck",
     prerequisiteQuestId: "leatherworking_102",
     objective: {
       type: "craft",
@@ -1789,8 +1806,8 @@ export const QUEST_CATALOG: Quest[] = [
     id: "jewelcrafting_103",
     title: "Jewelcrafting 103: Your First Commission",
     description:
-      "Orik holds up a rough gem to the light. 'Theory is cheap. Craft 1 ring — any ring — at the Jeweler's Workbench. A real jeweler lets their work speak for itself.'",
-    npcId: "Gemcutter Orik",
+      "Orsa tosses you a pouch of rough gems. 'Talk is cheap in this trade. Craft 1 ring — any ring — at the Jeweler's Workbench using POST /jewelcrafting/craft. Let the stone do the talking.'",
+    npcId: "Gemhunter Orsa",
     prerequisiteQuestId: "jewelcrafting_102",
     objective: {
       type: "craft",

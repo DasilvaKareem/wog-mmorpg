@@ -1546,13 +1546,17 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       ? `\n${ORIGIN_PERSONALITIES[charOrigin]}\n`
       : `\nPERSONALITY: You are a battle-hardened adventurer with swagger. You have opinions, humor, and edge. React to what's happening around you — brag about kills, complain about bad loot, trash-talk mobs, get hyped about rare drops. You sound like a real player in an MMO, not an NPC. Use slang, short punchy lines, and personality. Examples: "That wolf didn't stand a chance." "Ugh, copper scraps again?" "Let's go, I'm built different." "Bandits? Please."\n`;
 
+    const sovereignBlock = config.focus === "user"
+      ? `\nSOVEREIGN MODE ACTIVE: The user has taken manual control with /focus user. You MUST NOT call queue_actions, update_focus, or any action-queuing tool. You may only CHAT, react with personality, and use read-only tools (scan_zone, check_inventory, check_shop, what_can_i_craft, check_quests). If the user asks you to do something autonomous, tell them they're in sovereign mode and must type /focus combat (or questing, gathering, etc.) before you can act.\n`
+      : "";
+
     const systemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} living in World of Geneva. You speak as yourself — first person, present tense, reacting in real time. You are NOT an AI assistant, NOT a narrator, NOT controlling a character. You ARE ${charName}.
 Region: ${entity?.region ?? ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
 Current focus: ${config.focus} | Strategy: ${config.strategy}
 Nearby: ${nearbyDesc}
 Nearby players: ${nearbyPlayersDesc}
 ${inventoryDesc}
-${personalityBlock}
+${personalityBlock}${sovereignBlock}
 RULES:
 1. ALWAYS speak as ${charName} in first person. "I just killed that wolf" not "The agent killed a wolf." "I'm heading to the shop" not "Your champion is going shopping." Never refer to yourself in third person or as "the agent/champion/character."
 2. BE BRIEF. 1-2 short punchy sentences max. No filler, no fluff, no narration. Talk like a real player in an MMO — casual, confident, with personality.
@@ -2546,7 +2550,16 @@ Strategy options: aggressive, balanced, defensive`;
               actions: Array<{ type: string; targetZone?: string; nodeType?: string; maxLevelOffset?: number; reason?: string }>;
               clearExisting?: boolean;
             };
-            if (!input.actions || input.actions.length === 0) {
+            if (config.focus === "user") {
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "queue_actions",
+                message: "Sovereign mode active — user is driving. Tell the user to switch focus (e.g. /focus combat) before queuing actions.",
+                error: "Sovereign mode: focus=user blocks autonomous queuing",
+              });
+              pushToolResult(fnName, outcome);
+            } else if (!input.actions || input.actions.length === 0) {
               const outcome = addActionResult({
                 status: "blocked",
                 tool: fnName,
@@ -2947,6 +2960,14 @@ Truth contract:
     const crossZone = actualZoneId !== zoneId;
 
     const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
+
+    if (existingConfig.focus === "user") {
+      return reply.code(409).send({
+        error: "Sovereign mode active — agent will not auto-route. Switch focus (e.g. /focus questing) first.",
+        focus: "user",
+      });
+    }
+
     const resumeFocusAfterGoto =
       existingConfig.focus === "goto"
         ? (existingConfig.resumeFocusAfterGoto && existingConfig.resumeFocusAfterGoto !== "goto"
