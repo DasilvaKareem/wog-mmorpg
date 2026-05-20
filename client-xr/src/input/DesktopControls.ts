@@ -63,6 +63,9 @@ export class DesktopControls {
     domElement.addEventListener("gestureend", this.onGesture, { passive: false });
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
+    // Clear held keys when an input/textarea gains focus so movement keys can't
+    // get stuck in the pressed state when the user clicks into a text field.
+    window.addEventListener("focusin", this.onFocusIn);
 
     this.updateCamera();
   }
@@ -287,6 +290,13 @@ export class DesktopControls {
     this.keys.delete(e.key.toLowerCase());
   };
 
+  private onFocusIn = (e: FocusEvent) => {
+    const target = e.target as HTMLElement;
+    if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") {
+      this.keys.clear();
+    }
+  };
+
   // ── Touch handlers (mobile orbit + pinch-zoom; tap passes through as click) ──
 
   private onTouchStart = (e: TouchEvent) => {
@@ -381,5 +391,6 @@ export class DesktopControls {
     this.domElement.removeEventListener("gestureend", this.onGesture);
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("focusin", this.onFocusIn);
   }
 }
