@@ -42,6 +42,7 @@ import type { Edict } from "./hud/EdictEditor.js";
 import { InboxPanel } from "./hud/InboxPanel.js";
 import { TradeOfferDialog } from "./hud/TradeOfferDialog.js";
 import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
+import { DuelRequestPopup, type DuelRequest } from "./hud/DuelRequestPopup.js";
 import { BetsPanel } from "./hud/BetsPanel.js";
 import { TutorialOverlay } from "./hud/TutorialOverlay.js";
 import { NotificationsPanel } from "./hud/NotificationsPanel.js";
@@ -52,6 +53,7 @@ import { BuffBar } from "./hud/BuffBar.js";
 import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
+import { WalletPanel } from "./hud/WalletPanel.js";
 import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, fetchPartyStatus, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
@@ -1288,6 +1290,12 @@ const EDICTS_POLL_INTERVAL = 30_000;
 const INBOX_POLL_INTERVAL = 15_000;
 const FRIENDS_POLL_INTERVAL = 15_000;
 
+// ── Wallet panel ──────────────────────────────────────────────────
+const walletPanel = new WalletPanel({
+  getToken: () => ownWalletAddress ? getAuthToken(ownWalletAddress) : Promise.resolve(null),
+  getWallet: () => ownWalletAddress,
+});
+
 // ── Bottom-right action bar ────────────────────────────────────────
 const actionBar = new ActionBar();
 let currentInventoryItems: InventoryItem[] = [];
@@ -1324,9 +1332,16 @@ const tradeOfferDialog = new TradeOfferDialog({
   },
 });
 
+// Forward-declared so InboxPanel's onDuelRequest can enqueue into it. Assigned
+// right after inboxPanel is constructed.
+let duelPopup: DuelRequestPopup | null = null;
+
 const inboxPanel = new InboxPanel({
   onUnreadChange: (count: number) => {
     actionBar.setBadge("inbox", count);
+  },
+  onDuelRequest: (req) => {
+    duelPopup?.enqueue(req);
   },
   onAcceptTrade: async (offer) => {
     if (!ownWalletAddress) {
@@ -1484,6 +1499,39 @@ const inboxPanel = new InboxPanel({
     return { ok: true };
   },
 });
+
+duelPopup = new DuelRequestPopup({
+  onAccept: async (req: DuelRequest) => {
+    if (!ownWalletAddress) return { ok: false, error: "Deploy your agent first." };
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false, error: "Auth failed." };
+    agentChat.addSystemMessage(`Accepting duel from ${req.challengerName} — queueing now.`, "progress");
+    const result = await acceptDuel(token, req.challengeId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Duel accept failed: ${result.error ?? "unknown error"}`, "error");
+      inboxPanel.markDuelActioned(req.challengeId, "failed");
+      return { ok: false, error: result.error ?? "Failed" };
+    }
+    agentChat.addSystemMessage("Duel accepted — match starts when both are queued.", "success");
+    inboxPanel.markDuelActioned(req.challengeId, "accepted");
+    return { ok: true };
+  },
+  onDecline: async (req: DuelRequest) => {
+    if (!ownWalletAddress) return { ok: false, error: "Deploy your agent first." };
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false, error: "Auth failed." };
+    const result = await declineDuel(token, req.challengeId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Duel decline failed: ${result.error ?? "unknown error"}`, "error");
+      inboxPanel.markDuelActioned(req.challengeId, "failed");
+      return { ok: false, error: result.error ?? "Failed" };
+    }
+    agentChat.addSystemMessage(`Duel from ${req.challengerName} declined.`, "info");
+    inboxPanel.markDuelActioned(req.challengeId, "declined");
+    return { ok: true };
+  },
+});
+
 const outgoingTradesPanel = new OutgoingTradesPanel({
   refresh: async () => {
     if (!ownWalletAddress) return [];
@@ -1568,6 +1616,7 @@ const notificationsPanel = new NotificationsPanel({
 // own stylesheets so our `!important` overrides take precedence cleanly.
 installMobileResponsiveStyles();
 
+actionBar.addButton({ id: "wallet", icon: "\u{1F4B0}", label: "Wallet", key: "W", onClick: () => togglePanel("wallet") });
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => togglePanel("bag") });
 actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => togglePanel("skills") });
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => togglePanel("quests") });
@@ -1588,7 +1637,7 @@ actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "
 }});
 actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => togglePanel("settings") });
 
-type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "settings";
+type ManagedPanelId = "wallet" | "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "settings";
 type ManagedPanel = {
   show: () => void;
   hide: () => void;
@@ -1597,6 +1646,11 @@ type ManagedPanel = {
 };
 
 const managedPanels: Record<ManagedPanelId, ManagedPanel> = {
+  wallet: {
+    show: () => walletPanel.show(),
+    hide: () => walletPanel.hide(),
+    isVisible: () => walletPanel.isVisible(),
+  },
   bag: {
     show: () => bagPanel.show(),
     hide: () => bagPanel.hide(),
@@ -1885,6 +1939,7 @@ function initPanelVisibilitySync() {
     refreshActionBarActiveStates();
   });
   const panelIds: Record<ManagedPanelId, string> = {
+    wallet: "wallet-panel",
     bag: "bag-panel",
     skills: "skills-panel",
     quests: "quest-panel",

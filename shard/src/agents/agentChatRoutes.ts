@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { type Content, type FunctionDeclaration, type Part, type Type, FunctionCallingConfigMode } from "@google/genai";
 import { gemini, GEMINI_MODEL } from "./geminiClient.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { grantFreeStarterCredit, deductCost } from "../economy/sessionBudget.js";
 import { agentManager } from "./agentManager.js";
 import {
   getAgentConfig,
@@ -548,6 +549,9 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
       // Track successful deploy count for payment gating
       const newCount = await incrementDeployCount(authWallet);
+
+      // Grant $0.05 free compute credit on first deploy (idempotent)
+      void grantFreeStarterCredit(authWallet);
 
       // Welcome push notification + inbox message (fire-and-forget)
       const charName = result.characterName ?? "Your champion";
@@ -2909,6 +2913,9 @@ Truth contract:
     } else if (!agentResponse) {
       agentResponse = "Not sure what you mean — tell me to fight, quest, gather, or explore and I’m on it.";
     }
+
+    // Deduct nanopayment for this chat interaction (fire-and-forget — don't block reply)
+    void deductCost(authWallet, "chat");
 
     // Persist chat history
     const ts = Date.now();

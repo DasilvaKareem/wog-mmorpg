@@ -1082,6 +1082,50 @@ export async function learnProfession(
   return postJsonWithFallback("/professions/learn", token, body);
 }
 
+// ── Nanopayments ─────────────────────────────────────────────────
+
+export interface NanopayStatus {
+  budget: number;
+  spent: number;
+  remaining: number;
+  freeGranted: boolean;
+  needsTopUp: boolean;
+  lowBalance: boolean;
+  hasAuth: boolean;
+}
+
+export async function fetchNanopayStatus(wallet: string, token: string): Promise<NanopayStatus | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/nanopay/status/${encodeURIComponent(wallet)}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as NanopayStatus;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+export async function submitTopUp(
+  token: string,
+  budgetUsdc: number,
+): Promise<{ ok: boolean; balance?: NanopayStatus; error?: string }> {
+  const result = await postJsonWithFallback<{ balance: NanopayStatus }>("/nanopay/topup", token, { budgetUsdc });
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, balance: result.data?.balance };
+}
+
+export async function fetchNanopayGatewayInfo(): Promise<{
+  gatewayWalletContract: string;
+  sellerAddress: string;
+  defaultSessionBudgetUsdc: number;
+  freeStarterUsdc: number;
+  pricing: Record<string, number>;
+} | null> {
+  return fetchJsonWithFallback("/nanopay/gateway-info");
+}
+
 // ── Enchanting ────────────────────────────────────────────────────
 
 export async function fetchEnchantingCatalog(): Promise<EnchantmentEntry[]> {

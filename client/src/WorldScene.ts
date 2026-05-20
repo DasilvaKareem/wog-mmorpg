@@ -280,6 +280,10 @@ export class WorldScene extends Phaser.Scene {
 
     // Click-to-move: detect clicks on empty ground
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      // Phaser registers pointerup on the window, so React overlay clicks reach
+      // this handler too. Bail if the press originated outside the game canvas.
+      if (pointer.downElement && pointer.downElement !== this.sys.game.canvas) return;
+
       // Skip if this was a drag (camera pan)
       if (this.isDragging) return;
       // Skip if an entity sprite was clicked (its handler already fired)
