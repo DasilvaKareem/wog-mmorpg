@@ -93,7 +93,6 @@ import {
 
 const TICK_MS = 1200;
 const GOTO_TICK_MS = 350;
-const PARTY_TICK_MS = 400;
 /** Safety-net: call supervisor if no trigger has fired in about 30s. */
 const MAX_STALE_TICKS = Math.ceil(30_000 / TICK_MS);
 const MOVE_REISSUE_MS = 4_000;
@@ -2945,7 +2944,7 @@ export class AgentRunner {
                   if (focus === "party") this.currentScript = null;
                   const moving = await this.moveToEntity(entity, leaderEntity, PARTY_LEADER_STOP_DISTANCE);
                   if (moving) {
-                    await sleep(focus === "party" ? PARTY_TICK_MS : TICK_MS);
+                    await sleep(TICK_MS);
                     continue;
                   }
                 }
@@ -3076,11 +3075,7 @@ export class AgentRunner {
         this.persistRuntimeSnapshotEventually("loop");
       }
 
-      const nextSleep =
-        this.currentScript?.type === "goto" ? GOTO_TICK_MS
-        : this.lastFocus === "party" ? PARTY_TICK_MS
-        : TICK_MS;
-      await sleep(nextSleep);
+      await sleep(this.currentScript?.type === "goto" ? GOTO_TICK_MS : TICK_MS);
     }
 
     console.log(`[agent:${this.walletTag}] Loop exited`);
