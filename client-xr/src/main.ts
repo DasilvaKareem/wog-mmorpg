@@ -39,10 +39,10 @@ import { SkillsPanel } from "./hud/SkillsPanel.js";
 import { RecipesPanel } from "./hud/RecipesPanel.js";
 import type { LearnedTechnique } from "./hud/LearnedTechniquesList.js";
 import type { Edict } from "./hud/EdictEditor.js";
-import { InboxPanel } from "./hud/InboxPanel.js";
+import { InboxPanel, type TradeOfferPayload } from "./hud/InboxPanel.js";
 import { TradeOfferDialog } from "./hud/TradeOfferDialog.js";
 import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
-import { DuelRequestPopup, type DuelRequest } from "./hud/DuelRequestPopup.js";
+import { RequestPopup } from "./hud/RequestPopup.js";
 import { BetsPanel } from "./hud/BetsPanel.js";
 import { TutorialOverlay } from "./hud/TutorialOverlay.js";
 import { NotificationsPanel } from "./hud/NotificationsPanel.js";
@@ -684,6 +684,7 @@ let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
 let ownCustodialWallet: string | null = null;
 let ownEntityId: string | null = null;
+let lastKnownGoldCopper = 0;
 let ownCharacterInfo: { level: number; characterTokenId: string | null; agentId: string | null } | null = null;
 let latestActivePlayers: ActivePlayer[] = [];
 let autoLockEnabled = isDisplayMode;
@@ -1294,6 +1295,16 @@ const FRIENDS_POLL_INTERVAL = 15_000;
 const walletPanel = new WalletPanel({
   getToken: () => ownWalletAddress ? getAuthToken(ownWalletAddress) : Promise.resolve(null),
   getWallet: () => ownWalletAddress,
+  getStats: () => {
+    const ent = ownEntityId ? entities.getEntity(ownEntityId) : null;
+    if (!ent) return null;
+    return {
+      goldCopper: lastKnownGoldCopper,
+      xp: (ent as any).xp ?? 0,
+      level: (ent as any).level ?? 1,
+      maxXp: (ent as any).maxXp ?? undefined,
+    };
+  },
 });
 
 // ── Bottom-right action bar ────────────────────────────────────────
@@ -1332,72 +1343,204 @@ const tradeOfferDialog = new TradeOfferDialog({
   },
 });
 
-// Forward-declared so InboxPanel's onDuelRequest can enqueue into it. Assigned
-// right after inboxPanel is constructed.
-let duelPopup: DuelRequestPopup | null = null;
+// === Shared accept/decline handlers (used by both inbox row and popup) ===
+
+async function performAcceptDuel(challengeId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) {
+    agentChat.addSystemMessage("Accept duel: deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    agentChat.addSystemMessage("Accept duel: auth failed.", "error");
+    return { ok: false, error: "Auth failed." };
+  }
+  agentChat.addSystemMessage("Accepting duel — queueing now.", "progress");
+  const result = await acceptDuel(token, challengeId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Duel accept failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Duel accepted — match starts when both are queued.", "success");
+  return { ok: true };
+}
+
+async function performDeclineDuel(challengeId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) return { ok: false, error: "Deploy your agent first." };
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await declineDuel(token, challengeId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Duel decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Duel declined.", "info");
+  return { ok: true };
+}
+
+async function performAcceptPartyInvite(inviteId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) {
+    agentChat.addSystemMessage("Deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await acceptPartyInvite(token, ownCustodialWallet, inviteId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Party join failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Joined the party!", "success");
+  return { ok: true };
+}
+
+async function performDeclinePartyInvite(inviteId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) return { ok: false, error: "Deploy your agent first." };
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await declinePartyInvite(token, ownCustodialWallet, inviteId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Party invite declined.", "info");
+  return { ok: true };
+}
+
+async function performAcceptTrade(offer: TradeOfferPayload): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) {
+    agentChat.addSystemMessage("Accept trade: deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    agentChat.addSystemMessage("Accept trade: auth failed — sign in again.", "error");
+    return { ok: false, error: "Auth failed." };
+  }
+  const buyerAddress = ownCustodialWallet ?? ownWalletAddress;
+  const itemDisplay = offer.itemName ?? `token #${offer.tokenId}`;
+  agentChat.addSystemMessage(
+    `Accepting offer from ${offer.sellerName} for ${itemDisplay} (${offer.askPrice}g) — BITE CTX can take ~30s.`,
+    "progress",
+  );
+  const result = await acceptTradeOffer(token, {
+    tradeId: offer.tradeId,
+    buyerAddress,
+    bidPrice: offer.askPrice,
+  });
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Trade failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  if (result.matched) {
+    agentChat.addSystemMessage(`Trade complete! Received ${itemDisplay}.`, "success");
+  } else {
+    agentChat.addSystemMessage(
+      `Trade submitted but did not match: ${result.reason ?? "see logs"}`,
+      "error",
+    );
+  }
+  lastInventoryPollTime = 0;
+  void pollInventory();
+  return { ok: true };
+}
+
+async function performDeclineTrade(offer: TradeOfferPayload): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) {
+    agentChat.addSystemMessage("Decline trade: deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    agentChat.addSystemMessage("Decline trade: auth failed.", "error");
+    return { ok: false, error: "Auth failed." };
+  }
+  const result = await rejectTradeOffer(token, offer.tradeId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage(`Offer from ${offer.sellerName} declined.`, "info");
+  return { ok: true };
+}
+
+// Forward-declared so InboxPanel onXxxArrived callbacks can enqueue into it.
+// Assigned right after inboxPanel is constructed.
+let requestPopup: RequestPopup | null = null;
 
 const inboxPanel = new InboxPanel({
   onUnreadChange: (count: number) => {
     actionBar.setBadge("inbox", count);
   },
   onDuelRequest: (req) => {
-    duelPopup?.enqueue(req);
-  },
-  onAcceptTrade: async (offer) => {
-    if (!ownWalletAddress) {
-      agentChat.addSystemMessage("Accept trade: deploy your agent first.", "error");
-      return { ok: false };
-    }
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) {
-      agentChat.addSystemMessage("Accept trade: auth failed — sign in again.", "error");
-      return { ok: false };
-    }
-    const buyerAddress = ownCustodialWallet ?? ownWalletAddress;
-    const itemDisplay = offer.itemName ?? `token #${offer.tokenId}`;
-    agentChat.addSystemMessage(
-      `Accepting offer from ${offer.sellerName} for ${itemDisplay} (${offer.askPrice}g) — BITE CTX can take ~30s.`,
-      "progress",
-    );
-    const result = await acceptTradeOffer(token, {
-      tradeId: offer.tradeId,
-      buyerAddress,
-      bidPrice: offer.askPrice,
+    requestPopup?.enqueue({
+      id: req.challengeId,
+      kind: "duel",
+      title: "DUEL CHALLENGE",
+      subtitle: `From ${req.challengerName}`,
+      rows: [{ label: "Format", value: req.format }],
+      expiresAtMs: req.expiresAtMs,
+      onAccept: async () => {
+        const r = await performAcceptDuel(req.challengeId);
+        inboxPanel.markDuelActioned(req.challengeId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclineDuel(req.challengeId);
+        inboxPanel.markDuelActioned(req.challengeId, r.ok ? "declined" : "failed");
+        return r;
+      },
     });
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Trade failed: ${result.error ?? "unknown error"}`, "error");
-      return { ok: false, error: result.error };
-    }
-    if (result.matched) {
-      agentChat.addSystemMessage(`Trade complete! Received ${itemDisplay}.`, "success");
-    } else {
-      agentChat.addSystemMessage(
-        `Trade submitted but did not match: ${result.reason ?? "see logs"}`,
-        "error",
-      );
-    }
-    lastInventoryPollTime = 0;
-    void pollInventory();
-    return { ok: true };
   },
-  onDeclineTrade: async (offer) => {
-    if (!ownWalletAddress) {
-      agentChat.addSystemMessage("Decline trade: deploy your agent first.", "error");
-      return { ok: false };
-    }
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) {
-      agentChat.addSystemMessage("Decline trade: auth failed.", "error");
-      return { ok: false };
-    }
-    const result = await rejectTradeOffer(token, offer.tradeId);
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
-      return { ok: false, error: result.error };
-    }
-    agentChat.addSystemMessage(`Offer from ${offer.sellerName} declined.`, "info");
-    return { ok: true };
+  onPartyInviteArrived: (req) => {
+    requestPopup?.enqueue({
+      id: req.inviteId,
+      kind: "party",
+      title: "PARTY INVITE",
+      subtitle: `From ${req.inviterName}`,
+      rows: [],
+      acceptLabel: "Join Party",
+      onAccept: async () => {
+        const r = await performAcceptPartyInvite(req.inviteId);
+        inboxPanel.markPartyInviteActioned(req.inviteId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclinePartyInvite(req.inviteId);
+        inboxPanel.markPartyInviteActioned(req.inviteId, r.ok ? "declined" : "failed");
+        return r;
+      },
+    });
   },
+  onTradeOfferArrived: (offer) => {
+    const itemDisplay = offer.itemName ?? `Token #${offer.tokenId}`;
+    const rows: Array<{ label: string; value: string }> = [
+      { label: "Item", value: itemDisplay },
+    ];
+    if (offer.quantity > 1) rows.push({ label: "Quantity", value: `\u00d7${offer.quantity}` });
+    rows.push({ label: "Price", value: `${offer.askPrice}g` });
+    requestPopup?.enqueue({
+      id: String(offer.tradeId),
+      kind: "trade",
+      title: "TRADE OFFER",
+      subtitle: `From ${offer.sellerName}`,
+      rows,
+      expiresAtMs: offer.expiresAtMs,
+      acceptLabel: "Buy",
+      onAccept: async () => {
+        const r = await performAcceptTrade(offer);
+        inboxPanel.markTradeActioned(offer.tradeId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclineTrade(offer);
+        inboxPanel.markTradeActioned(offer.tradeId, r.ok ? "declined" : "failed");
+        return r;
+      },
+    });
+  },
+  onAcceptTrade: performAcceptTrade,
+  onDeclineTrade: performDeclineTrade,
   onTradeResult: (data) => {
     // A trade-result message (accepted / declined / expired) just landed — the
     // seller's gold or inventory has likely changed. Force the next inventory
@@ -1440,96 +1583,18 @@ const inboxPanel = new InboxPanel({
     void npcDialog.openBattleViewer(battleId);
     void refreshCurrentBattle(battleId);
   },
-  onAcceptDuel: async (challengeId) => {
-    if (!ownWalletAddress) {
-      agentChat.addSystemMessage("Accept duel: deploy your agent first.", "error");
-      return { ok: false };
-    }
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) {
-      agentChat.addSystemMessage("Accept duel: auth failed.", "error");
-      return { ok: false };
-    }
-    agentChat.addSystemMessage("Accepting duel — queueing now.", "progress");
-    const result = await acceptDuel(token, challengeId);
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Duel accept failed: ${result.error ?? "unknown error"}`, "error");
-      return { ok: false, error: result.error };
-    }
-    agentChat.addSystemMessage("Duel accepted — match will start as soon as both are queued.", "success");
-    return { ok: true };
-  },
-  onDeclineDuel: async (challengeId) => {
-    if (!ownWalletAddress) return { ok: false };
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return { ok: false };
-    const result = await declineDuel(token, challengeId);
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Duel decline failed: ${result.error ?? "unknown error"}`, "error");
-      return { ok: false, error: result.error };
-    }
-    agentChat.addSystemMessage("Duel declined.", "info");
-    return { ok: true };
-  },
-  onAcceptPartyInvite: async (inviteId) => {
-    if (!ownWalletAddress || !ownCustodialWallet) {
-      agentChat.addSystemMessage("Deploy your agent first.", "error");
-      return { ok: false };
-    }
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return { ok: false };
-    const result = await acceptPartyInvite(token, ownCustodialWallet, inviteId);
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Party join failed: ${result.error ?? "unknown error"}`, "error");
-      return { ok: false, error: result.error };
-    }
-    agentChat.addSystemMessage("Joined the party!", "success");
-    return { ok: true };
-  },
-  onDeclinePartyInvite: async (inviteId) => {
-    if (!ownWalletAddress || !ownCustodialWallet) return { ok: false };
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return { ok: false };
-    const result = await declinePartyInvite(token, ownCustodialWallet, inviteId);
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
-      return { ok: false, error: result.error };
-    }
-    agentChat.addSystemMessage("Party invite declined.", "info");
-    return { ok: true };
-  },
+  onAcceptDuel: performAcceptDuel,
+  onDeclineDuel: performDeclineDuel,
+  onAcceptPartyInvite: performAcceptPartyInvite,
+  onDeclinePartyInvite: performDeclinePartyInvite,
 });
 
-duelPopup = new DuelRequestPopup({
-  onAccept: async (req: DuelRequest) => {
-    if (!ownWalletAddress) return { ok: false, error: "Deploy your agent first." };
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return { ok: false, error: "Auth failed." };
-    agentChat.addSystemMessage(`Accepting duel from ${req.challengerName} — queueing now.`, "progress");
-    const result = await acceptDuel(token, req.challengeId);
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Duel accept failed: ${result.error ?? "unknown error"}`, "error");
-      inboxPanel.markDuelActioned(req.challengeId, "failed");
-      return { ok: false, error: result.error ?? "Failed" };
-    }
-    agentChat.addSystemMessage("Duel accepted — match starts when both are queued.", "success");
-    inboxPanel.markDuelActioned(req.challengeId, "accepted");
-    return { ok: true };
-  },
-  onDecline: async (req: DuelRequest) => {
-    if (!ownWalletAddress) return { ok: false, error: "Deploy your agent first." };
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return { ok: false, error: "Auth failed." };
-    const result = await declineDuel(token, req.challengeId);
-    if (!result.ok) {
-      agentChat.addSystemMessage(`Duel decline failed: ${result.error ?? "unknown error"}`, "error");
-      inboxPanel.markDuelActioned(req.challengeId, "failed");
-      return { ok: false, error: result.error ?? "Failed" };
-    }
-    agentChat.addSystemMessage(`Duel from ${req.challengerName} declined.`, "info");
-    inboxPanel.markDuelActioned(req.challengeId, "declined");
-    return { ok: true };
-  },
+requestPopup = new RequestPopup();
+
+// Clear popup queue on wallet/identity change so requests from a previous
+// session don't linger after logout or character switch.
+playerSession.on((ev) => {
+  if (ev.type === "wallet-changed") requestPopup?.clear();
 });
 
 const outgoingTradesPanel = new OutgoingTradesPanel({
@@ -2352,6 +2417,7 @@ async function pollInventory() {
     bagPanel.updateInventory(inv.items);
   }
   if (balance) {
+    lastKnownGoldCopper = balance.copper;
     bagPanel.updateGold(balance.copper);
   }
 }
@@ -2742,6 +2808,8 @@ if (navigator.xr) {
             vrStartTime = Date.now();
             trackXRVRSessionStarted();
             vrButton.textContent = "Exit VR";
+            // DOM overlays don't render in immersive XR — defer popups until exit.
+            requestPopup?.setSuspended(true);
             const { XRControllers } = await import("./xr/XRControllers.js");
             xrControllers = new XRControllers(
               renderer, scene,
@@ -2765,6 +2833,8 @@ if (navigator.xr) {
             xrControllers = null;
             xrSession.cameraRig.position.set(0, 0, 0);
             xrSession.cameraRig.rotation.set(0, 0, 0);
+            // Resume popups — any requests that arrived during the VR session display now.
+            requestPopup?.setSuspended(false);
           },
         });
       });

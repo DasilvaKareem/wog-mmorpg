@@ -450,7 +450,7 @@ export class NpcDialog {
       case "arena-master":
         return [{ id: "arena", label: "Arena" }, { id: "dialog", label: "Talk" }];
       case "profession-trainer":
-        return [{ id: "professions", label: "Professions" }, { id: "dialog", label: "Talk" }];
+        return [{ id: "professions", label: "Professions" }, { id: "quests", label: "Quests" }, { id: "dialog", label: "Talk" }];
       case "enchanting-altar":
         return [{ id: "enchanting", label: "Enchanting" }, { id: "dialog", label: "Talk" }];
       default:

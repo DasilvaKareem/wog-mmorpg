@@ -1,8 +1,7 @@
-// Circle Gateway sell-side API client
-// Reference: https://developers.circle.com/gateway/nanopayments
-
-const CIRCLE_API_BASE = process.env.CIRCLE_API_BASE ?? "https://api.circle.com";
-const CIRCLE_API_KEY  = process.env.CIRCLE_API_KEY  ?? "";
+// Circle Programmable Wallets — sell-side API client
+const CIRCLE_API_BASE      = process.env.CIRCLE_API_BASE           ?? "https://api.circle.com";
+const CIRCLE_API_KEY       = process.env.CIRCLE_API_KEY            ?? "";
+const CIRCLE_SELLER_WALLET_ID = process.env.CIRCLE_SELLER_WALLET_ID ?? "";
 
 export const CIRCLE_SELLER_ADDRESS          = process.env.CIRCLE_SELLER_ADDRESS          ?? "";
 export const CIRCLE_GATEWAY_WALLET_CONTRACT = process.env.CIRCLE_GATEWAY_WALLET_CONTRACT ?? "";
@@ -69,15 +68,18 @@ export async function submitAuthorizationsForSettlement(
 }
 
 export async function getSellerBalance(): Promise<number> {
-  if (!CIRCLE_API_KEY) return 0;
+  if (!CIRCLE_API_KEY || !CIRCLE_SELLER_WALLET_ID) return 0;
   try {
-    const res = await fetch(`${CIRCLE_API_BASE}/v1/gateway/balance`, {
-      headers: { Authorization: `Bearer ${CIRCLE_API_KEY}` },
-    });
+    const res = await fetch(
+      `${CIRCLE_API_BASE}/v1/w3s/wallets/${CIRCLE_SELLER_WALLET_ID}/balances`,
+      { headers: { Authorization: `Bearer ${CIRCLE_API_KEY}` } },
+    );
     if (!res.ok) return 0;
     const data: any = await res.json();
-    const micro = parseInt(data.balance?.usdc ?? "0", 10);
-    return micro / 10 ** USDC_DECIMALS;
+    const usdcToken = (data.data?.tokenBalances ?? []).find(
+      (t: any) => t.token?.symbol === "USDC",
+    );
+    return parseFloat(usdcToken?.amount ?? "0");
   } catch {
     return 0;
   }

@@ -293,6 +293,8 @@ export const CLASS_COLORS: Record<string, number> = {
   ranger: 0x33aa44, rogue: 0x8833bb, warlock: 0x33bb66, monk: 0xe69628,
 };
 
+const RESOURCE_NODE_TYPES = new Set(["ore-node", "flower-node", "nectar-node", "crop-node"]);
+
 const ENTITY_STYLE: Record<string, { color: number; style: "humanoid" | "object" | "resource" | "mob" }> = {
   player: { color: 0x44ddff, style: "humanoid" },
   mob: { color: 0xcc4444, style: "mob" }, boss: { color: 0xaa33ff, style: "mob" },
@@ -1042,6 +1044,7 @@ export class EntityManager {
         this.refreshCombatFacing(existing, preferredIntentBySource.get(id), entities);
 
         this.updateHpBar(existing, ent);
+        if (RESOURCE_NODE_TYPES.has(ent.type)) this.updateResourceNodeDepletion(existing, ent);
       } else {
         const obj = this.createEntity(ent);
         this.refreshCombatFacing(obj, preferredIntentBySource.get(id), entities);
@@ -1373,6 +1376,24 @@ export class EntityManager {
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const mat of materials) {
         if (mat) fn(mat);
+      }
+    });
+  }
+
+  private updateResourceNodeDepletion(obj: EntityObject, ent: Entity) {
+    const depleted =
+      ent.depletedAtTick != null ||
+      ((ent.charges ?? 1) <= 0 && (ent.maxCharges ?? 0) > 0);
+    const originalColor = ENTITY_STYLE[ent.type]?.color ?? 0x999999;
+    this.forEachEntityMaterial(obj, (mat) => {
+      if (depleted) {
+        mat.opacity = 0.3;
+        mat.transparent = true;
+        if ("color" in mat) (mat as THREE.MeshToonMaterial).color.setHex(0x777777);
+      } else {
+        mat.opacity = 1.0;
+        mat.transparent = false;
+        if ("color" in mat) (mat as THREE.MeshToonMaterial).color.setHex(originalColor);
       }
     });
   }
@@ -2477,6 +2498,10 @@ export class EntityManager {
 
     if (ent.hp <= 0) {
       obj.group.visible = false;
+    }
+
+    if (RESOURCE_NODE_TYPES.has(ent.type)) {
+      this.updateResourceNodeDepletion(obj, ent);
     }
 
     return obj;

@@ -17,7 +17,7 @@ import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { getEdictCache } from "../combat/edictCache.js";
-import { evaluateEdicts } from "../combat/edictEvaluator.js";
+import { evaluateEdicts, type BestTechniquePicker } from "../combat/edictEvaluator.js";
 import { getDefaultGambits } from "../combat/defaultGambits.js";
 import { randomInt, randomUUID } from "crypto";
 import { getPlayerPartyId, getPartyMembers, areInSameParty, getPartyLeaderId } from "../social/partySystem.js";
@@ -70,9 +70,9 @@ export interface VisibleIntent {
 }
 
 export type Order =
-  | { action: "move"; x: number; y: number }
-  | { action: "attack"; targetId: string }
-  | { action: "technique"; targetId: string; techniqueId: string; resolving?: boolean };
+  | { action: "move"; x: number; y: number; userIssued?: boolean }
+  | { action: "attack"; targetId: string; userIssued?: boolean }
+  | { action: "technique"; targetId: string; techniqueId: string; resolving?: boolean; userIssued?: boolean };
 
 export interface CastingIntent {
   targetId: string;
@@ -237,6 +237,13 @@ export interface Entity {
   gotoMode?: boolean;
   /** Entity ID of party leader to follow when idle (rented characters). */
   followLeaderId?: string;
+  /**
+   * User-driven combat engagement. Set by /command when the user explicitly
+   * clicks attack on a mob. Auto-combat treats this as a sticky engagement:
+   * keep attacking the target until it dies and don't get hijacked into
+   * buff/heal techniques. Cleared on death of target or after a TTL.
+   */
+  userEngagedAt?: { targetId: string; tick: number };
   /** In-flight technique windup state for pre-resolution telegraphing. */
   castingIntent?: CastingIntent;
   /** Swing timer: tick when this entity is next allowed to land a basic attack. */
@@ -1732,6 +1739,7 @@ export function pickTechnique(
   entity: Entity,
   target: Entity,
   zone: ZoneState,
+  opts?: { skipBuffPriority?: boolean },
 ): TechniqueDefinition | null {
   const learned = entity.learnedTechniques ?? [];
   if (learned.length === 0) return null;
@@ -1754,11 +1762,15 @@ export function pickTechnique(
 
   if (usable.length === 0) return null;
 
-  // 1. Self-buff if we don't have one active
-  const hasBuff = entity.activeEffects?.some(e => e.type === "buff" && e.casterId === entity.id);
-  if (!hasBuff) {
-    const buff = usable.find(t => t.type === "buff" && (t.targetType === "self" || t.targetType === "party"));
-    if (buff) return buff;
+  // 1. Self-buff if we don't have one active.
+  // Skipped when the caller is mid-swing — don't hijack an in-progress attack
+  // to apply a buff.
+  if (!opts?.skipBuffPriority) {
+    const hasBuff = entity.activeEffects?.some(e => e.type === "buff" && e.casterId === entity.id);
+    if (!hasBuff) {
+      const buff = usable.find(t => t.type === "buff" && (t.targetType === "self" || t.targetType === "party"));
+      if (buff) return buff;
+    }
   }
 
   // 2. Self-heal if low HP
@@ -1900,18 +1912,32 @@ function isAliveAutoCombatTarget(entity: Entity | undefined): entity is Entity {
     && !entity.leashing;
 }
 
+// Re-evaluate edicts each tick while an attack order is active so edicts can
+// upgrade basic attacks into techniques (Shadow Bolt) or re-target to a
+// party-tagged mob. Guards:
+//   • For userIssued clicks, only upgrade to offensive techniques (attack /
+//     debuff). Buffs and heals would cancel the swing into self-cast.
+//   • pickTechnique runs with skipBuffPriority so the heuristic doesn't
+//     hijack into Dark Pact.
 function applyEdictOverrideForActiveAttack(entity: Entity, target: Entity, zone: ZoneState): boolean {
   if (entity.type !== "player") return false;
   if (!isAliveAutoCombatTarget(target)) return false;
+
+  const isUserIssued = entity.order?.action === "attack" && entity.order.userIssued === true;
 
   const cachedEdicts = entity.walletAddress ? getEdictCache(entity.walletAddress) : undefined;
   const edicts = (cachedEdicts && cachedEdicts.length > 0)
     ? cachedEdicts
     : getDefaultGambits(entity.classId);
-  const edictResult = evaluateEdicts(entity, zone, edicts, target, pickTechnique);
+  const pickerNoBuff: BestTechniquePicker = (e, t, z) => pickTechnique(e, t, z, { skipBuffPriority: true });
+  const edictResult = evaluateEdicts(entity, zone, edicts, target, pickerNoBuff);
   if (!edictResult) return false;
 
   if (edictResult.techniqueOverride) {
+    const techType = edictResult.techniqueOverride.type;
+    if (isUserIssued && techType !== "attack" && techType !== "debuff") {
+      return false;
+    }
     const eTarget = edictResult.targetOverride ?? target;
     const techTargetId = pickTechniqueTargetIdForAutoCombat(entity, eTarget, edictResult.techniqueOverride, zone);
     const techTarget = zone.entities.get(techTargetId);
@@ -1930,17 +1956,6 @@ function applyEdictOverrideForActiveAttack(entity: Entity, target: Entity, zone:
       targetName: techTarget.name,
       techniqueId: edictResult.techniqueOverride.id,
       techniqueName: edictResult.techniqueOverride.name,
-      tick: zone.tick,
-    };
-    return true;
-  }
-
-  if (edictResult.order && edictResult.order.action !== "attack") {
-    entity.order = edictResult.order as Order;
-    entity.lastEdictDecision = {
-      edictId: edictResult.edict.id,
-      edictName: edictResult.edict.name,
-      actionType: edictResult.edict.action.type,
       tick: zone.tick,
     };
     return true;
@@ -2888,6 +2903,9 @@ async function worldTick() {
             }
 
             entity.order = undefined;
+            if (entity.userEngagedAt?.targetId === target.id) {
+              entity.userEngagedAt = undefined;
+            }
 
             // Grant XP on kill — shared with party members in same zone
             awardPartyXp(zone, xpRecipient, target.xpReward ?? 0, target.level);
@@ -3217,6 +3235,9 @@ async function worldTick() {
             }
 
             entity.order = undefined;
+            if (entity.userEngagedAt?.targetId === target.id) {
+              entity.userEngagedAt = undefined;
+            }
 
             // Grant XP on kill — shared with party members in same zone
             awardPartyXp(zone, techXpRecipient, target.xpReward ?? 0, target.level);
@@ -3457,6 +3478,22 @@ async function worldTick() {
       if (entity.travelTargetZone) continue;
       // Skip players in goto mode (navigating to NPC — don't interrupt with combat)
       if (entity.gotoMode) continue;
+
+      // ── User engagement re-arm (FF12-gambit style) ───────────────────
+      // If the user clicked attack on a mob and the order has since
+      // resolved (technique cast cleared it), re-arm a userIssued attack
+      // order so the override loop keeps cycling offensive techniques on
+      // the same target instead of falling through to buff maintenance.
+      const engagement = entity.userEngagedAt;
+      if (engagement) {
+        const engagedTarget = zone.entities.get(engagement.targetId);
+        if (engagedTarget && isAliveAutoCombatTarget(engagedTarget)) {
+          entity.order = { action: "attack", targetId: engagement.targetId, userIssued: true };
+          entity.userEngagedAt = { targetId: engagement.targetId, tick: zone.tick };
+          continue;
+        }
+        entity.userEngagedAt = undefined;
+      }
 
       // Ranged classes scan further — auto-engage at their attack range + buffer
       const classRange = getEntityAttackRange(entity);

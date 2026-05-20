@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getEntity, getOrCreateZone, type Order, type Entity } from "../world/zoneRuntime.js";
+import { getEntity, getOrCreateZone, getWorldTick, type Order, type Entity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import {
@@ -67,7 +67,8 @@ export function registerCommands(server: FastifyInstance) {
         reply.code(400);
         return { error: "move requires x and y" };
       }
-      order = { action: "move", x, y };
+      order = { action: "move", x, y, userIssued: true };
+      entity.userEngagedAt = undefined; // explicit move breaks engagement
     } else if (action === "attack") {
       if (!targetId) {
         reply.code(400);
@@ -77,7 +78,8 @@ export function registerCommands(server: FastifyInstance) {
         reply.code(404);
         return { error: "Target entity not found" };
       }
-      order = { action: "attack", targetId };
+      order = { action: "attack", targetId, userIssued: true };
+      entity.userEngagedAt = { targetId, tick: getWorldTick() };
     } else if (action === "attack-nearest") {
       // Find nearest mob (optionally filtered by name)
       const regionId = entity.region;
@@ -107,7 +109,8 @@ export function registerCommands(server: FastifyInstance) {
         return { error: mobName ? `No "${mobName}" found nearby` : "No mobs found nearby" };
       }
 
-      order = { action: "attack", targetId: nearestMob.id };
+      order = { action: "attack", targetId: nearestMob.id, userIssued: true };
+      entity.userEngagedAt = { targetId: nearestMob.id, tick: getWorldTick() };
     } else if (action === "travel") {
       if (!targetZone) {
         reply.code(400);
@@ -122,8 +125,9 @@ export function registerCommands(server: FastifyInstance) {
       }
 
       // Set move order toward the target region center (world-space)
-      order = { action: "move", x: center.x, y: center.z };
+      order = { action: "move", x: center.x, y: center.z, userIssued: true };
       entity.travelTargetZone = targetZone;
+      entity.userEngagedAt = undefined; // traveling cancels engagement
     } else {
       reply.code(400);
       return { error: `Unknown action: ${action}` };

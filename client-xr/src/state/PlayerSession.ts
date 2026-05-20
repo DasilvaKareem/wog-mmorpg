@@ -31,7 +31,8 @@ export interface PlayerSessionSnapshot {
 export type PlayerSessionEvent =
   | { type: "state-changed"; from: PlayerSessionState; to: PlayerSessionState }
   | { type: "entity-id-changed"; from: string | null; to: string }
-  | { type: "zone-changed"; from: string | null; to: string };
+  | { type: "zone-changed"; from: string | null; to: string }
+  | { type: "wallet-changed"; from: string | null; to: string | null };
 
 type Listener = (ev: PlayerSessionEvent) => void;
 
@@ -93,12 +94,16 @@ class PlayerSessionImpl {
   /** Called once on app boot when wallet is known but character not yet spawned. */
   initWallet(wallet: string, custodialWallet: string | null = null) {
     const norm = wallet.toLowerCase();
-    if (this._wallet && this._wallet !== norm) {
-      console.warn("[PlayerSession] wallet changed mid-session; resetting", this._wallet, "→", norm);
+    const prev = this._wallet;
+    if (prev && prev !== norm) {
+      console.warn("[PlayerSession] wallet changed mid-session; resetting", prev, "→", norm);
       this.reset();
     }
     this._wallet = norm;
     this._custodialWallet = custodialWallet;
+    if (prev !== norm) {
+      this.emit({ type: "wallet-changed", from: prev, to: norm });
+    }
     if (this._state === "booting") this.setState("spawning");
   }
 
@@ -161,6 +166,7 @@ class PlayerSessionImpl {
 
   /** Wipe everything (logout, wallet change, etc.). */
   reset() {
+    const prevWallet = this._wallet;
     this._state = "booting";
     this._wallet = null;
     this._entityId = null;
@@ -169,6 +175,9 @@ class PlayerSessionImpl {
     this._characterInfo = null;
     this._lastPresentAtMs = 0;
     this._missingSinceMs = null;
+    if (prevWallet) {
+      this.emit({ type: "wallet-changed", from: prevWallet, to: null });
+    }
   }
 
   /** Update character info without changing identity (level-up, agent flip, etc.). */

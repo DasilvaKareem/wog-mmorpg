@@ -307,6 +307,15 @@ export class EntityInspector {
       `;
     }
 
+    if (e.maxCharges && e.maxCharges > 0) {
+      const depleted = e.depletedAtTick != null || ((e.charges ?? 1) <= 0 && e.maxCharges > 0);
+      const chargeColor = depleted ? "#ff6a6a" : "#7ee8a2";
+      const chargeText = depleted
+        ? "DEPLETED — respawning"
+        : `${e.charges ?? 0} / ${e.maxCharges} charges`;
+      html += `<div style="margin-top:6px; font-size:11px; color:${chargeColor};">&#9671; ${chargeText}</div>`;
+    }
+
     const gather = GATHER_TYPES[e.type];
     if (gather && this.options.onAgentGather && this.options.canCommandAgent?.()) {
       const busy = this.activeAction === "gather";

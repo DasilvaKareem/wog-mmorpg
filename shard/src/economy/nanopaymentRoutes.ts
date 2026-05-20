@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
+import { getRedis } from "../redis.js";
 import {
   getSessionBalance,
   initTopUp,
@@ -104,6 +105,66 @@ export function registerNanopaymentRoutes(server: FastifyInstance): void {
   server.get("/nanopay/balance/seller", async (_req, reply) => {
     const usdc = await getSellerBalance();
     return reply.send({ usdc });
+  });
+
+  // ── POST /webhooks/circle ───────────────────────────────────────────────────
+  // Circle delivers via AWS SNS. SNS first sends a SubscriptionConfirmation,
+  // then wraps every Circle notification inside an SNS Notification envelope.
+  server.post<{ Body: any }>("/webhooks/circle", async (request, reply) => {
+    const snsType = (request.headers["x-amz-sns-message-type"] ?? "") as string;
+    const body    = request.body ?? {};
+
+    // ── Step 1: confirm the SNS subscription ──────────────────────────────────
+    if (snsType === "SubscriptionConfirmation") {
+      const subscribeUrl = body.SubscribeURL as string;
+      if (subscribeUrl?.startsWith("https://sns.")) {
+        try {
+          await fetch(subscribeUrl);
+          console.log("[nanopay:webhook] SNS subscription confirmed");
+        } catch (e: any) {
+          console.error("[nanopay:webhook] SNS confirm failed:", e.message);
+        }
+      }
+      return reply.send({ ok: true });
+    }
+
+    // ── Step 2: unwrap SNS Notification → Circle payload ─────────────────────
+    let payload: any;
+    if (snsType === "Notification") {
+      try { payload = JSON.parse(body.Message as string); } catch { payload = body; }
+    } else {
+      payload = body; // direct delivery (non-SNS path)
+    }
+
+    const notifType = (payload?.notificationType ?? "") as string;
+    const transfer  = payload?.notification ?? {};
+
+    // Only care about confirmed inbound transfers to our seller wallet
+    if (
+      notifType !== "transfers" ||
+      transfer.transactionType !== "INBOUND" ||
+      transfer.state          !== "CONFIRMED" ||
+      transfer.walletId       !== process.env.CIRCLE_SELLER_WALLET_ID
+    ) {
+      return reply.send({ ok: true, ignored: true });
+    }
+
+    // Deduplicate — SNS retries on timeout
+    const redis     = getRedis();
+    const dedupeKey = `nanopay:circle:processed:${transfer.id as string}`;
+    const isNew     = await redis.set(dedupeKey, "1", { NX: true, EX: 86400 * 7 });
+    if (!isNew) return reply.send({ ok: true, duplicate: true });
+
+    const senderAddress: string = (transfer.sourceAddress ?? "").toLowerCase();
+    const amount                = parseFloat(transfer.amounts?.[0] ?? "0");
+    if (!senderAddress || amount <= 0) {
+      return reply.send({ ok: true, skipped: "missing sender or zero amount" });
+    }
+
+    await initTopUp(senderAddress, `circle:${transfer.id as string}`, amount);
+    console.log(`[nanopay:webhook] +${amount} USDC → ${senderAddress}  tx=${transfer.txHash as string}`);
+
+    return reply.send({ ok: true, credited: amount, wallet: senderAddress });
   });
 }
 

@@ -99,6 +99,14 @@ export interface InboxPanelCallbacks {
    * host can show a popup. Skipped on first-fetch to avoid replaying old requests.
    */
   onDuelRequest?: (req: { challengeId: string; challengerName: string; challengerWallet: string; format: string; expiresAtMs: number }) => void;
+  /**
+   * A `party-invite` message just arrived. First-sight only.
+   */
+  onPartyInviteArrived?: (req: { inviteId: string; inviterName: string; inviterWallet: string; partyId?: string }) => void;
+  /**
+   * A `trade-offer` message just arrived. First-sight only.
+   */
+  onTradeOfferArrived?: (offer: TradeOfferPayload) => void;
   /** Accept a party invite. */
   onAcceptPartyInvite?: (inviteId: string) => Promise<{ ok: boolean; error?: string }>;
   /** Decline a party invite. */
@@ -126,6 +134,10 @@ export class InboxPanel {
   private seenMatchFoundIds = new Set<string>();
   /** First-sight tracking for duel-request notifications. */
   private seenDuelRequestIds = new Set<string>();
+  /** First-sight tracking for party-invite notifications. */
+  private seenPartyInviteIds = new Set<string>();
+  /** First-sight tracking for trade-offer notifications. */
+  private seenTradeOfferIds = new Set<string>();
   /** challengeIds whose Accept/Decline buttons are pending or settled. */
   private duelActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
   /** inviteIds whose Join/Decline buttons are pending or settled. */
@@ -208,10 +220,23 @@ export class InboxPanel {
   markDuelActioned(challengeId: string, state: "accepted" | "declined" | "failed") {
     if (!challengeId) return;
     this.duelActionState.set(challengeId, state);
-    if (state === "failed") {
-      // Allow retry from inbox row
-      this.duelActionState.delete(challengeId);
-    }
+    if (state === "failed") this.duelActionState.delete(challengeId);
+    this.render();
+  }
+
+  /** Mark a party invite as actioned from outside (e.g. popup). */
+  markPartyInviteActioned(inviteId: string, state: "accepted" | "declined" | "failed") {
+    if (!inviteId) return;
+    this.partyInviteActionState.set(inviteId, state);
+    if (state === "failed") this.partyInviteActionState.delete(inviteId);
+    this.render();
+  }
+
+  /** Mark a trade offer as actioned from outside (e.g. popup). */
+  markTradeActioned(tradeId: number, state: "accepted" | "declined" | "failed") {
+    if (!Number.isFinite(tradeId)) return;
+    this.tradeActionState.set(tradeId, state);
+    if (state === "failed") this.tradeActionState.delete(tradeId);
     this.render();
   }
 
@@ -242,15 +267,19 @@ export class InboxPanel {
         const msgs: InboxMessage[] = Array.isArray(data.messages) ? data.messages : [];
         msgs.sort((a, b) => b.ts - a.ts);
 
-        // Detect newly-arrived trade-result + match-found + duel-request messages so
-        // the host can react without waiting for the regular poll interval.
+        // Detect newly-arrived actionable messages so the host can show popups
+        // without waiting for the user to open the inbox.
         const isFirstFetch = this.messages.length === 0
           && this.seenTradeResultIds.size === 0
           && this.seenMatchFoundIds.size === 0
-          && this.seenDuelRequestIds.size === 0;
+          && this.seenDuelRequestIds.size === 0
+          && this.seenPartyInviteIds.size === 0
+          && this.seenTradeOfferIds.size === 0;
         const freshTradeResults: InboxMessage[] = [];
         const freshMatchFound: InboxMessage[] = [];
         const freshDuelRequests: InboxMessage[] = [];
+        const freshPartyInvites: InboxMessage[] = [];
+        const freshTradeOffers: InboxMessage[] = [];
         for (const m of msgs) {
           if (m.type === "trade-result") {
             if (this.seenTradeResultIds.has(m.id)) continue;
@@ -263,13 +292,28 @@ export class InboxPanel {
           } else if (m.type === "duel-request") {
             if (this.seenDuelRequestIds.has(m.id)) continue;
             this.seenDuelRequestIds.add(m.id);
-            // Skip if already actioned (accepted/declined) or expired.
             const data = (m.data ?? {}) as { challengeId?: string; expiresAtMs?: number };
             if (!data.challengeId) continue;
             const actioned = this.duelActionState.get(data.challengeId);
             const expired = typeof data.expiresAtMs === "number" && data.expiresAtMs < Date.now();
             if (actioned || expired) continue;
             if (!isFirstFetch) freshDuelRequests.push(m);
+          } else if (m.type === "party-invite") {
+            if (this.seenPartyInviteIds.has(m.id)) continue;
+            this.seenPartyInviteIds.add(m.id);
+            const data = (m.data ?? {}) as { inviteId?: string };
+            if (!data.inviteId) continue;
+            if (this.partyInviteActionState.get(data.inviteId)) continue;
+            if (!isFirstFetch) freshPartyInvites.push(m);
+          } else if (m.type === "trade-offer") {
+            if (this.seenTradeOfferIds.has(m.id)) continue;
+            this.seenTradeOfferIds.add(m.id);
+            const data = m.data as TradeOfferPayload | undefined;
+            if (!data?.tradeId) continue;
+            const actioned = this.tradeActionState.get(data.tradeId);
+            const expired = typeof data.expiresAtMs === "number" && data.expiresAtMs < Date.now();
+            if (actioned || expired) continue;
+            if (!isFirstFetch) freshTradeOffers.push(m);
           }
         }
 
@@ -311,6 +355,21 @@ export class InboxPanel {
             format: data.format ?? "1v1",
             expiresAtMs: data.expiresAtMs ?? (Date.now() + 5 * 60_000),
           });
+        }
+        for (const m of freshPartyInvites) {
+          const data = (m.data ?? {}) as { inviteId?: string; partyId?: string };
+          if (!data.inviteId) continue;
+          this.callbacks.onPartyInviteArrived?.({
+            inviteId: data.inviteId,
+            inviterName: m.fromName || "A player",
+            inviterWallet: m.from || "",
+            partyId: data.partyId,
+          });
+        }
+        for (const m of freshTradeOffers) {
+          const data = m.data as TradeOfferPayload | undefined;
+          if (!data) continue;
+          this.callbacks.onTradeOfferArrived?.(data);
         }
         return;
       } catch {
