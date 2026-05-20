@@ -242,7 +242,7 @@ function logPartyCoordination(
   });
 }
 
-function pickPartyCombatTarget(me: any, currentRegion: string): any | null {
+export function pickPartyCombatTarget(me: any, currentRegion: string): any | null {
   const partyId = getPlayerPartyId(me.id);
   if (!partyId) return null;
 

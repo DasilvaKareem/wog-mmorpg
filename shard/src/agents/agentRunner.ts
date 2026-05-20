@@ -2082,7 +2082,22 @@ export class AgentRunner {
     // Only cross-zone travel (set by the party-follow block above) and same-zone
     // leader-follow/combat are allowed. No quests, no zone-wandering, no LLM calls.
     if (config.focus === "party") {
-      if (!this.currentScript) {
+      // Probe for the leader's combat target so non-leaders engage what the
+      // leader is fighting. doCombat() handles the non-leader assist path at
+      // agentBehaviors:868-878 — we just need to route there by setting a
+      // combat script when there's a target to assist on.
+      const partyTarget = this.entityId
+        ? behaviors.pickPartyCombatTarget(entity, this.currentRegion)
+        : null;
+      const preserveTravel = this.currentScript?.type === "travel";
+      if (partyTarget && !preserveTravel) {
+        if (this.currentScript?.type !== "combat") {
+          this.currentScript = { type: "combat", reason: "Party — assist leader's target" };
+          this.ticksOnCurrentScript = 0;
+        }
+      } else if (!this.currentScript || (this.currentScript.type === "combat" && !partyTarget)) {
+        // No party target — fall back to idle (auto-defend only). Travel
+        // scripts from the party-follow block are preserved above.
         this.currentScript = { type: "idle", reason: "Party mode — near leader" };
         this.ticksOnCurrentScript = 0;
       }
