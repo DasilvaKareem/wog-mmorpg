@@ -1,7 +1,42 @@
 import type { Entity } from "../types.js";
 import { getNodeResourceInfo } from "../data/professionCatalogs.js";
+import { fetchItemCatalog, type CatalogItem } from "../api.js";
 
 type EquipmentItem = NonNullable<NonNullable<Entity["equipment"]>[string]>;
+
+const STAT_LABELS: Record<string, string> = {
+  str: "STR", int: "INT", agi: "AGI", def: "DEF",
+  spi: "SPI", spirit: "SPI", faith: "FAI", fai: "FAI",
+  hp: "HP", mp: "MP", essence: "ESS",
+  vit: "VIT", luck: "LCK", lck: "LCK",
+};
+const STAT_ORDER = ["str", "int", "agi", "def", "spi", "spirit", "faith", "fai", "vit", "luck", "lck"];
+
+let cachedCatalog: Map<string, CatalogItem> | null = null;
+void fetchItemCatalog().then((m) => { cachedCatalog = m; }).catch(() => {});
+
+function getItemBonuses(tokenId: number | string | undefined): Record<string, number> | null {
+  if (tokenId == null || !cachedCatalog) return null;
+  return cachedCatalog.get(String(tokenId))?.statBonuses ?? null;
+}
+
+function formatStatRows(stats: Record<string, number> | undefined): string {
+  if (!stats) return "";
+  const entries: string[] = [];
+  for (const key of STAT_ORDER) {
+    if (stats[key] == null) continue;
+    const label = STAT_LABELS[key] ?? key.toUpperCase();
+    entries.push(`<span style="color:#aab;">${label}</span> <span style="color:#dfe8ff;font-weight:bold;">${stats[key]}</span>`);
+  }
+  // Catch any remaining keys not in STAT_ORDER
+  for (const [key, val] of Object.entries(stats)) {
+    if (STAT_ORDER.includes(key)) continue;
+    if (val == null) continue;
+    const label = STAT_LABELS[key] ?? key.toUpperCase();
+    entries.push(`<span style="color:#aab;">${label}</span> <span style="color:#dfe8ff;font-weight:bold;">${val}</span>`);
+  }
+  return entries.join('<span style="color:#445;margin:0 6px;">·</span>');
+}
 
 interface EntityInspectorOptions {
   canActOnPlayer?: (entity: Entity) => boolean;
@@ -270,6 +305,18 @@ export class EntityInspector {
       if (e.equipment) {
         html += this.renderPaperDoll(e);
       }
+      const statsToShow = e.effectiveStats ?? e.stats;
+      if (statsToShow && Object.keys(statsToShow).length > 0) {
+        const rows = formatStatRows(statsToShow);
+        if (rows) {
+          html += `
+            <div style="margin-top:8px; padding:6px 8px; border-radius:5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+              <div style="font:bold 10px monospace; color:#998; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:3px;">Stats</div>
+              <div style="font:11px monospace; line-height:1.5;">${rows}</div>
+            </div>
+          `;
+        }
+      }
     }
 
     if (e.type === "player" && this.options.canActOnPlayer?.(e)) {
@@ -508,10 +555,17 @@ export class EntityInspector {
       const name = item.name ?? `Item #${item.tokenId}`;
       html += `<div style="color:${qColor}; font-weight:bold; font-size:12px;">${esc(name)}</div>`;
       html += `<div style="color:#778; font-size:10px; margin-bottom:4px; text-transform:capitalize;">${esc(quality)} · ${esc(label)}</div>`;
+      const bonuses = getItemBonuses(item.tokenId);
+      if (bonuses && Object.keys(bonuses).length > 0) {
+        const rows = formatStatRows(bonuses);
+        if (rows) {
+          html += `<div style="font-size:10px; margin-top:4px; line-height:1.5;">${rows}</div>`;
+        }
+      }
       if (item.durability != null && item.maxDurability != null && item.maxDurability > 0) {
         const dPct = Math.round((item.durability / item.maxDurability) * 100);
         const dColor = dPct > 50 ? "#4c4" : dPct > 20 ? "#cc4" : "#c44";
-        html += `<div style="font-size:10px; color:${dColor};">Durability: ${item.durability}/${item.maxDurability}</div>`;
+        html += `<div style="font-size:10px; color:${dColor}; margin-top:4px;">Durability: ${item.durability}/${item.maxDurability}</div>`;
         html += `<div style="background:#333; border-radius:2px; height:3px; margin-top:2px; width:100%;"><div style="background:${dColor}; width:${dPct}%; height:100%; border-radius:2px;"></div></div>`;
       }
       if (item.broken) {

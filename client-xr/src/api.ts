@@ -121,6 +121,29 @@ export async function fetchActivePlayers(): Promise<ActivePlayersResponse | null
   return fetchJsonWithFallback<ActivePlayersResponse>("/players/active");
 }
 
+export interface CatalogItem {
+  tokenId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  equipSlot?: string | null;
+  armorSlot?: string | null;
+  statBonuses?: Record<string, number>;
+  maxDurability?: number | null;
+}
+
+let itemCatalogPromise: Promise<Map<string, CatalogItem>> | null = null;
+export function fetchItemCatalog(): Promise<Map<string, CatalogItem>> {
+  if (itemCatalogPromise) return itemCatalogPromise;
+  itemCatalogPromise = (async () => {
+    const list = (await fetchJsonWithFallback<CatalogItem[]>("/shop/catalog")) ?? [];
+    const map = new Map<string, CatalogItem>();
+    for (const item of list) map.set(String(item.tokenId), item);
+    return map;
+  })();
+  return itemCatalogPromise;
+}
+
 export async function fetchFriends(walletAddress: string): Promise<FriendsResponse | null> {
   return fetchJsonWithFallback<FriendsResponse>(`/friends/${walletAddress}`);
 }
@@ -1116,6 +1139,27 @@ export async function submitTopUp(
   return { ok: true, balance: result.data?.balance };
 }
 
+export interface SpendHistoryEntry {
+  ts: number;
+  type: "debit" | "credit";
+  action?: "combat" | "gather" | "supervisor" | "chat" | "idle";
+  amount: number;
+}
+
+export async function fetchNanopayHistory(wallet: string, token: string): Promise<SpendHistoryEntry[]> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/nanopay/history/${encodeURIComponent(wallet)}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as { history: SpendHistoryEntry[] };
+      return data.history ?? [];
+    } catch { /* try next */ }
+  }
+  return [];
+}
+
 export async function fetchNanopayGatewayInfo(): Promise<{
   gatewayWalletContract: string;
   sellerAddress: string;
@@ -1138,4 +1182,14 @@ export async function applyEnchantment(
   body: { walletAddress: string; zoneId: string; entityId: string; altarId: string; enchantmentElixirTokenId: string; equipmentSlot: string },
 ): Promise<{ ok: boolean; data?: any; error?: string }> {
   return postJsonWithFallback("/enchanting/apply", token, body);
+}
+
+// ── Telegram notifications ────────────────────────────────────────
+
+export async function fetchTelegramStatus(wallet: string): Promise<{ linked: boolean } | null> {
+  return fetchJsonWithFallback(`/notifications/telegram/status/${encodeURIComponent(wallet)}`);
+}
+
+export async function fetchTelegramBotLink(wallet: string): Promise<{ url: string | null; botUsername: string | null } | null> {
+  return fetchJsonWithFallback(`/notifications/telegram/bot-link/${encodeURIComponent(wallet)}`);
 }

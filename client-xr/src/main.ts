@@ -35,7 +35,7 @@ import { QuestPanel } from "./hud/QuestPanel.js";
 import { NpcDialog } from "./hud/NpcDialog.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SettingsPanel } from "./hud/SettingsPanel.js";
-import { SkillsPanel } from "./hud/SkillsPanel.js";
+import { SkillsPanel, type FarmTabData } from "./hud/SkillsPanel.js";
 import { RecipesPanel } from "./hud/RecipesPanel.js";
 import type { LearnedTechnique } from "./hud/LearnedTechniquesList.js";
 import type { Edict } from "./hud/EdictEditor.js";
@@ -373,6 +373,7 @@ const effects = new EffectsManager(entities);
 effects.setElevationProvider(world);
 effects.setCamera(camera);
 scene.add(effects.group);
+entities.setEffectsManager(effects);
 
 const intentLines = new IntentLinesManager(entities);
 scene.add(intentLines.group);
@@ -1200,6 +1201,18 @@ const bagPanel = new BagPanel({
       agentChat.addSystemMessage(result.error ?? "Recycle failed", "error");
     }
   },
+  onSellItem: (item) => {
+    agentChat.addSystemMessage(
+      `To sell ${item.displayName ?? item.name}, walk to a Merchant NPC and use their shop dialog.`,
+      "info",
+    );
+  },
+  onAuctionItem: (item) => {
+    agentChat.addSystemMessage(
+      `To auction ${item.displayName ?? item.name}, visit an Auctioneer NPC in any town.`,
+      "info",
+    );
+  },
 });
 bagPanel.setPlayer(null, true);
 
@@ -1254,6 +1267,7 @@ const skillsPanel = new SkillsPanel({
     if (tab === "professions") { lastProfessionPollTime = 0; void pollProfessions(); }
     else if (tab === "skills") { lastLearnedTechPollTime = 0; void pollLearnedTechniques(); }
     else if (tab === "edicts") { lastLearnedTechPollTime = 0; lastEdictsPollTime = 0; void pollLearnedTechniques(); void pollEdicts(); }
+    else if (tab === "farm") { lastFarmPollTime = 0; void pollFarm(); }
   },
   onProfessionClick: (info) => {
     void recipesPanel.show({
@@ -1283,6 +1297,7 @@ let lastEdictsPollTime = 0;
 let lastInboxPollTime = 0;
 let lastFriendsPollTime = 0;
 let lastPartyPollTime = 0;
+let lastFarmPollTime = 0;
 const PARTY_POLL_INTERVAL = 5_000;
 const INVENTORY_POLL_INTERVAL = 10_000;
 const PROFESSION_POLL_INTERVAL = 15_000;
@@ -1290,6 +1305,7 @@ const LEARNED_TECH_POLL_INTERVAL = 20_000;
 const EDICTS_POLL_INTERVAL = 30_000;
 const INBOX_POLL_INTERVAL = 15_000;
 const FRIENDS_POLL_INTERVAL = 15_000;
+const FARM_POLL_INTERVAL = 20_000;
 
 // ── Wallet panel ──────────────────────────────────────────────────
 const walletPanel = new WalletPanel({
@@ -1681,7 +1697,7 @@ const notificationsPanel = new NotificationsPanel({
 // own stylesheets so our `!important` overrides take precedence cleanly.
 installMobileResponsiveStyles();
 
-actionBar.addButton({ id: "wallet", icon: "\u{1F4B0}", label: "Wallet", key: "W", onClick: () => togglePanel("wallet") });
+actionBar.addButton({ id: "wallet", icon: "\u{1F4B0}", label: "Wallet", key: "K", onClick: () => togglePanel("wallet") });
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => togglePanel("bag") });
 actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => togglePanel("skills") });
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => togglePanel("quests") });
@@ -1796,8 +1812,10 @@ function togglePanel(id: ManagedPanelId) {
 function initDesktopPanelDragging() {
   const isDesktop = () => !window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
   const draggableDefs: Array<{ id: string; handleSelector?: string }> = [
+    { id: "wallet-panel", handleSelector: ".wp-header" },
     { id: "bag-panel", handleSelector: ".bag-header" },
     { id: "skills-panel", handleSelector: ".sk-drag-handle" },
+    { id: "recipes-panel", handleSelector: ".rp-drag-handle" },
     { id: "quest-panel", handleSelector: ".qp-header" },
     { id: "player-panel", handleSelector: ".pp-drag-handle" },
     { id: "inbox-panel", handleSelector: ".ibx-header" },
@@ -2453,6 +2471,37 @@ async function pollProfessions() {
   }
 }
 
+async function pollFarm() {
+  const addr = ownCustodialWallet ?? ownWalletAddress;
+  if (!addr) return;
+  const now = Date.now();
+  if (now - lastFarmPollTime < FARM_POLL_INTERVAL) return;
+  lastFarmPollTime = now;
+
+  const zoneId = ownEntityId ? entities.getEntity(ownEntityId)?.zoneId ?? "" : "";
+
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const [plotRes, nodeRes] = await Promise.all([
+        fetch(toUrl(base, `/plots/owned/${addr}`)).then((r) => r.ok ? r.json() : null),
+        zoneId
+          ? fetch(toUrl(base, `/farming/nodes?region=${encodeURIComponent(zoneId)}`)).then((r) => r.ok ? r.json() : null)
+          : Promise.resolve(null),
+      ]);
+
+      const farmData: FarmTabData = {
+        plot: plotRes
+          ? { owned: !!plotRes.owned, ...(plotRes.plot ?? {}) }
+          : { owned: false },
+        nodes: nodeRes?.nodes ?? [],
+        currentZoneId: zoneId || undefined,
+      };
+      skillsPanel.updateFarm(farmData);
+      return;
+    } catch { /* try next base */ }
+  }
+}
+
 const prevLearnedTechniqueIds = new Set<string>();
 let prevLearnedTechniquesPrimed = false;
 
@@ -2584,6 +2633,9 @@ function kickSkillsPollForActiveTab(force = true) {
   } else if (tab === "skills") {
     if (force) lastLearnedTechPollTime = 0;
     void pollLearnedTechniques();
+  } else if (tab === "farm") {
+    if (force) lastFarmPollTime = 0;
+    void pollFarm();
   } else {
     if (force) {
       lastLearnedTechPollTime = 0;
@@ -2889,6 +2941,9 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "b" || e.key === "B") {
     togglePanel("bag");
+  }
+  if (e.key === "k" || e.key === "K") {
+    togglePanel("wallet");
   }
   if (e.key === "p" || e.key === "P") {
     togglePanel("skills");

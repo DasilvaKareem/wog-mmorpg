@@ -51,6 +51,8 @@ interface BagPanelCallbacks {
   onUseItem?: (item: InventoryItem) => void;
   onEquipItem?: (item: InventoryItem) => void;
   onRecycleItem?: (item: InventoryItem, qty: number) => void;
+  onSellItem?: (item: InventoryItem) => void;
+  onAuctionItem?: (item: InventoryItem) => void;
 }
 
 const NON_RECYCLABLE_CATEGORIES = new Set(["currency"]);
@@ -66,11 +68,13 @@ export class BagPanel {
   private goldEl: HTMLDivElement;
   private gridEl: HTMLDivElement;
   private tooltipEl: HTMLDivElement;
+  private menuEl: HTMLDivElement;
   private callbacks: BagPanelCallbacks;
 
   private items: InventoryItem[] = [];
   private isOwn = false;
   private copper: number | null = null;
+  private menuItem: InventoryItem | null = null;
 
   constructor(callbacks: BagPanelCallbacks = {}) {
     this.callbacks = callbacks;
@@ -102,8 +106,24 @@ export class BagPanel {
     this.tooltipEl.style.display = "none";
     document.body.appendChild(this.tooltipEl);
 
+    // Context menu (shared, positioned on click)
+    this.menuEl = document.createElement("div");
+    this.menuEl.className = "bag-menu";
+    this.menuEl.style.display = "none";
+    document.body.appendChild(this.menuEl);
+
     document.body.appendChild(this.container);
     this.injectStyles();
+
+    // Close menu on outside click / Escape
+    document.addEventListener("mousedown", (e) => {
+      if (this.menuEl.style.display === "none") return;
+      if (this.menuEl.contains(e.target as Node)) return;
+      this.hideMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.menuEl.style.display !== "none") this.hideMenu();
+    });
 
     // Hover events (delegated)
     this.gridEl.addEventListener("mouseover", (e) => {
@@ -123,7 +143,8 @@ export class BagPanel {
       this.tooltipEl.style.display = "none";
     });
 
-    // Click to equip / unequip / use; Shift+click to recycle
+    // Left-click an item to open the action menu.
+    // Shift+click still recycles directly as a power-user shortcut.
     this.gridEl.addEventListener("click", (e) => {
       if (!this.isOwn) return;
       const cell = (e.target as HTMLElement).closest(".bag-cell[data-idx]") as HTMLElement;
@@ -132,23 +153,106 @@ export class BagPanel {
       const item = this.items[idx];
       if (!item) return;
 
-      playSoundEffect("ui_button_click");
-
       if (e.shiftKey && isRecyclable(item)) {
+        playSoundEffect("ui_button_click");
         this.callbacks.onRecycleItem?.(item, item.quantity);
         return;
       }
 
-      const isEquippable = Boolean(item.equipSlot)
-        && (item.category === "armor" || item.category === "weapon" || item.category === "tool");
-      if (isEquippable) {
-        this.callbacks.onEquipItem?.(item);
-        return;
-      }
-      if (item.category === "consumable" || item.category === "potion" || item.category === "food") {
-        this.callbacks.onUseItem?.(item);
+      playSoundEffect("ui_dialog_open");
+      this.showMenu(item, cell, e);
+    });
+
+    // Menu item dispatch
+    this.menuEl.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-action]");
+      if (!btn || !this.menuItem) return;
+      const action = btn.dataset.action!;
+      const item = this.menuItem;
+      this.hideMenu();
+      playSoundEffect("ui_button_click");
+      switch (action) {
+        case "equip":
+        case "unequip":
+          this.callbacks.onEquipItem?.(item);
+          break;
+        case "use":
+          this.callbacks.onUseItem?.(item);
+          break;
+        case "recycle":
+          this.callbacks.onRecycleItem?.(item, 1);
+          break;
+        case "recycle-all":
+          this.callbacks.onRecycleItem?.(item, item.quantity);
+          break;
+        case "sell":
+          this.callbacks.onSellItem?.(item);
+          break;
+        case "auction":
+          this.callbacks.onAuctionItem?.(item);
+          break;
       }
     });
+  }
+
+  private showMenu(item: InventoryItem, cell: HTMLElement, clickEvent: MouseEvent) {
+    this.menuItem = item;
+    const isEquippable = Boolean(item.equipSlot)
+      && (item.category === "armor" || item.category === "weapon" || item.category === "tool");
+    const cat = (item.category ?? "").toLowerCase();
+    const isUsable = cat === "consumable" || cat === "potion" || cat === "food";
+    const recyclable = isRecyclable(item);
+
+    const rows: string[] = [];
+    if (item.equipped) {
+      rows.push(`<button data-action="unequip"><span class="bag-menu-icon">⮌</span>Unequip</button>`);
+    } else if (isEquippable) {
+      rows.push(`<button data-action="equip"><span class="bag-menu-icon">⚔</span>Equip</button>`);
+    }
+    if (isUsable && !item.equipped) {
+      rows.push(`<button data-action="use"><span class="bag-menu-icon">🧪</span>Use</button>`);
+    }
+    if (!item.equipped) {
+      rows.push(`<button data-action="sell"><span class="bag-menu-icon">💰</span>Sell to vendor</button>`);
+      rows.push(`<button data-action="auction"><span class="bag-menu-icon">🏷</span>List on auction</button>`);
+    }
+    if (recyclable) {
+      rows.push(`<button data-action="recycle"><span class="bag-menu-icon">♻</span>Recycle 1</button>`);
+      if (item.quantity > 1) {
+        rows.push(`<button data-action="recycle-all"><span class="bag-menu-icon">♻</span>Recycle all (${item.quantity})</button>`);
+      }
+    }
+    if (rows.length === 0) {
+      rows.push(`<div class="bag-menu-empty">No actions available</div>`);
+    }
+
+    const qColor = QUALITY_COLORS[(item.quality ?? "common").toLowerCase()] ?? QUALITY_COLORS.common;
+    this.menuEl.innerHTML = `
+      <div class="bag-menu-head" style="color:${qColor};">${esc(item.displayName ?? item.name)}</div>
+      ${rows.join("")}
+    `;
+    this.menuEl.style.display = "block";
+
+    // Position next to cell, clamp into viewport
+    const cellRect = cell.getBoundingClientRect();
+    let left = clickEvent.clientX + 4;
+    let top = clickEvent.clientY + 4;
+    const menuRect = this.menuEl.getBoundingClientRect();
+    if (left + menuRect.width > window.innerWidth - 8) {
+      left = cellRect.left - menuRect.width - 4;
+    }
+    if (left < 8) left = 8;
+    if (top + menuRect.height > window.innerHeight - 8) {
+      top = window.innerHeight - menuRect.height - 8;
+    }
+    if (top < 8) top = 8;
+    this.menuEl.style.left = `${left}px`;
+    this.menuEl.style.top = `${top}px`;
+  }
+
+  private hideMenu() {
+    this.menuEl.style.display = "none";
+    this.menuItem = null;
   }
 
   setPlayer(_walletAddress: string | null, isOwn: boolean) {
@@ -202,6 +306,7 @@ export class BagPanel {
     if (this.container.style.display === "none") return;
     this.container.style.display = "none";
     this.tooltipEl.style.display = "none";
+    this.hideMenu();
     playSoundEffect("ui_dialog_close");
   }
 
@@ -260,8 +365,8 @@ export class BagPanel {
     if (item.equipped) {
       html += `<div class="bag-tt-equipped">Equipped</div>`;
     }
-    if (this.isOwn && isRecyclable(item)) {
-      html += `<div class="bag-tt-recycle">Shift+click to recycle</div>`;
+    if (this.isOwn) {
+      html += `<div class="bag-tt-recycle">Click for actions · Shift+click recycles</div>`;
     }
 
     this.tooltipEl.innerHTML = html;
@@ -434,6 +539,56 @@ export class BagPanel {
       .bag-tt-qty { color: #997; font-size: 10px; }
       .bag-tt-equipped { color: #4f8; font-size: 10px; font-weight: bold; margin-top: 2px; }
       .bag-tt-recycle { color: #d4a85a; font-size: 10px; margin-top: 3px; font-style: italic; }
+
+      .bag-menu {
+        position: fixed;
+        background: rgba(8, 14, 24, 0.97);
+        border: 1px solid rgba(255, 204, 68, 0.35);
+        border-radius: 6px;
+        padding: 4px;
+        min-width: 180px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+        z-index: 25;
+        font: 12px monospace;
+        pointer-events: auto;
+      }
+      .bag-menu-head {
+        padding: 6px 8px 8px;
+        font-weight: bold;
+        font-size: 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        margin-bottom: 4px;
+      }
+      .bag-menu button {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 6px 8px;
+        background: none;
+        border: none;
+        color: #dfe8ff;
+        font: 11px monospace;
+        text-align: left;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .bag-menu button:hover {
+        background: rgba(68, 255, 136, 0.12);
+        color: #fff;
+      }
+      .bag-menu-icon {
+        display: inline-block;
+        width: 16px;
+        text-align: center;
+        color: #aab;
+      }
+      .bag-menu-empty {
+        padding: 8px;
+        color: #778;
+        font-size: 11px;
+        text-align: center;
+      }
     `;
     document.head.appendChild(style);
   }

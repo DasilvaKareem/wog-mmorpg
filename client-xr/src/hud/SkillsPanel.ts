@@ -18,7 +18,33 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export type SkillsTab = "professions" | "skills" | "edicts";
+export type SkillsTab = "professions" | "skills" | "edicts" | "farm";
+
+export interface FarmPlotData {
+  owned: boolean;
+  plotId?: string;
+  zoneId?: string;
+  buildingType?: string;
+  buildingStage?: number;
+  claimedAt?: number;
+  cost?: number;
+}
+
+export interface FarmCropNode {
+  id: string;
+  name: string;
+  cropType?: string;
+  charges: number;
+  maxCharges: number;
+  depleted: boolean;
+  requiredHoeTier: number;
+}
+
+export interface FarmTabData {
+  plot: FarmPlotData | null;
+  nodes: FarmCropNode[];
+  currentZoneId?: string;
+}
 
 export interface SkillsPanelCallbacks {
   /** Save the full edict list. */
@@ -59,6 +85,10 @@ export class SkillsPanel {
   private edictsScroll: HTMLDivElement;
   private edictEditor: EdictEditor;
 
+  // Farm tab
+  private farmScroll: HTMLDivElement;
+  private lastFarmData: FarmTabData | null = null;
+
   private activeTab: SkillsTab = "professions";
   private callbacks: SkillsPanelCallbacks;
 
@@ -77,9 +107,17 @@ export class SkillsPanel {
       <button class="sk-tab active" data-tab="professions">Professions</button>
       <button class="sk-tab" data-tab="skills">Skills</button>
       <button class="sk-tab" data-tab="edicts">Edicts</button>
+      <button class="sk-tab" data-tab="farm">Farm</button>
+      <button class="sk-close" type="button" title="Close">×</button>
     `;
     this.tabBar.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement).closest(".sk-tab") as HTMLButtonElement | null;
+      const target = e.target as HTMLElement;
+      if (target.closest(".sk-close")) {
+        playSoundEffect("ui_dialog_close");
+        this.hide();
+        return;
+      }
+      const btn = target.closest(".sk-tab") as HTMLButtonElement | null;
       if (!btn) return;
       const tab = btn.dataset.tab as SkillsTab;
       if (tab === this.activeTab) return;
@@ -154,6 +192,10 @@ export class SkillsPanel {
     });
     this.edictsScroll.appendChild(this.edictEditor.container);
 
+    // ── Farm view ─────────────────────────────────────────────
+    this.farmScroll = document.createElement("div");
+    this.farmScroll.className = "sk-skills-scroll";
+
     // ── Tooltip (professions) ─────────────────────────────────
     this.profTooltip = document.createElement("div");
     this.profTooltip.className = "sk-tooltip";
@@ -185,6 +227,11 @@ export class SkillsPanel {
 
   updateEdicts(edicts: Edict[]) {
     this.edictEditor.setEdicts(edicts);
+  }
+
+  updateFarm(data: FarmTabData) {
+    this.lastFarmData = data;
+    if (this.activeTab === "farm") this.renderFarm();
   }
 
   getActiveTab(): SkillsTab {
@@ -223,6 +270,9 @@ export class SkillsPanel {
       this.profTooltip.style.display = "none";
     } else if (this.activeTab === "skills") {
       this.bodyEl.appendChild(this.skillsScroll);
+    } else if (this.activeTab === "farm") {
+      this.bodyEl.appendChild(this.farmScroll);
+      this.renderFarm();
     } else {
       this.bodyEl.appendChild(this.edictsScroll);
     }
@@ -289,6 +339,88 @@ export class SkillsPanel {
     this.profTooltip.style.top = `${top}px`;
   }
 
+  private renderFarm() {
+    const d = this.lastFarmData;
+    if (!d) {
+      this.farmScroll.innerHTML = `<div class="fm-loading">Loading farm data...</div>`;
+      return;
+    }
+
+    let html = "";
+
+    // ── Your Plot ──────────────────────────────────────────────
+    html += `<div class="sk-section-head">`;
+    html += `<span class="sk-section-title">\u{1F331} Your Plot</span>`;
+    html += `</div>`;
+
+    if (d.plot?.owned) {
+      const p = d.plot;
+      const zone = p.zoneId ?? "unknown";
+      const stage = p.buildingStage ?? 0;
+      const building = p.buildingType ?? "empty";
+      const claimed = p.claimedAt ? new Date(p.claimedAt).toLocaleDateString() : "—";
+      const stageLabel = stage === 0 ? "Empty" : stage === 1 ? "Foundation" : stage === 2 ? "Framed" : stage === 3 ? "Roofed" : `Stage ${stage}`;
+      html += `<div class="fm-plot-card">`;
+      html += `<div class="fm-plot-row"><span class="fm-plot-label">Plot</span><span class="fm-plot-val">${esc(p.plotId ?? "—")}</span></div>`;
+      html += `<div class="fm-plot-row"><span class="fm-plot-label">Zone</span><span class="fm-plot-val">${esc(zone)}</span></div>`;
+      html += `<div class="fm-plot-row"><span class="fm-plot-label">Building</span><span class="fm-plot-val">${esc(building)}</span></div>`;
+      html += `<div class="fm-plot-row"><span class="fm-plot-label">Stage</span><span class="fm-plot-val fm-stage">${esc(stageLabel)}</span></div>`;
+      html += `<div class="fm-plot-row"><span class="fm-plot-label">Claimed</span><span class="fm-plot-val fm-dim">${claimed}</span></div>`;
+      html += `<div class="fm-stage-bar">`;
+      for (let i = 0; i < 4; i++) {
+        html += `<div class="fm-stage-pip${i < stage ? " fm-pip-done" : ""}"></div>`;
+      }
+      html += `</div>`;
+      html += `</div>`;
+    } else {
+      html += `<div class="fm-no-plot">`;
+      html += `<div class="fm-no-plot-icon">\u{1FAB5}</div>`;
+      html += `<div class="fm-no-plot-title">No plot claimed</div>`;
+      html += `<div class="fm-no-plot-steps">`;
+      html += `<div class="fm-step"><span class="fm-step-num">1</span>Travel to <b>sunflower-fields</b></div>`;
+      html += `<div class="fm-step"><span class="fm-step-num">2</span>Talk to <b>Farmhand Amos</b> for a quest</div>`;
+      html += `<div class="fm-step"><span class="fm-step-num">3</span>Complete quest, visit <b>Plot Registrar Helga</b></div>`;
+      html += `<div class="fm-step"><span class="fm-step-num">4</span>Claim a plot for <b>25–50 gold</b></div>`;
+      html += `</div>`;
+      html += `</div>`;
+    }
+
+    // ── Crop Nodes ─────────────────────────────────────────────
+    const zone = d.currentZoneId ? esc(d.currentZoneId) : "current zone";
+    html += `<div class="sk-section-head" style="margin-top:6px">`;
+    html += `<span class="sk-section-title">\u{1F33E} Crop Nodes — ${zone}</span>`;
+    html += `</div>`;
+
+    if (d.nodes.length === 0) {
+      html += `<div class="fm-loading">No crop nodes in this zone</div>`;
+    } else {
+      html += `<div class="fm-nodes">`;
+      for (const n of d.nodes) {
+        const dep = n.depleted;
+        const pct = n.maxCharges > 0 ? Math.round((n.charges / n.maxCharges) * 100) : 0;
+        const tierStr = `T${n.requiredHoeTier}`;
+        html += `<div class="fm-node${dep ? " fm-node-dep" : ""}">`;
+        html += `<span class="fm-node-icon">${dep ? "\u{1F534}" : "\u{1F7E2}"}</span>`;
+        html += `<div class="fm-node-info">`;
+        html += `<div class="fm-node-name">${esc(n.name)}</div>`;
+        html += `<div class="fm-node-bar-wrap">`;
+        if (dep) {
+          html += `<span class="fm-node-dep-label">Depleted</span>`;
+        } else {
+          html += `<div class="fm-node-bar"><div class="fm-node-bar-fill" style="width:${pct}%"></div></div>`;
+          html += `<span class="fm-node-charges">${n.charges}/${n.maxCharges}</span>`;
+        }
+        html += `</div>`;
+        html += `</div>`;
+        html += `<span class="fm-node-tier">${tierStr}</span>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    this.farmScroll.innerHTML = html;
+  }
+
   private injectStyles() {
     if (document.getElementById("sk-panel-styles")) return;
     const style = document.createElement("style");
@@ -342,6 +474,18 @@ export class SkillsPanel {
       }
       .sk-tab:hover { color: #aab; }
       .sk-tab.active { color: #4f8; border-bottom-color: #4f8; }
+      .sk-close {
+        flex: 0 0 32px;
+        background: rgba(255, 100, 100, 0.12);
+        border: none;
+        border-left: 1px solid rgba(68, 255, 136, 0.15);
+        color: #f88;
+        font: bold 16px monospace;
+        line-height: 1;
+        cursor: pointer;
+        padding: 8px 0;
+      }
+      .sk-close:hover { background: rgba(255, 100, 100, 0.28); color: #fff; }
 
       .sk-body {
         flex: 1;
@@ -439,6 +583,66 @@ export class SkillsPanel {
       .sk-tt-actions { color: #997; font-size: 10px; }
       .sk-tt-locked { color: #665; font-size: 11px; margin-bottom: 2px; }
       .sk-tt-hint { color: #556; font-size: 10px; font-style: italic; }
+
+      /* Farm tab */
+      .fm-loading { padding: 12px 10px; color: #556; font-size: 11px; font-style: italic; }
+
+      .fm-plot-card {
+        margin: 6px 8px;
+        background: rgba(30, 45, 25, 0.5);
+        border: 1px solid rgba(80, 180, 80, 0.2);
+        border-radius: 5px;
+        padding: 8px 10px;
+      }
+      .fm-plot-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+      .fm-plot-label { color: #778; font-size: 10px; }
+      .fm-plot-val { color: #bdc; font-size: 11px; font-weight: bold; }
+      .fm-stage { color: #8fa; }
+      .fm-dim { color: #667; font-weight: normal; }
+      .fm-stage-bar { display: flex; gap: 3px; margin-top: 6px; }
+      .fm-stage-pip { flex: 1; height: 4px; background: rgba(80,100,80,0.4); border-radius: 2px; }
+      .fm-pip-done { background: #5c9; }
+
+      .fm-no-plot {
+        margin: 6px 8px;
+        background: rgba(25, 30, 20, 0.5);
+        border: 1px solid rgba(68, 255, 136, 0.1);
+        border-radius: 5px;
+        padding: 10px;
+        text-align: center;
+      }
+      .fm-no-plot-icon { font-size: 24px; margin-bottom: 4px; }
+      .fm-no-plot-title { color: #8a9; font-size: 11px; font-weight: bold; margin-bottom: 8px; }
+      .fm-no-plot-steps { text-align: left; }
+      .fm-step { display: flex; align-items: flex-start; gap: 6px; color: #99a; font-size: 10px; margin-bottom: 5px; line-height: 1.4; }
+      .fm-step b { color: #bdc; }
+      .fm-step-num {
+        flex-shrink: 0;
+        width: 16px; height: 16px;
+        background: rgba(68, 255, 136, 0.15);
+        border-radius: 50%;
+        text-align: center; line-height: 16px;
+        color: #4f8; font-size: 9px; font-weight: bold;
+      }
+
+      .fm-nodes { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 8px; }
+      .fm-node {
+        display: flex; align-items: center; gap: 7px;
+        padding: 5px 7px;
+        background: rgba(30, 40, 25, 0.55);
+        border-radius: 4px;
+        border: 1px solid rgba(80, 180, 80, 0.15);
+      }
+      .fm-node-dep { opacity: 0.45; }
+      .fm-node-icon { font-size: 12px; flex-shrink: 0; }
+      .fm-node-info { flex: 1; min-width: 0; }
+      .fm-node-name { font-size: 10px; color: #bdc; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .fm-node-bar-wrap { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+      .fm-node-bar { flex: 1; height: 3px; background: rgba(60,80,50,0.5); border-radius: 2px; overflow: hidden; }
+      .fm-node-bar-fill { height: 100%; background: #5c9; border-radius: 2px; transition: width 0.3s; }
+      .fm-node-charges { color: #7a9; font-size: 9px; min-width: 24px; text-align: right; }
+      .fm-node-dep-label { color: #a66; font-size: 9px; font-style: italic; }
+      .fm-node-tier { color: #667; font-size: 9px; flex-shrink: 0; }
     `;
     document.head.appendChild(style);
   }

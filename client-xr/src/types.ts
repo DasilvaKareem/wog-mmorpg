@@ -34,6 +34,8 @@ export interface Entity {
   zoneId?: string;
   essence?: number;
   maxEssence?: number;
+  stats?: Record<string, number>;
+  effectiveStats?: Record<string, number>;
   order?: EntityOrder;
   activeEffects?: ActiveEffect[];
   isRunning?: boolean;

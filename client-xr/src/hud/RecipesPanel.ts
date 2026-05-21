@@ -252,6 +252,7 @@ export class RecipesPanel {
     const levelLabel = learned ? `Level ${skillLevel} / 300` : `Not learned`;
     this.headerEl.innerHTML = `
       <div class="rp-title-row">
+        <span class="rp-drag-handle" data-drag-handle="recipes" title="Drag panel">:::</span>
         <span class="rp-icon">${profIcon}</span>
         <span class="rp-title">${esc(profName)}</span>
         <button class="rp-close" type="button" title="Close">×</button>
@@ -428,13 +429,23 @@ export class RecipesPanel {
         border-bottom: 1px solid rgba(255, 204, 68, 0.18);
       }
       .rp-title-row { display: flex; align-items: center; gap: 8px; }
+      .rp-drag-handle {
+        color: #667; cursor: grab; user-select: none;
+        font: bold 14px monospace; letter-spacing: 1px;
+        padding: 0 4px;
+      }
+      .rp-drag-handle:hover { color: #ffcc44; }
+      .rp-drag-handle:active { cursor: grabbing; }
       .rp-icon { font-size: 20px; }
       .rp-title { flex: 1; font: bold 14px monospace; color: #ffcc44; }
       .rp-close {
-        background: none; border: none; color: #889; cursor: pointer;
-        font: bold 18px monospace; line-height: 1; padding: 0 4px;
+        background: rgba(255, 100, 100, 0.12);
+        border: 1px solid rgba(255, 100, 100, 0.3);
+        color: #f88; cursor: pointer;
+        font: bold 16px monospace; line-height: 1;
+        padding: 2px 8px; border-radius: 3px;
       }
-      .rp-close:hover { color: #fff; }
+      .rp-close:hover { background: rgba(255, 100, 100, 0.28); color: #fff; }
       .rp-subtitle { color: #998; font-size: 10px; margin-top: 2px; }
       .rp-body {
         flex: 1; min-height: 0; overflow-y: auto; padding: 6px;
