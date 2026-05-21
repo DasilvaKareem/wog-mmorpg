@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { getGoldBalance, getItemBalance, mintItem, burnItem, enqueueGoldTransferFrom } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGoldAsync } from "../blockchain/goldLedger.js";
 import {
@@ -62,7 +62,7 @@ export function registerTradeRoutes(server: FastifyInstance) {
     const { sellerAddress, tokenId, quantity, askPrice, targetBuyerWallet, expiresAtMs } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
-    if (sellerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, sellerAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -206,7 +206,7 @@ export function registerTradeRoutes(server: FastifyInstance) {
     const { tradeId, buyerAddress, bidPrice } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
-    if (buyerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, buyerAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

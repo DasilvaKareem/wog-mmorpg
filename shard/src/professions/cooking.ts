@@ -6,7 +6,7 @@ import { hasLearnedProfession } from "./professions.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { logDiary, narrativeCook, narrativeConsume } from "../social/diary.js";
 import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
@@ -61,7 +61,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -254,7 +254,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

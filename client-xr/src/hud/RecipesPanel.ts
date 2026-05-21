@@ -13,6 +13,15 @@ interface NormalizedRecipe {
   hpRestoration?: number;
 }
 
+interface NormalizedGatherable {
+  name: string;
+  rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
+  requiredSkillLevel: number;
+  requiredToolTier?: number;
+  toolName?: string;
+  maxCharges?: number;
+}
+
 interface ShowOpts {
   profId: string;
   profName: string;
@@ -31,6 +40,17 @@ const RECIPE_ENDPOINT: Record<string, string | null> = {
   cooking: "/cooking/recipes",
   leatherworking: "/leatherworking/recipes",
   jewelcrafting: "/jewelcrafting/recipes",
+};
+
+const CATALOG_ENDPOINT: Record<string, string> = {
+  mining: "/mining/catalog",
+  herbalism: "/herbalism/catalog",
+};
+
+const GATHER_TOOL: Record<string, string> = {
+  mining: "Pickaxe",
+  herbalism: "Sickle",
+  skinning: "Skinning knife",
 };
 
 const GATHER_HINTS: Record<string, string> = {
@@ -107,6 +127,30 @@ function normalize(profId: string, payload: any): NormalizedRecipe[] {
       return null;
     })
     .filter((r): r is NormalizedRecipe => r !== null)
+    .sort((a, b) => a.requiredSkillLevel - b.requiredSkillLevel);
+}
+
+function normalizeCatalog(profId: string, payload: any): NormalizedGatherable[] {
+  const arr: any[] = Array.isArray(payload) ? payload : [];
+  const toolName = GATHER_TOOL[profId];
+  const tierKey = profId === "mining" ? "requiredPickaxeTier" : "requiredSickleTier";
+  return arr
+    .map((e): NormalizedGatherable | null => {
+      if (!e) return null;
+      const rawRarity = String(e.rarity ?? "common").toLowerCase();
+      const rarity = ["common", "uncommon", "rare", "epic", "legendary"].includes(rawRarity)
+        ? (rawRarity as NormalizedGatherable["rarity"])
+        : "common";
+      return {
+        name: String(e.label ?? e.oreType ?? e.flowerType ?? "?"),
+        rarity,
+        requiredSkillLevel: Number(e.requiredSkillLevel ?? 1) || 1,
+        requiredToolTier: Number(e[tierKey] ?? 0) || undefined,
+        toolName,
+        maxCharges: Number(e.maxCharges ?? 0) || undefined,
+      };
+    })
+    .filter((e): e is NormalizedGatherable => e !== null)
     .sort((a, b) => a.requiredSkillLevel - b.requiredSkillLevel);
 }
 
@@ -221,9 +265,10 @@ export class RecipesPanel {
     if (!this.current) return;
     const { profId } = this.current;
     const endpoint = RECIPE_ENDPOINT[profId];
+    const catalogEndpoint = CATALOG_ENDPOINT[profId];
     const seq = ++this.fetchSeq;
 
-    if (!endpoint) {
+    if (!endpoint && !catalogEndpoint) {
       const hint = GATHER_HINTS[profId] ?? "This is a gathering profession.";
       this.bodyEl.innerHTML = `
         <div class="rp-empty">
@@ -234,13 +279,15 @@ export class RecipesPanel {
       return;
     }
 
-    this.bodyEl.innerHTML = `<div class="rp-loading">Loading recipes…</div>`;
+    const isCatalog = !endpoint && !!catalogEndpoint;
+    const targetEndpoint = endpoint ?? catalogEndpoint!;
+    this.bodyEl.innerHTML = `<div class="rp-loading">Loading ${isCatalog ? "gatherables" : "recipes"}…</div>`;
 
     let payload: any = null;
     let lastErr = "";
     for (const base of CANDIDATE_BASES) {
       try {
-        const res = await fetch(toUrl(base, endpoint));
+        const res = await fetch(toUrl(base, targetEndpoint));
         if (res.ok) {
           payload = await res.json();
           lastErr = "";
@@ -254,7 +301,17 @@ export class RecipesPanel {
 
     if (seq !== this.fetchSeq) return; // stale fetch
     if (!payload) {
-      this.bodyEl.innerHTML = `<div class="rp-error">Failed to load recipes${lastErr ? ` — ${esc(lastErr)}` : ""}</div>`;
+      this.bodyEl.innerHTML = `<div class="rp-error">Failed to load ${isCatalog ? "gatherables" : "recipes"}${lastErr ? ` — ${esc(lastErr)}` : ""}</div>`;
+      return;
+    }
+
+    if (isCatalog) {
+      const entries = normalizeCatalog(profId, payload);
+      if (entries.length === 0) {
+        this.bodyEl.innerHTML = `<div class="rp-empty"><div class="rp-empty-title">No gatherables found</div></div>`;
+        return;
+      }
+      this.renderGatherables(entries);
       return;
     }
 
@@ -264,6 +321,41 @@ export class RecipesPanel {
       return;
     }
     this.renderRecipes(recipes);
+  }
+
+  private renderGatherables(entries: NormalizedGatherable[]) {
+    if (!this.current) return;
+    const { skillLevel, profId } = this.current;
+    const hint = GATHER_HINTS[profId] ?? "";
+
+    let html = "";
+    for (const e of entries) {
+      const canHarvest = skillLevel >= e.requiredSkillLevel;
+      const rowClass = canHarvest ? "rp-row rp-row-ok" : "rp-row rp-row-locked";
+      const lvlClass = canHarvest ? "rp-lvl-ok" : "rp-lvl-locked";
+      const rarityClass = `rp-rarity rp-rarity-${e.rarity}`;
+      const meta: string[] = [];
+      if (e.toolName && e.requiredToolTier && e.requiredToolTier > 0) {
+        meta.push(`⛏ ${esc(e.toolName)} T${e.requiredToolTier}+`);
+      }
+      if (e.maxCharges) meta.push(`◆ ${e.maxCharges} per node`);
+
+      html += `
+        <div class="${rowClass}">
+          <div class="rp-row-head">
+            <span class="rp-output">${esc(e.name)}</span>
+            <span class="${rarityClass}">${esc(e.rarity)}</span>
+            <span class="${lvlClass}">Lv ${e.requiredSkillLevel}</span>
+          </div>
+          ${meta.length > 0 ? `<div class="rp-meta">${meta.join("  ·  ")}</div>` : ""}
+        </div>
+      `;
+    }
+
+    const unlocked = entries.filter((e) => skillLevel >= e.requiredSkillLevel).length;
+    const summary = `${unlocked} / ${entries.length} unlocked`;
+    const hintHtml = hint ? `<div class="rp-empty-hint" style="padding:4px 4px 8px;text-align:left;">${esc(hint)}</div>` : "";
+    this.bodyEl.innerHTML = `<div class="rp-summary">${summary}</div>${hintHtml}${html}`;
   }
 
   private renderRecipes(recipes: NormalizedRecipe[]) {
@@ -403,6 +495,16 @@ export class RecipesPanel {
       }
       .rp-status-ok { color: #4f8; }
       .rp-status-err { color: #f86; }
+      .rp-rarity {
+        font: bold 10px monospace;
+        padding: 1px 6px; border-radius: 3px;
+        text-transform: uppercase; letter-spacing: 0.4px;
+      }
+      .rp-rarity-common    { color: #bbb; background: rgba(170,170,170,0.12); }
+      .rp-rarity-uncommon  { color: #6f6; background: rgba(100,255,100,0.13); }
+      .rp-rarity-rare      { color: #6cf; background: rgba(100,200,255,0.14); }
+      .rp-rarity-epic      { color: #c8f; background: rgba(200,140,255,0.16); }
+      .rp-rarity-legendary { color: #fc6; background: rgba(255,200,100,0.16); }
     `;
     document.head.appendChild(style);
   }

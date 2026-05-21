@@ -5,7 +5,7 @@ import { enqueueItemMint, enqueueItemBurn, getItemBalance, getGoldBalance } from
 import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { logDiary, narrativeCraft } from "../social/diary.js";
@@ -713,7 +713,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

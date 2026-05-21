@@ -806,7 +806,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       return { error: "Invalid wallet address" };
     }
 
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

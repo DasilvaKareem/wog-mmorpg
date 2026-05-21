@@ -4,7 +4,7 @@ import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { ORE_CATALOG } from "../resources/oreCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { logDiary, narrativeMine } from "../social/diary.js";
 import { awardProfessionXp, xpForRarity, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
@@ -93,7 +93,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

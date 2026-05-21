@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getEntity, recalculateEntityVitals, getWorldTick } from "../world/zoneRuntime.js";
 import { enqueueItemBurn } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { getItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 import { saveCharacter } from "../character/characterStore.js";
@@ -129,7 +129,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -367,7 +367,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       return { error: "Invalid wallet address" };
     }
 
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

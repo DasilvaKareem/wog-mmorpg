@@ -5,7 +5,7 @@ import { FLOWER_CATALOG } from "../resources/flowerCatalog.js";
 import { NECTAR_CATALOG } from "../resources/nectarCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { logDiary, narrativeGatherHerb } from "../social/diary.js";
 import { awardProfessionXp, xpForRarity, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
@@ -98,7 +98,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -368,7 +368,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       return { error: "Invalid wallet address" };
     }
 
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
