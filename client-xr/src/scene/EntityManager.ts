@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import type { Entity, ElevationProvider, VisibleIntent } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
+import type { EffectsManager } from "./EffectsManager.js";
 import { resolveCanonicalArmorPieceId } from "./ArmorSystem.js";
 import { getGradientMap, NO_OUTLINE_LAYER } from "./ToonPipeline.js";
-import { playSoundEffect } from "../sfx.js";
+import { playSoundEffect, type SoundEffectId } from "../sfx.js"; // SoundEffectId used in GATHER_SFX
 import { playerSession } from "../state/PlayerSession.js";
 
 // ── Appearance color maps (matched to actual server values) ─────────
@@ -644,6 +645,7 @@ const GATHER_ACTION: Record<string, Action> = {
   mining: "mine",
   herbalism: "forage",
   skinning: "skin",
+  farming: "forage",
 };
 
 /** Map professional craftType → Action */
@@ -785,6 +787,8 @@ interface EntityObject {
   lifeToken: number;
   /** Timestamp when death animation started — prevents premature respawn */
   dyingSince: number;
+  /** Name/level label sprite above entity */
+  nameLabel: THREE.Sprite | null;
   /** Floating quest indicator sprite above NPC */
   questIndicator: THREE.Sprite | null;
   /** Red ground ring shown while the entity is actively attacking (WoW-style combat indicator) */
@@ -801,6 +805,7 @@ export class EntityManager {
   private speechBubbles: SpeechBubble[] = [];
   private elevationProvider: ElevationProvider | null = null;
   private envAssets: EnvironmentAssets | null = null;
+  private effects: EffectsManager | null = null;
   /** ID of the local player's entity — used to gate XP-gain floating text. Auto-healed from wallet match in sync(). */
   private ownEntityId: string | null = null;
   /** Wallet address (lowercased) is the durable identity. entityId changes on relogin (shard issues new id), wallet does not. */
@@ -845,6 +850,10 @@ export class EntityManager {
   /** Link to an elevation provider (WorldManager or TerrainRenderer) */
   setElevationProvider(ep: ElevationProvider) {
     this.elevationProvider = ep;
+  }
+
+  setEffectsManager(mgr: EffectsManager) {
+    this.effects = mgr;
   }
 
   /** Tell the manager which entity is the local player (for XP-gain text, etc.) */
@@ -1040,6 +1049,9 @@ export class EntityManager {
         }
 
         existing.prevHp = ent.hp;
+        if (existing.nameLabel && ent.level && ent.level !== existing.entity.level) {
+          this.updateNameLabel(existing, ent);
+        }
         existing.entity = ent;
         this.refreshCombatFacing(existing, preferredIntentBySource.get(id), entities);
 
@@ -1402,6 +1414,22 @@ export class EntityManager {
     const baseY = this.elevationProvider?.getElevationAt(x, z) ?? obj.group.position.y;
     const yOffset = obj.hasGlbModel ? 0.15 : 0;
     obj.group.position.set(x, baseY + yOffset, z);
+  }
+
+  private updateNameLabel(obj: EntityObject, ent: Entity) {
+    if (!obj.nameLabel) return;
+    const labelColor = ent.type === "player" ? "#44ddff" : ent.type === "mob" ? "#ff6666" : ent.type === "boss" ? "#cc66ff" : "#ffcc44";
+    const labelText = ent.level ? `${ent.name} [Lv${ent.level}]` : ent.name;
+    const oldY = obj.nameLabel.position.y;
+    const oldScale = obj.nameLabel.scale.clone();
+    const newSprite = makeLabel(labelText, labelColor);
+    newSprite.position.y = oldY;
+    newSprite.scale.copy(oldScale);
+    obj.group.remove(obj.nameLabel);
+    (obj.nameLabel.material as THREE.SpriteMaterial).map?.dispose();
+    (obj.nameLabel.material as THREE.SpriteMaterial).dispose();
+    obj.group.add(newSprite);
+    obj.nameLabel = newSprite;
   }
 
   private updateHpBar(obj: EntityObject, ent: Entity) {
@@ -2136,8 +2164,23 @@ export class EntityManager {
       // ── Profession: gather/craft ──
       if (ev.type === "loot" && ev.entityId && ev.data?.gatherType) {
         const obj = this.entities.get(ev.entityId);
-        const action = GATHER_ACTION[ev.data.gatherType as string] ?? "gather";
+        const gatherType = ev.data.gatherType as string;
+        const action = GATHER_ACTION[gatherType] ?? "gather";
         if (obj && obj.currentAction !== action) this.playOneShot(obj, action);
+        // VFX at node position (fallback to gatherer position)
+        if (this.effects && obj) {
+          const nodeId = ev.data?.nodeId as string | undefined;
+          const nodeObj = nodeId ? this.entities.get(nodeId) : undefined;
+          const vfxPos = nodeObj ? nodeObj.group.position.clone() : obj.group.position.clone();
+          this.effects.spawnGatherEffect(vfxPos, gatherType);
+        }
+        // SFX — reuse existing sounds until dedicated gather audio is added
+        const GATHER_SFX: Record<string, SoundEffectId> = {
+          mining: "combat_melee_hit", herbalism: "ui_item_pickup", skinning: "combat_defend",
+          farming: "ui_item_pickup",
+        };
+        const sfxId = GATHER_SFX[gatherType];
+        if (sfxId) playSoundEffect(sfxId);
       }
       if (ev.type === "loot" && ev.entityId && ev.data?.craftType) {
         const obj = this.entities.get(ev.entityId);
@@ -2441,6 +2484,7 @@ export class EntityManager {
     // HP bar + label
     let hpBarFg: THREE.Mesh | null = null;
     let hpBarBg: THREE.Mesh | null = null;
+    let entityNameLabel: THREE.Sprite | null = null;
     if (info.style === "humanoid" || info.style === "mob") {
       const labelY = info.style === "mob" && ent.type === "boss" ? 2.35 : 1.95;
 
@@ -2461,14 +2505,14 @@ export class EntityManager {
 
       const labelColor = ent.type === "player" ? "#44ddff" : ent.type === "mob" ? "#ff6666" : ent.type === "boss" ? "#cc66ff" : "#ffcc44";
       const labelText = ent.level ? `${ent.name} [Lv${ent.level}]` : ent.name;
-      const label = makeLabel(labelText, labelColor);
-      label.position.y = labelY + 0.3;
-      group.add(label);
+      entityNameLabel = makeLabel(labelText, labelColor);
+      entityNameLabel.position.y = labelY + 0.3;
+      group.add(entityNameLabel);
     } else if (ent.type !== "corpse") {
-      const label = makeLabel(ent.name, "#aaaaaa");
-      label.position.y = 1.2;
-      label.scale.set(1.5, 0.4, 1);
-      group.add(label);
+      entityNameLabel = makeLabel(ent.name, "#aaaaaa");
+      entityNameLabel.position.y = 1.2;
+      entityNameLabel.scale.set(1.5, 0.4, 1);
+      group.add(entityNameLabel);
     }
 
     const obj: EntityObject = {
@@ -2490,6 +2534,7 @@ export class EntityManager {
       lifeState: ent.hp > 0 ? "alive" : "dead-hidden",
       lifeToken: 0,
       dyingSince: 0,
+      nameLabel: entityNameLabel,
       questIndicator: null,
       combatRing: null,
       combatRingAlpha: 0,
@@ -3103,12 +3148,19 @@ export class EntityManager {
         const model = this.envAssets.place(assetName, 0, 0, 0);
         if (model) {
           model.name = "glb_mob";
+          const tint = this.envAssets.getTintForMob(ent.name);
+          const tintColor = tint != null ? new THREE.Color(tint) : null;
+          const cloneMat = (mat: THREE.Material): THREE.Material => {
+            const c = mat.clone();
+            if (tintColor && "color" in c) (c as { color: THREE.Color }).color = tintColor.clone();
+            return c;
+          };
           model.traverse((child) => {
             if (!(child instanceof THREE.Mesh)) return;
             if (Array.isArray(child.material)) {
-              child.material = child.material.map((mat) => mat.clone());
+              child.material = child.material.map(cloneMat);
             } else if (child.material) {
-              child.material = child.material.clone();
+              child.material = cloneMat(child.material);
             }
           });
           group.add(model);

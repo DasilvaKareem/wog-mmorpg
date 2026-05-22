@@ -86,6 +86,33 @@ export interface AgentObjective {
   completedAt?: number;
 }
 
+/**
+ * User-defined "limit order" rule for an item the agent should auto-buy and/or
+ * auto-sell. Runs independently of focus — DeFi-trader-style passive strategy.
+ */
+export interface TradingRule {
+  id: string;
+  tokenId: number;
+  itemName?: string;
+  /** Buy any auction with price ≤ this (per unit). Omit to disable buying. */
+  maxBuy?: number;
+  /** List inventory of this token at this price (per unit). Omit to disable selling. */
+  minSell?: number;
+  /** Never hold more than this many of this token. */
+  maxQty?: number;
+  /** Total gold cap for buy spend on this rule, ever. */
+  budget?: number;
+  /** Cumulative gold spent on buys for this rule. */
+  spent?: number;
+  /** Days to list when auto-selling (1..30, default 7). */
+  listDurationDays?: number;
+  venue: "auction" | "direct" | "both";
+  enabled: boolean;
+  createdAt: number;
+  /** Last tick the rule fired a buy/sell, for cooldown rate-limiting. */
+  lastFiredAt?: number;
+}
+
 export interface AgentConfig {
   enabled: boolean;
   focus: AgentFocus;
@@ -126,6 +153,10 @@ export interface AgentConfig {
    * once the quest is completed/abandoned or the user toggles focus off.
    */
   focusedQuestId?: string;
+  /** Passive auto-trading rules — run on a separate cadence from focus. */
+  tradingRules?: TradingRule[];
+  /** Global on/off switch for the auto-trader pass. Disabled by default. */
+  tradingEnabled?: boolean;
 }
 
 export interface AgentEntityRef {
@@ -1075,6 +1106,71 @@ export async function clearCompletedObjectives(userWallet: string): Promise<Agen
 /** Get the first non-completed objective (the one the agent should work on). */
 export function getActiveObjective(objectives: AgentObjective[]): AgentObjective | null {
   return objectives.find((o) => o.status === "pending" || o.status === "active") ?? null;
+}
+
+// ── Trading rules ──────────────────────────────────────────────────────────
+
+let tradingRuleIdCounter = 0;
+export function createTradingRuleId(): string {
+  return `tr-${Date.now()}-${++tradingRuleIdCounter}`;
+}
+
+export async function getTradingRules(userWallet: string): Promise<TradingRule[]> {
+  const cfg = await getAgentConfig(userWallet);
+  return cfg?.tradingRules ?? [];
+}
+
+export async function upsertTradingRule(
+  userWallet: string,
+  rule: TradingRule,
+): Promise<TradingRule[]> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = cfg.tradingRules ?? [];
+  const idx = rules.findIndex((r) => r.id === rule.id);
+  if (idx >= 0) {
+    // Preserve running spend total on update.
+    rules[idx] = { ...rules[idx], ...rule, spent: rules[idx].spent ?? rule.spent ?? 0 };
+  } else {
+    rules.push({ ...rule, spent: rule.spent ?? 0 });
+  }
+  await patchAgentConfig(userWallet, { tradingRules: rules });
+  return rules;
+}
+
+export async function removeTradingRule(
+  userWallet: string,
+  ruleId: string,
+): Promise<TradingRule[]> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = (cfg.tradingRules ?? []).filter((r) => r.id !== ruleId);
+  await patchAgentConfig(userWallet, { tradingRules: rules });
+  return rules;
+}
+
+/** Increment the running spend on a rule. Returns true if budget still has room. */
+export async function recordRuleSpend(
+  userWallet: string,
+  ruleId: string,
+  amount: number,
+): Promise<boolean> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = cfg.tradingRules ?? [];
+  const rule = rules.find((r) => r.id === ruleId);
+  if (!rule) return false;
+  rule.spent = (rule.spent ?? 0) + amount;
+  rule.lastFiredAt = Date.now();
+  await patchAgentConfig(userWallet, { tradingRules: rules });
+  return rule.budget == null || rule.spent < rule.budget;
+}
+
+/** Update lastFiredAt without changing spend (used for sell-listings). */
+export async function markRuleFired(userWallet: string, ruleId: string): Promise<void> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = cfg.tradingRules ?? [];
+  const rule = rules.find((r) => r.id === ruleId);
+  if (!rule) return;
+  rule.lastFiredAt = Date.now();
+  await patchAgentConfig(userWallet, { tradingRules: rules });
 }
 
 export async function listEnabledAgentWallets(): Promise<string[]> {

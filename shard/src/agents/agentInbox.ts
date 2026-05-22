@@ -182,6 +182,29 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
 }
 
 /**
+ * Send an inbox message addressed at a custodial wallet, but delivered to its
+ * owner (the wallet the human player signs in with). Falls back to the
+ * custodial wallet itself when no owner mapping is known — that's the right
+ * behaviour when a human player listed directly without an agent.
+ */
+export async function sendInboxToCustodialOwner(
+  custodialWallet: string,
+  params: Omit<SendMessageParams, "to">,
+): Promise<string> {
+  let recipient = custodialWallet;
+  try {
+    if (isPostgresConfigured()) {
+      const { getOwnerByCustodialWallet } = await import("../character/characterProjectionStore.js");
+      const owner = await getOwnerByCustodialWallet(custodialWallet);
+      if (owner) recipient = owner;
+    }
+  } catch {
+    /* fall back to the custodial address itself */
+  }
+  return sendInboxMessage({ ...params, to: recipient });
+}
+
+/**
  * Broadcast a message to all agents in a zone.
  * Caller provides the list of wallet addresses in the zone.
  */

@@ -80,8 +80,8 @@ function PlayerRow({ player, zoneId }: { player: PlayerInfo; zoneId: string }): 
         className="w-2 h-2 rounded-full shrink-0 border border-black"
         style={{ backgroundColor: classColor ?? "#9aa7cc" }}
       />
-      <Badge variant={getLevelBadgeVariant(player.level)} className="w-10 justify-center">
-        {player.level}
+      <Badge variant={getLevelBadgeVariant(player.level ?? 0)} className="w-10 justify-center">
+        {player.level ?? "?"}
       </Badge>
       <div className="flex-1 min-w-0">
         <div className="text-[9px] text-[#edf2ff] truncate">{player.name}</div>

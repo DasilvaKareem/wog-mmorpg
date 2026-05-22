@@ -14,6 +14,8 @@ import { WalletManager } from "@/lib/walletManager";
 import { useWalletContext } from "@/context/WalletContext";
 import { ChatLog } from "@/components/ChatLog";
 import { EdictsDialog } from "@/components/EdictsDialog";
+import { useEdicts, actionSummary } from "@/hooks/useEdicts";
+import { useTechniques } from "@/hooks/useTechniques";
 import { trackGiveInstruction, trackAgentTaskStarted, trackAgentTaskCompleted, trackAgentProgressTick } from "@/lib/analytics";
 
 interface InboxMessage {
@@ -80,6 +82,16 @@ interface AgentStatusData {
   entitySource?: "live" | "saved" | null;
   currentActivity: string | null;
   currentScript: { type: string; reason?: string } | null;
+  activeOrder?: {
+    action: string;
+    targetId?: string;
+    targetName?: string;
+    techniqueId?: string;
+    techniqueName?: string;
+    edictId?: string;
+    edictName?: string;
+    edictAction?: string;
+  } | null;
   telemetry: {
     loop: { count: number; avgMs: number; maxMs: number; lastMs: number };
     walletBalance: { count: number; avgMs: number; maxMs: number; lastMs: number };
@@ -103,6 +115,7 @@ const FOCUS_COLORS: Record<string, string> = {
   cooking: "#f2a854",
   homestead: "#7dd3a7",
   enchanting: "#c792ea",
+  dungeon: "#d96a4a",
   idle: "#8b9abc",
   user: "#f5d063",
 };
@@ -115,6 +128,7 @@ const FOCUS_SUGGESTIONS = [
   "alchemy",
   "cooking",
   "enchanting",
+  "dungeon",
   "shopping",
   "trading",
   "traveling",
@@ -393,10 +407,21 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     parseNumericTokenId,
   ]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages, but only when the user is already near the bottom.
+  // If they've scrolled up to read older messages, leave them alone — sending a
+  // new message resets `autoScroll` so the viewport re-tails.
+  const [autoScroll, setAutoScroll] = React.useState(true);
   React.useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages]);
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, autoScroll]);
+
+  const handleScroll = React.useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    setAutoScroll(scrollHeight - scrollTop - clientHeight < 50);
+  }, []);
 
   React.useEffect(() => {
     setMessages([]);
@@ -630,6 +655,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
 
     setInput("");
     setSending(true);
+    setAutoScroll(true);
     const ts = Date.now();
 
     const speakMatch = !replyTarget ? msg.match(/^\/(?:speak|say)\s+(.+)$/is) : null;
@@ -844,6 +870,32 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const hpPct = hp != null && maxHp ? Math.round((hp / Math.max(maxHp, 1)) * 100) : null;
   const hpColor = hpPct == null ? "#8b9abc" : hpPct > 60 ? "#54f28b" : hpPct > 30 ? "#e0af68" : "#f25454";
 
+  // ── Edict real-time viewer: current ability + next-in-line ────────────
+  const activeOrder = status?.activeOrder ?? null;
+  const { edicts: edictList } = useEdicts(walletAddress, token);
+  const { techniques: techList } = useTechniques();
+  const techNameById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of techList) map.set(t.id, t.name);
+    return map;
+  }, [techList]);
+  const nowEdictName = activeOrder?.edictName ?? null;
+  const nowActionLabel = activeOrder?.techniqueName
+    ?? (activeOrder?.action === "attack" ? "Basic Attack"
+      : activeOrder?.action === "move" ? "Reposition"
+      : activeOrder?.action ?? null);
+  const nextEdict = React.useMemo(() => {
+    if (!edictList.length) return null;
+    const enabled = edictList.filter((e) => e.enabled);
+    if (!enabled.length) return null;
+    const currentIdx = activeOrder?.edictId
+      ? enabled.findIndex((e) => e.id === activeOrder.edictId)
+      : -1;
+    return currentIdx >= 0
+      ? (enabled[currentIdx + 1] ?? enabled[0])
+      : enabled[0];
+  }, [edictList, activeOrder?.edictId]);
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
@@ -881,13 +933,28 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
             </button>
           )}
           {isDeployed && (
-            <button
-              onClick={() => setViewMode(viewMode === "chat" ? "zonelog" : "chat")}
-              className="text-[11px] text-[#7a8b9e] hover:text-[#7dcfff] transition-colors uppercase tracking-widest"
-              title={viewMode === "chat" ? "Show zone log" : "Show chat"}
-            >
-              {viewMode === "chat" ? "[log]" : "[chat]"}
-            </button>
+            <div className="flex items-center text-[11px] uppercase tracking-widest" role="tablist">
+              <button
+                onClick={() => setViewMode("chat")}
+                className="px-1.5 transition-colors"
+                style={{ color: viewMode === "chat" ? "#ffcc00" : "#7a8b9e" }}
+                title="Agent chat"
+                role="tab"
+                aria-selected={viewMode === "chat"}
+              >
+                [agent]
+              </button>
+              <button
+                onClick={() => setViewMode("zonelog")}
+                className="px-1.5 transition-colors"
+                style={{ color: viewMode === "zonelog" ? "#ffcc00" : "#7a8b9e" }}
+                title="Zone log"
+                role="tab"
+                aria-selected={viewMode === "zonelog"}
+              >
+                [log]
+              </button>
+            </div>
           )}
           {isDeployed && (
             <button
@@ -896,6 +963,15 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               title="Combat edicts"
             >
               [edicts]
+            </button>
+          )}
+          {isDeployed && (
+            <button
+              onClick={() => gameBus.emit("tradingRulesOpen", undefined)}
+              className="text-[11px] text-[#7a8b9e] hover:text-[#54f28b] transition-colors uppercase tracking-widest"
+              title="Auto-trading rules"
+            >
+              [trade]
             </button>
           )}
           {isDeployed && (
@@ -951,6 +1027,30 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               {activity.startsWith("⚠") ? activity : `▸ ${activity}`}
             </div>
           )}
+          {/* Edict real-time viewer: NOW / NEXT */}
+          {(nowActionLabel || nextEdict) && (
+            <div className="mt-1 flex flex-col gap-0.5 text-[10px] font-mono">
+              {nowActionLabel && (
+                <div className="flex items-baseline gap-1.5 truncate">
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#f2c854]">NOW</span>
+                  <span className="truncate text-[#fff1a8]">
+                    {nowActionLabel}
+                    {activeOrder?.targetName ? <span className="text-[#8b9abc]"> → {activeOrder.targetName}</span> : null}
+                    {nowEdictName ? <span className="text-[#5f6b8f]"> [{nowEdictName}]</span> : null}
+                  </span>
+                </div>
+              )}
+              {nextEdict && (
+                <div className="flex items-baseline gap-1.5 truncate">
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#5dadec]">NEXT</span>
+                  <span className="truncate text-[#cde0ff]">
+                    {actionSummary(nextEdict.action, nextEdict.action.techniqueId ? techNameById.get(nextEdict.action.techniqueId) : undefined)}
+                    <span className="text-[#5f6b8f]"> [{nextEdict.name}]</span>
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           {status.telemetry && (
             <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-[#5f6b8f]">
               <span>loop {Math.round(status.telemetry.loop.avgMs)}ms</span>
@@ -971,6 +1071,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {viewMode === "chat" && (
       <div
         ref={scrollRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5"
         style={{ scrollbarWidth: "thin", scrollbarColor: "#1a3a22 transparent" }}
       >
@@ -1345,6 +1446,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         classId={status?.entity?.classId}
         learnedTechniqueIds={status?.entity?.learnedTechniques}
       />
+
 
       {/* Deploy payment overlay */}
       {showDeployPayment && (

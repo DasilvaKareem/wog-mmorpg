@@ -28,6 +28,8 @@ import {
   objectiveToFocus,
   completeObjective,
   updateObjectiveProgress,
+  recordRuleSpend,
+  markRuleFired,
   type AgentFocus,
   type AgentStrategy,
   type GatherPreference,
@@ -35,10 +37,12 @@ import {
   type PendingQuestion,
   type AgentRuntimeState,
   type AgentErrorEntry,
+  type TradingRule,
   getActionQueue,
   setActionQueue,
   clearActionQueue,
 } from "./agentConfigStore.js";
+import { getItemBalance } from "../blockchain/blockchain.js";
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
@@ -48,6 +52,7 @@ import { getPartyLeaderId, getPlayerPartyId } from "../social/partySystem.js";
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { deductCost, type ActionType } from "../economy/sessionBudget.js";
+import { sendInstantAlert } from "../social/telegramNotifications.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
 import { AgentMcpClient } from "./mcpClient.js";
 import { type BotScript, type TriggerEvent } from "../types/botScriptTypes.js";
@@ -98,8 +103,8 @@ const MAX_STALE_TICKS = Math.ceil(30_000 / TICK_MS);
 const MOVE_REISSUE_MS = 4_000;
 const GOTO_MOVE_REISSUE_MS = 700;
 const MOVE_PROGRESS_EPSILON = 4;
-const PARTY_LEADER_FOLLOW_DISTANCE = 150;
-const PARTY_LEADER_STOP_DISTANCE = 35;
+const PARTY_LEADER_FOLLOW_DISTANCE = 70;
+const PARTY_LEADER_STOP_DISTANCE = 20;
 const SUPERVISOR_EVENT_TYPES: ZoneEvent["type"][] = ["combat", "death", "kill", "levelup", "quest", "quest-progress", "loot", "technique"];
 
 function getQuestProgressMilestone(event: ZoneEvent): string | null {
@@ -1048,6 +1053,114 @@ export class AgentRunner {
     appendAgentError(this.userWallet, entry).catch(() => {});
   }
 
+  // ── Auto-trader pass ───────────────────────────────────────────────────────
+  //
+  // Independent of focus: scans the user-defined `tradingRules` and fires
+  // buyout/list actions whose conditions are met. Buy side checks zone
+  // auctions for floor ≤ maxBuy; sell side lists inventory surplus at
+  // minSell. Each rule has its own cooldown so a misconfigured rule can't
+  // hammer the auction house every tick.
+  private async autoTraderPass(): Promise<void> {
+    if (!this.custodialWallet || !this.api) return;
+    const cfg = await getAgentConfig(this.userWallet);
+    if (!cfg?.tradingEnabled) return;
+    const rules = cfg.tradingRules ?? [];
+    if (rules.length === 0) return;
+
+    const now = Date.now();
+    const BUY_COOLDOWN_MS = 30_000;
+    const SELL_COOLDOWN_MS = 5 * 60_000;
+
+    for (const rule of rules) {
+      if (!rule.enabled) continue;
+      if (rule.venue === "direct") {
+        // Direct-trade venue is reserved for a future iteration. Skip silently
+        // so an existing rule doesn't error out.
+        continue;
+      }
+      const cooldown = rule.maxBuy != null ? BUY_COOLDOWN_MS : SELL_COOLDOWN_MS;
+      if (rule.lastFiredAt && now - rule.lastFiredAt < cooldown) continue;
+
+      try {
+        const balance = Number(await getItemBalance(this.custodialWallet, BigInt(rule.tokenId)));
+
+        // ── Sell side ──────────────────────────────────────────────────────
+        if (rule.minSell != null && balance > 0) {
+          const keepQty = rule.maxQty ?? 0;
+          const surplus = Math.max(0, balance - keepQty);
+          if (surplus > 0) {
+            const days = Math.max(1, Math.min(30, rule.listDurationDays ?? 7));
+            const res = await this.api("POST", `/auctionhouse/${this.currentRegion}/create`, {
+              sellerAddress: this.custodialWallet,
+              tokenId: rule.tokenId,
+              quantity: surplus,
+              startPrice: rule.minSell,
+              durationMinutes: days * 24 * 60,
+            });
+            if (res?.ok) {
+              await markRuleFired(this.userWallet, rule.id);
+              const label = rule.itemName ?? `token #${rule.tokenId}`;
+              void this.logActivity(`Auto-listed ${surplus}× ${label} @ ${rule.minSell} GOLD (${days}d)`);
+            }
+          }
+        }
+
+        // ── Buy side ───────────────────────────────────────────────────────
+        if (rule.maxBuy != null) {
+          if (rule.maxQty != null && balance >= rule.maxQty) continue;
+          const remainingBudget = rule.budget != null
+            ? rule.budget - (rule.spent ?? 0)
+            : Infinity;
+          if (remainingBudget <= 0) continue;
+
+          const listing = await this.api(
+            "GET",
+            `/auctionhouse/${this.currentRegion}/auctions?status=active&tokenId=${rule.tokenId}`,
+          );
+          const auctions: Array<{
+            auctionId: number;
+            seller: string;
+            quantity: number;
+            buyoutPrice?: number | null;
+            startPrice: number;
+          }> = Array.isArray(listing) ? listing : (listing?.auctions ?? []);
+
+          // Find cheapest buyout (per-unit price ≤ maxBuy, not our own, within budget+qty caps).
+          let best: typeof auctions[number] | null = null;
+          let bestPricePerUnit = Infinity;
+          for (const a of auctions) {
+            if (!a.buyoutPrice || a.buyoutPrice <= 0) continue;
+            if (a.seller?.toLowerCase() === this.custodialWallet.toLowerCase()) continue;
+            const perUnit = a.buyoutPrice / Math.max(1, a.quantity);
+            if (perUnit > rule.maxBuy) continue;
+            if (a.buyoutPrice > remainingBudget) continue;
+            if (rule.maxQty != null && balance + a.quantity > rule.maxQty) continue;
+            if (perUnit < bestPricePerUnit) {
+              best = a;
+              bestPricePerUnit = perUnit;
+            }
+          }
+
+          if (best) {
+            const res = await this.api("POST", `/auctionhouse/${this.currentRegion}/buyout`, {
+              auctionId: best.auctionId,
+              buyerAddress: this.custodialWallet,
+            });
+            if (res?.ok) {
+              await recordRuleSpend(this.userWallet, rule.id, best.buyoutPrice!);
+              const label = rule.itemName ?? `token #${rule.tokenId}`;
+              void this.logActivity(
+                `Auto-bought ${best.quantity}× ${label} for ${best.buyoutPrice} GOLD (@ ${bestPricePerUnit.toFixed(4)} ea)`,
+              );
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logError("action", `Trading rule ${rule.id} failed: ${err?.message?.slice(0, 200) ?? err}`);
+      }
+    }
+  }
+
   private async processInbox(): Promise<void> {
     try {
       const messages = await peekInbox(this.userWallet, 5);
@@ -1945,6 +2058,23 @@ export class AgentRunner {
     const ctx = this.buildContext();
     if (!ctx) return actionBlocked("Agent context unavailable", { failureKey: "context:missing" });
 
+    // Auto-defend for non-combat scripts: if a mob is actively attacking us,
+    // preempt this tick to fight it, then resume the current script next tick.
+    if (script.type !== "combat" && script.type !== "idle" && script.type !== "dungeon") {
+      const attacker = Object.values(entities).find(
+        (e: any) =>
+          (e.type === "mob" || e.type === "boss")
+          && e.hp > 0
+          && e.order?.action === "attack"
+          && e.order?.targetId === this.entityId,
+      ) as any;
+      if (attacker) {
+        this.commitTarget(attacker.id);
+        this.issueCommand({ action: "attack", targetId: attacker.id });
+        return actionProgressed(`Defending against ${attacker.name ?? "attacker"} (will resume ${script.type})`);
+      }
+    }
+
     switch (script.type) {
       case "combat":  return behaviors.doCombat(ctx, strategy, () => this.learnNextTechnique());
       case "gather":  return behaviors.doGathering(ctx, strategy, script.nodeType ?? "both");
@@ -2321,7 +2451,13 @@ export class AgentRunner {
             this.currentScript = utilityDecision.winner.script;
             this.ticksOnCurrentScript = 0;
             void this.logActivity("[nanopay] Budget low — using utility decision, supervisor skipped");
+            void sendInstantAlert(this.userWallet,
+              `⏸️ Your agent's compute budget is exhausted and has been paused.\n\nOpen the Wallet panel in-game to top up and resume.`);
             return;
+          }
+          if (supervisorBudget.lowBalance) {
+            void sendInstantAlert(this.userWallet,
+              `⚠️ Agent compute budget is running low (≤20% remaining: $${supervisorBudget.remaining.toFixed(6)} USDC).\n\nTop up soon to keep your agent running.`);
           }
           const newScript = await runSupervisor(trigger, {
             entity, entities,
@@ -2683,6 +2819,12 @@ export class AgentRunner {
         // Inbox check every 5 ticks
         if (this.ticksSinceFocusChange % 5 === 0) {
           await this.processInbox();
+        }
+
+        // Auto-trader pass every 8 ticks (~10s). Independent of focus —
+        // limit-order rules fire passively whatever the agent is doing.
+        if (this.tickCounter % 8 === 0) {
+          await this.autoTraderPass();
         }
 
         // Check for summoner reply to pending question
@@ -3057,8 +3199,14 @@ export class AgentRunner {
           if (!tickBudget.ok) {
             console.log(`[agent:${this.walletTag}] Budget exhausted — pausing agent`);
             await patchAgentConfig(this.userWallet, { enabled: false });
+            void sendInstantAlert(this.userWallet,
+              `⏸️ Your agent has been paused — compute budget exhausted.\n\nOpen the Wallet panel in-game to top up and resume.`);
             this.running = false;
             return;
+          }
+          if (tickBudget.lowBalance) {
+            void sendInstantAlert(this.userWallet,
+              `⚠️ Agent compute budget is running low (≤20% remaining: $${tickBudget.remaining.toFixed(6)} USDC).\n\nTop up soon to keep your agent running.`);
           }
         }
       } catch (err: any) {

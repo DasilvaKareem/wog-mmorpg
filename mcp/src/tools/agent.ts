@@ -575,7 +575,7 @@ export function registerAgentTools(server: McpServer): void {
       const { walletAddress } = requireSession(sessionId);
 
       const [inventoryData, craftingRecipes, alchemyRecipes, cookingRecipes] = await Promise.all([
-        shard.get<any>(`/items/${walletAddress}`).catch(() => null),
+        shard.get<any>(`/inventory/${walletAddress}`).catch(() => null),
         shard.get<any>("/crafting/recipes").catch(() => []),
         shard.get<any>("/alchemy/recipes").catch(() => []),
         shard.get<any>("/cooking/recipes").catch(() => []),

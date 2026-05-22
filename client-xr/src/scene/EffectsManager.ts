@@ -306,6 +306,24 @@ export class EffectsManager {
     }
   }
 
+  spawnGatherEffect(pos: THREE.Vector3, gatherType: string) {
+    if (gatherType === "mining") {
+      this.emitBurst(pos, 0x888888, 8, 2.5, 0.08, 0.8);
+      this.emitBurst(pos, 0xccbb99, 6, 1.0, 0.15, 1.2);
+      this.emitBurst(pos.clone().setY(pos.y + 0.5), 0xffcc33, 4, 4.0, 0.04, 0.3);
+    } else if (gatherType === "herbalism") {
+      this.emitBurst(pos, 0xee88cc, 10, 1.5, 0.07, 1.5);
+      this.emitBurst(pos, 0x44bb66, 6, 1.2, 0.06, 1.2);
+      this.emitBurst(pos.clone().setY(pos.y + 0.3), 0xaaffcc, 5, 2.0, 0.04, 0.6);
+    } else if (gatherType === "skinning") {
+      this.emitBurst(pos, 0xcc9955, 6, 2.0, 0.07, 0.9);
+      this.emitBurst(pos, 0xbbaa88, 4, 0.8, 0.12, 1.0);
+    } else if (gatherType === "farming") {
+      this.emitBurst(pos, 0x88dd44, 8, 1.2, 0.08, 1.2);
+      this.emitBurst(pos, 0xffdd55, 5, 0.8, 0.06, 1.0);
+    }
+  }
+
   // ── Pool allocation helpers ─────────────────────────────────────
 
   private allocProjectile(): number {

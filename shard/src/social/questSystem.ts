@@ -3998,6 +3998,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       zoneId, type: "quest", tick: 0,
       message: `${player.name}: Accepted quest "${quest.title}"`,
       entityId: playerId, entityName: player.name,
+      data: { action: "accept", questId: quest.id, questTitle: quest.title },
     });
 
     if (player.walletAddress && player.name) {

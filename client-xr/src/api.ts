@@ -1139,25 +1139,22 @@ export async function submitTopUp(
   return { ok: true, balance: result.data?.balance };
 }
 
-export interface SpendHistoryEntry {
-  ts: number;
-  type: "debit" | "credit";
-  action?: "combat" | "gather" | "supervisor" | "chat" | "idle";
-  amount: number;
+export interface SpendBreakdown {
+  breakdown: Record<string, number>;
+  topups: Array<{ ts: number; amount: number }>;
 }
 
-export async function fetchNanopayHistory(wallet: string, token: string): Promise<SpendHistoryEntry[]> {
+export async function fetchNanopayBreakdown(wallet: string, token: string): Promise<SpendBreakdown | null> {
   for (const base of CANDIDATE_BASES) {
     try {
-      const res = await fetchWithRetry(toUrl(base, `/nanopay/history/${encodeURIComponent(wallet)}`), {
+      const res = await fetchWithRetry(toUrl(base, `/nanopay/breakdown/${encodeURIComponent(wallet)}`), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) continue;
-      const data = (await res.json()) as { history: SpendHistoryEntry[] };
-      return data.history ?? [];
+      return (await res.json()) as SpendBreakdown;
     } catch { /* try next */ }
   }
-  return [];
+  return null;
 }
 
 export async function fetchNanopayGatewayInfo(): Promise<{

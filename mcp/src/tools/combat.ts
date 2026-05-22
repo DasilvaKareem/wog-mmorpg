@@ -59,20 +59,20 @@ export function registerCombatTools(server: McpServer): void {
     "technique_cast",
     {
       description:
-        "Cast a learned technique (ability/spell) during combat. Use technique_list_catalog to see available techniques for your class.",
+        "Cast a learned technique (ability/spell) during combat. Use technique_list_catalog to see available techniques for your entity.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
-        entityId: z.string().describe("Your entity ID"),
+        entityId: z.string().describe("Your entity ID (caster)"),
         zoneId: z.string().describe("Current zone ID"),
         techniqueId: z.string().describe("Technique ID to cast"),
-        targetId: z.string().optional().describe("Target entity ID (if targeted technique)"),
+        targetEntityId: z.string().optional().describe("Target entity ID (if targeted technique)"),
       },
     },
-    async ({ sessionId, entityId, zoneId, techniqueId, targetId }) => {
-      const { walletAddress, token } = requireSession(sessionId);
+    async ({ sessionId, entityId, zoneId, techniqueId, targetEntityId }) => {
+      const { token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
-        "/technique/cast",
-        { walletAddress, entityId, zoneId, techniqueId, targetId },
+        "/techniques/use",
+        { entityId, zoneId, techniqueId, targetEntityId },
         token
       );
       return {
@@ -84,11 +84,15 @@ export function registerCombatTools(server: McpServer): void {
   server.registerTool(
     "technique_list_catalog",
     {
-      description: "List all available techniques (abilities/spells) grouped by class.",
-      inputSchema: {},
+      description: "List all techniques available to learn for your entity given their current level and class.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+      },
     },
-    async () => {
-      const data = await shard.get<unknown>("/techniques/catalog");
+    async ({ sessionId, entityId }) => {
+      requireSession(sessionId);
+      const data = await shard.get<unknown>(`/techniques/available/${entityId}`);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
       };
@@ -98,18 +102,20 @@ export function registerCombatTools(server: McpServer): void {
   server.registerTool(
     "technique_learn",
     {
-      description: "Learn a new technique from a trainer NPC. Requires the appropriate class level.",
+      description: "Learn a new technique from a trainer NPC. Requires standing next to the trainer and meeting the class level requirement.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
-        techniqueId: z.string().describe("Technique ID to learn"),
+        entityId: z.string().describe("Your entity ID"),
         zoneId: z.string().describe("Zone where the trainer NPC is located"),
+        techniqueId: z.string().describe("Technique ID to learn (from technique_list_catalog)"),
+        trainerEntityId: z.string().describe("Entity ID of the trainer NPC (from scan_zone)"),
       },
     },
-    async ({ sessionId, techniqueId, zoneId }) => {
-      const { walletAddress, token } = requireSession(sessionId);
+    async ({ sessionId, entityId, zoneId, techniqueId, trainerEntityId }) => {
+      const { token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
-        "/technique/learn",
-        { walletAddress, techniqueId, zoneId },
+        "/techniques/learn",
+        { entityId, zoneId, techniqueId, trainerEntityId },
         token
       );
       return {

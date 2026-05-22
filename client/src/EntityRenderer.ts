@@ -495,6 +495,60 @@ export class EntityRenderer {
     }
   }
 
+  /** Float a golden "QUEST ACCEPTED!" banner + quest title above the entity. */
+  triggerQuestAccepted(entityId: string, questTitle?: string): void {
+    const visual = this.visuals.get(entityId);
+    if (!visual?.sprite) return;
+
+    const x = visual.sprite.x;
+    const y = visual.sprite.y - 16;
+
+    visual.sprite.setTint(0xffd76b);
+    this.scene.time.delayedCall(450, () => visual.sprite?.clearTint());
+
+    const header = this.scene.add
+      .text(x, y, "QUEST ACCEPTED!", {
+        fontSize: "11px",
+        fontFamily: "monospace",
+        color: "#ffd76b",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(120);
+
+    this.scene.tweens.add({
+      targets: header,
+      y: y - 32,
+      alpha: 0,
+      duration: 2000,
+      ease: "Quad.easeOut",
+      onComplete: () => header.destroy(),
+    });
+
+    if (questTitle) {
+      const sub = this.scene.add
+        .text(x, y + 8, questTitle, {
+          fontSize: "9px",
+          fontFamily: "monospace",
+          color: "#fff1a8",
+          stroke: "#000000",
+          strokeThickness: 2,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(120);
+
+      this.scene.tweens.add({
+        targets: sub,
+        y: y - 20,
+        alpha: 0,
+        duration: 2000,
+        ease: "Quad.easeOut",
+        onComplete: () => sub.destroy(),
+      });
+    }
+  }
+
   /**
    * Play a profession-specific gathering animation on the gatherer entity,
    * plus a depletion flash on the resource node.
@@ -923,8 +977,8 @@ export class EntityRenderer {
     const labelYOff = -12 * mobScale;
     const hpYOff = 10 * mobScale;
 
-    // Name label — colored if in a party, guild tag underneath
-    const labelColor = entity.partyId ? colorToHex(partyColor(entity.partyId)) : "#ffffff";
+    // Name label — WoW-style light blue for any party member, guild tag underneath
+    const labelColor = entity.partyId ? "#7eb8ff" : "#ffffff";
     const levelTag = entity.level != null ? ` Lv.${entity.level}` : "";
     const labelText = entity.guildName
       ? `${entity.name}${levelTag}\n<${entity.guildName}>`
@@ -1234,7 +1288,7 @@ export class EntityRenderer {
         // Already has ring — update color in case party changed
         visual.partyRing.setStrokeStyle(1.5, color, 0.8);
       }
-      visual.label.setColor(colorToHex(color));
+      visual.label.setColor("#7eb8ff");
     } else {
       if (visual.partyRing) {
         // Left party — destroy ring

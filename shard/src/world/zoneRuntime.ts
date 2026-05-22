@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { arenaManager } from "../combat/arenaManager.js";
 import type { CharacterStats } from "../character/classes.js";
 import { getClassById } from "../character/classes.js";
-import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
+import { getItemByTokenId, type EquipmentSlot } from "../items/itemCatalog.js";
+import { applyDurabilityLoss, WEAPON_AND_ARMOR_SLOTS } from "../items/durability.js";
 import { updateCharacterMetadata, burnItem } from "../blockchain/blockchain.js";
 import { queueItemMint, queueGoldTransfer } from "../blockchain/chainBatcher.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
@@ -31,12 +32,21 @@ import {
 } from "./worldLayout.js";
 import { getActiveXpMultiplier } from "../professions/potionEffects.js";
 import { getAttackMultiplier, getDefenseMultiplier } from "../combat/elementSystem.js";
+import { computeDamage } from "../combat/damageCalc.js";
+import { resolveHit } from "../combat/hitResolution.js";
+import { tickMobAggro, tickMobLeash, tickMobRoam, trySetMobTag } from "../combat/mobAi.js";
+import { onTargetKilled } from "../combat/killReward.js";
+import {
+  applyPartyTechniqueInCombat,
+  applyTechniqueInCombat,
+  type TechniqueHitResult,
+} from "../combat/techniqueExecutor.js";
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "../social/diary.js";
 import { getGameTime, checkPhaseTransition, formatGameTime } from "./worldClock.js";
 import { recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
 import { flushPlayer } from "../blockchain/chainBatcher.js";
-import { deleteItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
+import { deleteItemInstance } from "../items/itemRng.js";
 import { getRedis } from "../redis.js";
 import { deleteLiveSession, listLiveSessions, upsertLiveSession } from "../db/liveSessionStore.js";
 import { reputationManager } from "../economy/reputationManager.js";
@@ -558,8 +568,6 @@ const MELEE_RANGE = 40; // units — fallback for melee / mobs
 // intervals to often see the windup before damage lands. Bumping this makes
 // combat feel slower; lowering it (to 0) restores instant resolution.
 const ATTACK_WINDUP_TICKS = 1;
-const MIN_DAMAGE = 3;
-const FALLBACK_ATTACK = 15;
 const PARTY_TARGET_LOCK_TICKS = 24; // 6s at 250ms tick (was 6 ticks @ 1s)
 const PARTY_ANCHOR_PULL_RADIUS = 100;
 
@@ -888,38 +896,6 @@ function buildVisibleIntents(zone: ZoneState): VisibleIntent[] {
   return intents;
 }
 
-// ── Stat-based combat mechanics (players only) ────────────────────────
-const DODGE_CAP = 0.40;
-const DODGE_K = 200;
-const DODGE_SCALE = 0.55;
-
-const CRIT_CAP = 0.50;
-const CRIT_K = 250;
-const CRIT_SCALE = 0.60;
-const CRIT_MULTIPLIER = 1.75;
-
-const BLOCK_CAP = 0.50;
-const BLOCK_K = 200;
-const BLOCK_SCALE = 0.60;
-const BLOCK_REDUCTION = 0.50;
-
-const FAITH_HEAL_K = 300;
-const FAITH_HEAL_SCALE = 0.60;
-const FAITH_HOLY_COEFF = 0.15;
-const ARMOR_SLOTS: ArmorSlot[] = [
-  "chest",
-  "legs",
-  "boots",
-  "helm",
-  "shoulders",
-  "gloves",
-  "belt",
-  "shield",
-  "cape",
-  "ring",
-  "amulet",
-];
-
 // Graveyard spawn locations per zone
 const GRAVEYARD_SPAWNS: Record<string, { x: number; y: number }> = {
   "village-square": { x: 150, y: 150 },
@@ -1179,7 +1155,7 @@ function shouldSuppressMobGold(killer: Entity, mob: Entity): boolean {
  * Each member's own potion multiplier is applied individually.
  * Level-gap and repeat-kill penalties are applied per member.
  */
-function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number, mobLevel?: number): void {
+export function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number, mobLevel?: number): void {
   // Only players receive XP — mobs killing players/other mobs should not gain XP
   if (xpRecipient.type !== "player") return;
   if (baseXpReward <= 0 || xpRecipient.level == null) return;
@@ -1272,227 +1248,8 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
   }
 }
 
-function getAttackPower(entity: Entity): number {
-  const stats = entity.effectiveStats ?? getEffectiveStats(entity);
-  if (stats) {
-    // Spellcasters (mage, warlock, cleric) scale primarily off INT;
-    // physical classes scale off STR. Both benefit from secondary stats.
-    const classId = entity.classId ?? "";
-    const isCaster = ["mage", "warlock", "cleric"].includes(classId);
-    const primary = isCaster
-      ? stats.int * 0.45 + stats.str * 0.08
-      : stats.str * 0.32 + stats.int * 0.12;
-    return Math.max(
-      5,
-      Math.round(
-        primary +
-          stats.agi * 0.1 +
-          stats.faith * 0.08
-      )
-    );
-  }
-  return Math.max(5, FALLBACK_ATTACK + Math.max(0, (entity.level ?? 1) - 1) * 2);
-}
-
-function getDefensePower(entity: Entity): number {
-  const stats = entity.effectiveStats ?? getEffectiveStats(entity);
-  if (stats) {
-    return Math.max(0, Math.round(stats.def * 0.45 + stats.agi * 0.06));
-  }
-  return Math.max(0, Math.round((entity.level ?? 1) * 2));
-}
-
-// ── Stat-based combat formula functions (players only) ─────────────────
-function getDodgeChance(entity: Entity): number {
-  if (entity.type !== "player") return 0;
-  const agi = entity.effectiveStats?.agi ?? entity.stats?.agi ?? 0;
-  if (agi <= 0) return 0;
-  return Math.min(DODGE_CAP, (agi / (agi + DODGE_K)) * DODGE_SCALE);
-}
-
-function getCritChance(entity: Entity): number {
-  if (entity.type !== "player") return 0;
-  const luck = entity.effectiveStats?.luck ?? entity.stats?.luck ?? 0;
-  if (luck <= 0) return 0;
-  return Math.min(CRIT_CAP, (luck / (luck + CRIT_K)) * CRIT_SCALE);
-}
-
-function getBlockChance(entity: Entity): number {
-  if (entity.type !== "player") return 0;
-  const def = entity.effectiveStats?.def ?? entity.stats?.def ?? 0;
-  if (def <= 0) return 0;
-  return Math.min(BLOCK_CAP, (def / (def + BLOCK_K)) * BLOCK_SCALE);
-}
-
-function getFaithHealMultiplier(entity: Entity): number {
-  const faith = entity.effectiveStats?.faith ?? entity.stats?.faith ?? 0;
-  if (faith <= 0) return 1.0;
-  return 1 + (faith / (faith + FAITH_HEAL_K)) * FAITH_HEAL_SCALE;
-}
-
-function getHolyDamageBonus(entity: Entity): number {
-  if (entity.type !== "player") return 0;
-  const classId = entity.classId ?? "";
-  if (classId !== "paladin" && classId !== "cleric") return 0;
-  const faith = entity.effectiveStats?.faith ?? entity.stats?.faith ?? 0;
-  return Math.floor(faith * FAITH_HOLY_COEFF);
-}
-
-// ── Hit resolution (dodge → crit → block) ──────────────────────────────
-interface HitResult {
-  finalDamage: number;
-  hpLost: number;
-  dodged: boolean;
-  critical: boolean;
-  blocked: boolean;
-}
-
-function resolveHit(attacker: Entity, defender: Entity, rawDamage: number): HitResult {
-  // 1. Dodge (defender is player)
-  if (defender.type === "player" && Math.random() < getDodgeChance(defender)) {
-    return { finalDamage: 0, hpLost: 0, dodged: true, critical: false, blocked: false };
-  }
-
-  let damage = rawDamage;
-
-  // 2. Critical hit (attacker is player)
-  let critical = false;
-  if (attacker.type === "player" && Math.random() < getCritChance(attacker)) {
-    damage = Math.round(damage * CRIT_MULTIPLIER);
-    critical = true;
-  }
-
-  // 3. Block (defender is player)
-  let blocked = false;
-  if (defender.type === "player" && Math.random() < getBlockChance(defender)) {
-    damage = Math.round(damage * BLOCK_REDUCTION);
-    blocked = true;
-  }
-
-  // 4. Clamp to MIN_DAMAGE
-  damage = Math.max(MIN_DAMAGE, damage);
-
-  // 5. Apply through shields → HP
-  const hpLost = applyDamageWithShield(defender, damage);
-
-  return { finalDamage: damage, hpLost, dodged: false, critical, blocked };
-}
-
-function computeDamage(attacker: Entity, defender: Entity, zoneId?: string): number {
-  const raw = getAttackPower(attacker) - getDefensePower(defender) * 0.50;
-  let damage = Math.max(MIN_DAMAGE, Math.round(raw));
-
-  // Apply elemental modifiers in L25+ zones
-  if (zoneId) {
-    if (attacker.type === "player" && defender.type !== "player") {
-      // Player attacking mob: check attacker resistance → deal less without it
-      damage = Math.round(damage * getAttackMultiplier(zoneId, attacker.activeEffects));
-    } else if (attacker.type !== "player" && defender.type === "player") {
-      // Mob attacking player: check defender resistance → take more without it
-      damage = Math.round(damage * getDefenseMultiplier(zoneId, defender.activeEffects));
-    }
-  }
-
-  return Math.max(MIN_DAMAGE, damage);
-}
-
-function applyDurabilityLoss(entity: Entity, slots: EquipmentSlot[]): void {
-  if (!entity.equipment) return;
-
-  let changed = false;
-  const owner = entity.walletAddress;
-  for (const slot of slots) {
-    const equipped = entity.equipment[slot];
-    if (!equipped || equipped.durability <= 0) continue;
-
-    equipped.durability = Math.max(0, equipped.durability - 1);
-    if (equipped.durability === 0) {
-      equipped.broken = true;
-      // Auto-unequip broken items so they don't show as equipped
-      const brokenName = equipped.name ?? `tokenId ${equipped.tokenId}`;
-      delete entity.equipment[slot];
-      changed = true;
-      console.log(`[durability] ${entity.name}'s ${brokenName} (${slot}) broke and was unequipped`);
-      logZoneEvent({
-        zoneId: entity.region ?? "unknown",
-        type: "system",
-        tick: 0,
-        message: `${entity.name}'s ${brokenName} broke!`,
-        entityId: entity.id,
-        entityName: entity.name,
-      });
-    }
-    if (
-      owner &&
-      (equipped.instanceId || equipped.enchantments?.length || equipped.quality || equipped.rolledStats || equipped.bonusAffix)
-    ) {
-      const persisted = upsertItemInstanceFromEquipment({
-        instanceId: equipped.instanceId,
-        walletAddress: owner,
-        tokenId: equipped.tokenId,
-        name: equipped.name,
-        quality: equipped.quality,
-        rolledStats: equipped.rolledStats,
-        bonusAffix: equipped.bonusAffix,
-        durability: equipped.durability,
-        maxDurability: equipped.maxDurability,
-        enchantments: equipped.enchantments,
-      });
-      equipped.instanceId = persisted.instanceId;
-    }
-    changed = true;
-  }
-
-  if (changed) {
-    recalculateEntityVitals(entity);
-    if (owner) {
-      saveCharacter(owner, entity.name, { equipment: entity.equipment }).catch(() => {});
-    }
-  }
-}
-
-function applyDamageWithShield(entity: Entity, rawDamage: number): number {
-  let remaining = rawDamage;
-  if (entity.activeEffects) {
-    for (const effect of entity.activeEffects) {
-      if (effect.type === "shield" && effect.shieldHp != null && effect.shieldHp > 0) {
-        const absorbed = Math.min(effect.shieldHp, remaining);
-        effect.shieldHp -= absorbed;
-        remaining -= absorbed;
-        if (remaining <= 0) break;
-      }
-    }
-  }
-  entity.hp -= remaining;
-  return remaining;
-}
-
 function canRetaliate(entity: Entity): boolean {
   return entity.type === "player" || entity.type === "mob" || entity.type === "boss";
-}
-
-/**
- * Tag a mob on first hit. Refresh tick on subsequent hits from tagger.
- */
-function trySetMobTag(mob: Entity, attackerId: string, attackerType: string, tick: number): void {
-  if (mob.type !== "mob" && mob.type !== "boss") return;
-  if (attackerType !== "player") return;
-
-  if (!mob.taggedBy) {
-    mob.taggedBy = attackerId;
-    mob.taggedAtTick = tick;
-  } else if (mob.taggedBy === attackerId) {
-    mob.taggedAtTick = tick;
-  }
-
-  // Interrupt roaming so aggro can engage next tick — don't override an
-  // existing attack order or a leash-home, and skip if already casting.
-  if (mob.leashing) return;
-  if (mob.castingIntent) return;
-  const currentOrder = mob.order;
-  if (!currentOrder || currentOrder.action === "move") {
-    mob.order = { action: "attack", targetId: attackerId };
-  }
 }
 
 /**
@@ -1511,7 +1268,7 @@ export function clearMobTagsForPlayer(zone: ZoneState, playerId: string): void {
 /**
  * Handle player death: respawn at graveyard, apply XP penalty, restore HP.
  */
-function handlePlayerDeath(player: Entity, zoneId: string): void {
+export function handlePlayerDeath(player: Entity, zoneId: string): void {
   // Keep mob tags alive so the player can return for revenge kills with XP credit.
   // Tags will expire naturally via TAG_TIMEOUT_TICKS (60s) if the player doesn't return.
   const zone = getOrCreateZone(zoneId);
@@ -2229,161 +1986,8 @@ export function pickAutoCombatTarget(
   return nearestMob;
 }
 
-/**
- * Apply technique effects during the tick loop (mirrors techniqueRoutes.applyTechniqueEffects).
- * Returns { damage } for attack techniques.
- */
-interface TechniqueHitResult {
-  damage?: number;
-  dodged?: boolean;
-  critical?: boolean;
-  blocked?: boolean;
-}
-
-function applyTechniqueInCombat(
-  caster: Entity,
-  target: Entity,
-  technique: TechniqueDefinition,
-  zone: ZoneState,
-): TechniqueHitResult {
-  const { effects, type } = technique;
-  const result: TechniqueHitResult = {};
-
-  // Attack techniques
-  if (type === "attack" && effects.damageMultiplier) {
-    const stats = caster.effectiveStats ?? getEffectiveStats(caster);
-    const isCaster = ["mage", "cleric", "warlock"].includes(caster.classId ?? "");
-    const primaryStat = isCaster
-      ? (stats?.int ?? caster.stats?.int ?? 10)
-      : (stats?.str ?? caster.stats?.str ?? 10);
-    const baseDmg = Math.floor(5 + primaryStat * 0.5);
-    let damage = Math.floor(baseDmg * effects.damageMultiplier);
-
-    // Holy damage bonus for paladin/cleric
-    damage += getHolyDamageBonus(caster);
-
-    if (effects.maxTargets && effects.maxTargets > 1) {
-      // AoE — hit multiple targets (each rolls dodge/crit/block independently)
-      const nearby: Entity[] = [];
-      for (const e of zone.entities.values()) {
-        if (e.type !== "mob" && e.type !== "boss") continue;
-        if (e.hp <= 0 || e.id === caster.id) continue;
-        const dx = e.x - target.x;
-        const dy = e.y - target.y;
-        if (Math.sqrt(dx * dx + dy * dy) <= (effects.areaRadius ?? 50)) {
-          nearby.push(e);
-          if (nearby.length >= effects.maxTargets) break;
-        }
-      }
-      for (const t of nearby) {
-        resolveHit(caster, t, damage);
-      }
-      result.damage = damage;
-    } else {
-      const hit = resolveHit(caster, target, damage);
-      result.damage = hit.finalDamage;
-      result.dodged = hit.dodged;
-      result.critical = hit.critical;
-      result.blocked = hit.blocked;
-    }
-
-    // Lifesteal (amplified by faith for paladin/cleric)
-    if (effects.healAmount && !result.dodged) {
-      const healBase = Math.floor((result.damage ?? 0) * (effects.healAmount / 100));
-      const heal = Math.floor(healBase * getFaithHealMultiplier(caster));
-      caster.hp = Math.min(caster.maxHp, caster.hp + heal);
-    }
-  }
-
-  // Healing techniques (amplified by faith)
-  if (type === "healing" && effects.healAmount) {
-    const faithMult = getFaithHealMultiplier(caster);
-    if (effects.duration && effects.duration > 0) {
-      const totalHeal = Math.floor(target.maxHp * (effects.healAmount / 100) * faithMult);
-      const healPerTick = Math.max(1, Math.floor(totalHeal / effects.duration));
-      addActiveEffectInternal(target, {
-        id: randomUUID(),
-        techniqueId: technique.id,
-        name: technique.name,
-        type: "hot",
-        casterId: caster.id,
-        appliedAtTick: zone.tick,
-        durationTicks: effects.duration,
-        remainingTicks: effects.duration,
-        hotHealPerTick: healPerTick,
-      });
-    } else {
-      const healAmount = Math.floor(target.maxHp * (effects.healAmount / 100) * faithMult);
-      const actualHeal = Math.min(healAmount, target.maxHp - target.hp);
-      target.hp = Math.min(target.maxHp, target.hp + actualHeal);
-    }
-  }
-
-  // Buffs
-  if (type === "buff" && effects.duration) {
-    addActiveEffectInternal(target, {
-      id: randomUUID(),
-      techniqueId: technique.id,
-      name: technique.name,
-      type: effects.shield ? "shield" : "buff",
-      casterId: caster.id,
-      appliedAtTick: zone.tick,
-      durationTicks: effects.duration,
-      remainingTicks: effects.duration,
-      statModifiers: effects.statBonus,
-      shieldHp: effects.shield ? Math.floor(target.maxHp * (effects.shield / 100)) : undefined,
-      shieldMaxHp: effects.shield ? Math.floor(target.maxHp * (effects.shield / 100)) : undefined,
-    });
-    if (effects.statBonus) recalculateEntityVitals(target);
-  }
-
-  // Debuffs
-  if (type === "debuff" && effects.duration) {
-    addActiveEffectInternal(target, {
-      id: randomUUID(),
-      techniqueId: technique.id,
-      name: technique.name,
-      type: effects.dotDamage ? "dot" : "debuff",
-      casterId: caster.id,
-      appliedAtTick: zone.tick,
-      durationTicks: effects.duration,
-      remainingTicks: effects.duration,
-      statModifiers: effects.statReduction,
-      dotDamage: effects.dotDamage,
-    });
-    if (effects.statReduction) recalculateEntityVitals(target);
-  }
-
-  return result;
-}
-
-function applyPartyTechniqueInCombat(
-  caster: Entity,
-  technique: TechniqueDefinition,
-  zone: ZoneState,
-): { affectedIds: string[] } {
-  const affectedIds: string[] = [];
-  const memberIds = getPartyMembers(caster.id);
-
-  for (const memberId of memberIds) {
-    const member = getEntity(memberId);
-    if (!member || member.type !== "player" || member.hp <= 0) continue;
-    if (member.region !== zone.zoneId) continue;
-
-    applyTechniqueInCombat(caster, member, technique, zone);
-    affectedIds.push(member.id);
-  }
-
-  if (affectedIds.length === 0) {
-    applyTechniqueInCombat(caster, caster, technique, zone);
-    affectedIds.push(caster.id);
-  }
-
-  return { affectedIds };
-}
-
 /** Add an active effect (same logic as techniqueRoutes, but accessible from zoneRuntime) */
-function addActiveEffectInternal(entity: Entity, effect: ActiveEffect): void {
+export function addActiveEffectInternal(entity: Entity, effect: ActiveEffect): void {
   if (!entity.activeEffects) entity.activeEffects = [];
   // Same technique refreshes (replaces), different techniques stack
   entity.activeEffects = entity.activeEffects.filter(e => e.techniqueId !== effect.techniqueId);
@@ -2402,7 +2006,7 @@ const MOVABLE_TYPES = new Set(["player", "mob", "boss"]);
  * Cell size 64 fits the largest common query (boss aggro = 100) in a 3×3 lookup.
  */
 const SPATIAL_GRID_CELL = 64;
-type SpatialGrid = Map<number, Entity[]>;
+export type SpatialGrid = Map<number, Entity[]>;
 
 function spatialCellKey(cx: number, cz: number): number {
   // Offset to keep keys non-negative for pathological coords; stride wide
@@ -2427,7 +2031,7 @@ function buildSpatialGrid(zone: ZoneState): SpatialGrid {
   return grid;
 }
 
-function forEachInRadius(
+export function forEachInRadius(
   grid: SpatialGrid,
   x: number,
   y: number,
@@ -2812,8 +2416,8 @@ async function worldTick() {
             });
           } else {
             // Hit landed — apply durability
-            applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
-            applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
+            applyDurabilityLoss(entity, WEAPON_AND_ARMOR_SLOTS);
+            applyDurabilityLoss(target, WEAPON_AND_ARMOR_SLOTS);
 
             const hitTag = hit.critical ? "CRITICAL! " : "";
             const blockTag = hit.blocked ? " (blocked)" : "";
@@ -2831,84 +2435,7 @@ async function worldTick() {
           }
 
           if (target.hp <= 0) {
-            // Resolve tagger: the player who first tagged the mob gets all rewards
-            const tagger = (target.taggedBy && target.taggedBy !== entity.id)
-              ? zone.entities.get(target.taggedBy) : undefined;
-            const xpRecipient = (tagger && tagger.type === "player") ? tagger : entity;
-
-            // Log kill
-            logZoneEvent({
-              zoneId: zone.zoneId,
-              type: "kill",
-              tick: zone.tick,
-              message: `${xpRecipient.name} has slain ${target.name}!`,
-              entityId: xpRecipient.id,
-              entityName: xpRecipient.name,
-              targetId: target.id,
-              targetName: target.name,
-              data: { xpReward: target.xpReward ?? 0 },
-            });
-
-            // Increment kill count for the reward recipient
-            if (xpRecipient.type === "player") {
-              xpRecipient.kills = (xpRecipient.kills ?? 0) + 1;
-
-              // Log kill diary entry
-              if (xpRecipient.walletAddress) {
-                const { headline, narrative } = narrativeKill(xpRecipient.name, xpRecipient.raceId, xpRecipient.classId, zone.zoneId, target.name, target.xpReward ?? 0);
-                logDiary(xpRecipient.walletAddress, xpRecipient.name, zone.zoneId, xpRecipient.x, xpRecipient.y, "kill", headline, narrative, {
-                  targetName: target.name,
-                  targetType: target.type,
-                  xpReward: target.xpReward ?? 0,
-                });
-              }
-            }
-
-            // Handle target death based on type
-            if (target.type === "player") {
-              handlePlayerDeath(target, zone.zoneId);
-            } else {
-              // Mobs/bosses: auto-loot to tagger + create corpse
-              handleMobDeath(target, xpRecipient, zone);
-
-              // Track quest progress for kills (reward recipient only)
-              if (xpRecipient.type === "player" && xpRecipient.activeQuests) {
-                for (const activeQuest of xpRecipient.activeQuests) {
-                  const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
-                  if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
-                    activeQuest.progress++;
-                    markQuestsDirty(xpRecipient);
-                    console.log(
-                      `[quest] ${xpRecipient.name} progress: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`
-                    );
-                    // Emit quest progress event so agents can track without polling
-                    logZoneEvent({
-                      zoneId: zone.zoneId,
-                      type: "quest-progress",
-                      tick: zone.tick,
-                      message: `${xpRecipient.name}: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`,
-                      entityId: xpRecipient.id,
-                      entityName: xpRecipient.name,
-                      data: {
-                        questId: activeQuest.questId,
-                        questTitle: questDef.title,
-                        progress: activeQuest.progress,
-                        required: questDef.objective.count,
-                        complete: activeQuest.progress >= questDef.objective.count,
-                      },
-                    });
-                  }
-                }
-              }
-            }
-
-            entity.order = undefined;
-            if (entity.userEngagedAt?.targetId === target.id) {
-              entity.userEngagedAt = undefined;
-            }
-
-            // Grant XP on kill — shared with party members in same zone
-            awardPartyXp(zone, xpRecipient, target.xpReward ?? 0, target.level);
+            onTargetKilled(entity, target, zone);
           }
         }
       } else if (entity.order.action === "technique") {
@@ -3188,59 +2715,7 @@ async function worldTick() {
 
           // Handle target death from technique damage
           if (target.hp <= 0) {
-            // Resolve tagger: the player who first tagged the mob gets all rewards
-            const techTagger = (target.taggedBy && target.taggedBy !== entity.id)
-              ? zone.entities.get(target.taggedBy) : undefined;
-            const techXpRecipient = (techTagger && techTagger.type === "player") ? techTagger : entity;
-
-            logZoneEvent({
-              zoneId: zone.zoneId,
-              type: "kill",
-              tick: zone.tick,
-              message: `${techXpRecipient.name} has slain ${target.name}!`,
-              entityId: techXpRecipient.id,
-              entityName: techXpRecipient.name,
-              targetId: target.id,
-              targetName: target.name,
-              data: { xpReward: target.xpReward ?? 0 },
-            });
-
-            if (techXpRecipient.type === "player") {
-              techXpRecipient.kills = (techXpRecipient.kills ?? 0) + 1;
-
-              // Log kill diary entry (technique path)
-              if (techXpRecipient.walletAddress) {
-                const { headline, narrative } = narrativeKill(techXpRecipient.name, techXpRecipient.raceId, techXpRecipient.classId, zone.zoneId, target.name, target.xpReward ?? 0);
-                logDiary(techXpRecipient.walletAddress, techXpRecipient.name, zone.zoneId, techXpRecipient.x, techXpRecipient.y, "kill", headline, narrative, {
-                  targetName: target.name,
-                  targetType: target.type,
-                  xpReward: target.xpReward ?? 0,
-                });
-              }
-            }
-
-            if (target.type === "player") {
-              handlePlayerDeath(target, zone.zoneId);
-            } else {
-              handleMobDeath(target, techXpRecipient, zone);
-              if (techXpRecipient.type === "player" && techXpRecipient.activeQuests) {
-                for (const activeQuest of techXpRecipient.activeQuests) {
-                  const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
-                  if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
-                    activeQuest.progress++;
-                    markQuestsDirty(techXpRecipient);
-                  }
-                }
-              }
-            }
-
-            entity.order = undefined;
-            if (entity.userEngagedAt?.targetId === target.id) {
-              entity.userEngagedAt = undefined;
-            }
-
-            // Grant XP on kill — shared with party members in same zone
-            awardPartyXp(zone, techXpRecipient, target.xpReward ?? 0, target.level);
+            onTargetKilled(entity, target, zone);
           } else {
             // Technique fired — clear order so AI picks next action
             entity.order = undefined;
@@ -3302,120 +2777,9 @@ async function worldTick() {
       });
     }
 
-    // ── Mob leash / de-aggro: mobs too far from spawn walk home ────
-    // If a mob is pulled beyond its leash range, it de-aggros, drops
-    // combat, and walks back to spawn. While leashing it regens HP
-    // each tick and ignores players entirely.
-    const MOB_LEASH_RANGE = 150;
-    const BOSS_LEASH_RANGE = 200;
-    const LEASH_REGEN_PCT = 0.0125; // 1.25%/tick = 5%/sec at 250ms tick
-    for (const entity of zone.entities.values()) {
-      if (entity.type !== "mob" && entity.type !== "boss") continue;
-      if (entity.hp <= 0) continue;
-      if (entity.spawnX == null || entity.spawnY == null) continue;
-
-      const dxSpawn = entity.x - entity.spawnX;
-      const dySpawn = entity.y - entity.spawnY;
-      const distFromSpawn = Math.sqrt(dxSpawn * dxSpawn + dySpawn * dySpawn);
-      const leashRange = entity.type === "boss" ? BOSS_LEASH_RANGE : MOB_LEASH_RANGE;
-
-      if (entity.leashing) {
-        // Walking home — regen HP each tick
-        entity.hp = Math.min(entity.maxHp, entity.hp + Math.ceil(entity.maxHp * LEASH_REGEN_PCT));
-        // Clear any active effects picked up during combat
-        if (entity.activeEffects?.length) entity.activeEffects = [];
-
-        if (distFromSpawn < 5) {
-          // Arrived home — fully reset
-          entity.leashing = false;
-          entity.hp = entity.maxHp;
-          entity.x = entity.spawnX;
-          entity.y = entity.spawnY;
-          entity.order = undefined;
-        } else {
-          // Keep walking home
-          entity.order = { action: "move", x: entity.spawnX, y: entity.spawnY };
-        }
-        continue;
-      }
-
-      // Check if mob has been pulled too far from spawn
-      if (distFromSpawn > leashRange) {
-        entity.leashing = true;
-        entity.order = { action: "move", x: entity.spawnX, y: entity.spawnY };
-        entity.taggedBy = undefined;
-        entity.taggedAtTick = undefined;
-        continue;
-      }
-    }
-
-    // ── Mob roaming: idle mobs wander near their spawn point ─────────
-    const MOB_ROAM_RADIUS = 50;
-    const BOSS_ROAM_RADIUS = 30;
-    const ROAM_CHANCE_PER_TICK = 0.0075; // ~0.75% per tick (250ms) → wander roughly every ~33s
-    for (const entity of zone.entities.values()) {
-      if (entity.type !== "mob" && entity.type !== "boss") continue;
-      if (entity.order) continue;
-      if (entity.castingIntent) continue;
-      if (entity.hp <= 0) continue;
-      if (entity.leashing) continue;
-      if (entity.spawnX == null || entity.spawnY == null) continue;
-      if (Math.random() > ROAM_CHANCE_PER_TICK) continue;
-
-      const roamRadius = entity.type === "boss" ? BOSS_ROAM_RADIUS : MOB_ROAM_RADIUS;
-      const angle = Math.random() * Math.PI * 2;
-      const dist = Math.random() * roamRadius;
-      const targetX = entity.spawnX + Math.cos(angle) * dist;
-      const targetY = entity.spawnY + Math.sin(angle) * dist;
-      entity.order = { action: "move", x: targetX, y: targetY };
-    }
-
-    // ── Mob aggro AI: mobs attack nearby players ─────────────────────
-    // Mobs proactively seek and attack players within aggro range.
-    // Bosses have larger aggro range. Mobs prefer their tagged target.
-    const MOB_AGGRO_RANGE = 60;
-    const BOSS_AGGRO_RANGE = 100;
-    for (const entity of zone.entities.values()) {
-      if (entity.type !== "mob" && entity.type !== "boss") continue;
-      if (entity.order) continue;
-      if (entity.castingIntent) continue;
-      if (entity.hp <= 0) continue;
-      if (entity.leashing) continue; // Don't re-aggro while walking home
-
-      const aggroRange = entity.type === "boss" ? BOSS_AGGRO_RANGE : MOB_AGGRO_RANGE;
-
-      // Prefer the player who tagged us (most recent attacker)
-      let target: Entity | null = null;
-      if (entity.taggedBy) {
-        const tagged = zone.entities.get(entity.taggedBy);
-        if (tagged && tagged.type === "player" && tagged.hp > 0) {
-          const dx = tagged.x - entity.x;
-          const dy = tagged.y - entity.y;
-          if (Math.sqrt(dx * dx + dy * dy) < aggroRange * 1.5) {
-            target = tagged;
-          }
-        }
-      }
-
-      // Otherwise find nearest player in aggro range (grid-scoped).
-      if (!target) {
-        let nearestDist = aggroRange;
-        forEachInRadius(spatialGrid, entity.x, entity.y, aggroRange, (other) => {
-          if (other.type !== "player") return;
-          if (other.hp <= 0) return;
-          const dx = other.x - entity.x;
-          const dy = other.y - entity.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < nearestDist) {
-            nearestDist = dist;
-            target = other;
-          }
-        });
-      }
-
-      if (!target) continue;
-      entity.order = { action: "attack", targetId: target.id };
-    }
+    tickMobLeash(zone);
+    tickMobRoam(zone);
+    tickMobAggro(zone, spatialGrid);
 
     // ── Party/rental follow-leader AI ────────────────────────────────
     // Idle party followers stay near the leader. Rentals can also opt in

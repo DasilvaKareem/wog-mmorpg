@@ -30,6 +30,8 @@ type DialogueEvent =
   | "npc_repair"
   | "gathering"
   | "crafting"
+  | "craft_great"
+  | "craft_fail"
   | "brewing"
   | "cooking"
   | "greet_player"
@@ -533,6 +535,60 @@ const DIALOGUE: Record<string, string[]> = {
     "At the forge. Let's see what we can make.",
     "Crafting time. Got a nice recipe lined up.",
     "Working the forge. This is going to be good.",
+  ],
+
+  // ── CRAFT_GREAT (rare/epic/legendary success) ────────────
+  "sunforged::craft_great": [
+    "By the light — {detail}! The forge favors me today.",
+    "A {detail} worthy of the citadel walls!",
+    "This {detail} will turn the tide.",
+  ],
+  "veilborn::craft_great": [
+    "Hm. {detail}. Better than I expected.",
+    "A {detail} like this — that's a rare draw.",
+    "Quiet pride. {detail} is exquisite.",
+  ],
+  "dawnkeeper::craft_great": [
+    "OH MY GOSH — {detail}! Look at this!!",
+    "I made a {detail}!! Best day ever!",
+    "Yesss!! A {detail}! I'm so proud of this one!",
+  ],
+  "ironvow::craft_great": [
+    "Heh. {detail}. The hammer doesn't lie.",
+    "A real {detail}. Steel honors the strong.",
+    "{detail}. Now THAT will leave a mark.",
+  ],
+  "::craft_great": [
+    "Yes! A {detail}! Look at that quality!",
+    "Hot damn — {detail}! Today's a good day.",
+    "A {detail}?! The recipe truly came together.",
+  ],
+
+  // ── CRAFT_FAIL ───────────────────────────────────────────
+  "sunforged::craft_fail": [
+    "The metal would not hold. I'll try again.",
+    "Failure. Even the steadfast falter.",
+    "A wasted strike. The light remains patient.",
+  ],
+  "veilborn::craft_fail": [
+    "Botched it. Quietly.",
+    "Hm. The alloy refused me.",
+    "Failed. Next time, sharper focus.",
+  ],
+  "dawnkeeper::craft_fail": [
+    "Awww no! It broke! :(",
+    "Oh no — failed! I'll try again!",
+    "Bummer! The forge was not my friend today.",
+  ],
+  "ironvow::craft_fail": [
+    "Tch. Botched. Iron's mood, not mine.",
+    "Failed. Strike harder next time.",
+    "Wasted swing. Move on.",
+  ],
+  "::craft_fail": [
+    "Damn. Crafting failed.",
+    "The metal warped. Lost the swing.",
+    "Failed craft. Annoying.",
   ],
 
   // ── BREWING ───────────────────────────────────────────────

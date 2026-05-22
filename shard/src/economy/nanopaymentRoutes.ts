@@ -6,6 +6,7 @@ import {
   initTopUp,
   collectPendingAuthorizations,
   markSettled,
+  getSpendBreakdown,
   ACTION_COSTS_USDC,
 } from "./sessionBudget.js";
 import {
@@ -30,6 +31,20 @@ export function registerNanopaymentRoutes(server: FastifyInstance): void {
       }
       const balance = await getSessionBalance(wallet);
       return reply.send(balance);
+    },
+  );
+
+  // ── GET /nanopay/breakdown/:wallet ──────────────────────────────────────────
+  server.get<{ Params: { wallet: string } }>(
+    "/nanopay/breakdown/:wallet",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const authWallet = (request as any).walletAddress as string;
+      const { wallet } = request.params;
+      if (wallet.toLowerCase() !== authWallet.toLowerCase()) {
+        return reply.code(403).send({ error: "Forbidden" });
+      }
+      return reply.send(await getSpendBreakdown(wallet));
     },
   );
 

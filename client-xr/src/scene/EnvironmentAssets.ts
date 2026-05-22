@@ -44,6 +44,59 @@ const ASSET_DEFS: Record<string, { file: string; scale: number; yOffset: number 
   forest_troll:     { file: "forest_troll.glb",      scale: 2.8, yOffset: 0 },
   ancient_golem:    { file: "ancient_golem.glb",     scale: 3.0, yOffset: 0 },
   necromancer_boss: { file: "necromancer_boss.glb",  scale: 3.5, yOffset: 0 },
+  // Quaternius Easy Animated Enemy Pack (CC0)
+  frog:             { file: "frog.glb",              scale: 1.3, yOffset: 0 },
+  rat:              { file: "rat.glb",               scale: 1.2, yOffset: 0 },
+  snake:            { file: "snake.glb",             scale: 1.8, yOffset: 0 },
+  snake_angry:      { file: "snake_angry.glb",       scale: 2.2, yOffset: 0 },
+  spider:           { file: "spider.glb",            scale: 1.5, yOffset: 0 },
+  wasp:             { file: "wasp.glb",              scale: 1.4, yOffset: 1.2 },
+  // Quaternius Ultimate Monsters — Big (humanoid/large, scale 2.0-3.0)
+  big_birb:         { file: "big_birb.glb",          scale: 2.2, yOffset: 1.5 },
+  big_bluedemon:    { file: "big_bluedemon.glb",     scale: 2.6, yOffset: 0 },
+  big_cactoro:      { file: "big_cactoro.glb",       scale: 2.0, yOffset: 0 },
+  big_demon:        { file: "big_demon.glb",         scale: 2.5, yOffset: 0 },
+  big_fish:         { file: "big_fish.glb",          scale: 1.8, yOffset: 0 },
+  big_monkroose:    { file: "big_monkroose.glb",     scale: 2.4, yOffset: 0 },
+  big_mushroomking: { file: "big_mushroomking.glb",  scale: 2.8, yOffset: 0 },
+  big_ninja:        { file: "big_ninja.glb",         scale: 2.2, yOffset: 0 },
+  big_orc:          { file: "big_orc.glb",           scale: 2.3, yOffset: 0 },
+  big_orc_skull:    { file: "big_orc_skull.glb",     scale: 2.4, yOffset: 0 },
+  big_tribal:       { file: "big_tribal.glb",        scale: 2.2, yOffset: 0 },
+  big_yeti:         { file: "big_yeti.glb",          scale: 2.8, yOffset: 0 },
+  // Quaternius Ultimate Monsters — Blob (chibi, scale 1.5-2.0)
+  blob_birb:        { file: "blob_birb.glb",         scale: 1.4, yOffset: 0 },
+  blob_cactoro:     { file: "blob_cactoro.glb",      scale: 1.5, yOffset: 0 },
+  blob_cat:         { file: "blob_cat.glb",          scale: 1.4, yOffset: 0 },
+  blob_chicken:     { file: "blob_chicken.glb",      scale: 1.2, yOffset: 0 },
+  blob_dog:         { file: "blob_dog.glb",          scale: 1.4, yOffset: 0 },
+  blob_fish:        { file: "blob_fish.glb",         scale: 1.4, yOffset: 0 },
+  blob_greenblob:   { file: "blob_greenblob.glb",    scale: 1.5, yOffset: 0 },
+  blob_greenspikyblob:    { file: "blob_greenspikyblob.glb",    scale: 1.5, yOffset: 0 },
+  blob_mushnub:     { file: "blob_mushnub.glb",      scale: 1.5, yOffset: 0 },
+  blob_mushnub_evolved:   { file: "blob_mushnub_evolved.glb",   scale: 2.0, yOffset: 0 },
+  blob_ninja:       { file: "blob_ninja.glb",        scale: 1.5, yOffset: 0 },
+  blob_orc:         { file: "blob_orc.glb",          scale: 1.6, yOffset: 0 },
+  blob_pigeon:      { file: "blob_pigeon.glb",       scale: 1.3, yOffset: 0 },
+  blob_pinkblob:    { file: "blob_pinkblob.glb",     scale: 1.5, yOffset: 0 },
+  blob_wizard:      { file: "blob_wizard.glb",       scale: 1.7, yOffset: 0 },
+  blob_yeti:        { file: "blob_yeti.glb",         scale: 1.7, yOffset: 0 },
+  // Quaternius Ultimate Monsters — Flying (yOffset lifts actual flyers off ground)
+  flying_armabee:   { file: "flying_armabee.glb",    scale: 1.6, yOffset: 1.5 },
+  flying_armabee_evolved: { file: "flying_armabee_evolved.glb", scale: 2.0, yOffset: 1.8 },
+  flying_demon:     { file: "flying_demon.glb",      scale: 1.8, yOffset: 1.0 },
+  flying_dragon:    { file: "flying_dragon.glb",     scale: 2.4, yOffset: 1.5 },
+  flying_dragon_evolved:  { file: "flying_dragon_evolved.glb",  scale: 3.2, yOffset: 2.0 },
+  flying_ghost:     { file: "flying_ghost.glb",      scale: 1.8, yOffset: 1.2 },
+  flying_ghost_skull:     { file: "flying_ghost_skull.glb",     scale: 2.0, yOffset: 1.2 },
+  flying_glub:      { file: "flying_glub.glb",       scale: 1.5, yOffset: 1.0 },
+  flying_glub_evolved:    { file: "flying_glub_evolved.glb",    scale: 1.9, yOffset: 1.2 },
+  flying_goleling:  { file: "flying_goleling.glb",   scale: 1.8, yOffset: 0.8 },
+  flying_goleling_evolved:{ file: "flying_goleling_evolved.glb",scale: 2.4, yOffset: 1.0 },
+  flying_hywirl:    { file: "flying_hywirl.glb",     scale: 1.8, yOffset: 1.0 },
+  flying_pigeon:    { file: "flying_pigeon.glb",     scale: 1.4, yOffset: 1.5 },
+  flying_squidle:   { file: "flying_squidle.glb",    scale: 2.0, yOffset: 1.5 },
+  flying_tribal:    { file: "flying_tribal.glb",     scale: 2.0, yOffset: 1.5 },
 };
 
 /** Kenney Fantasy Town Kit 2.0 — 167 modular building pieces (CC0) */
@@ -289,20 +342,237 @@ const TILE_TO_ASSET_FALLBACK: Record<number, string> = {
   30: "stone_wall", 31: "stone_wall", 32: "stone_wall", 33: "stone_wall",
 };
 
-/** Map from mob name substring → asset name */
+/** Map from mob name keyword → asset name. Matched as whole word (\b), case-insensitive.
+ *  First match wins, so list more specific keywords before general ones. */
 const MOB_NAME_TO_ASSET: [string, string][] = [
+  // ── Originals ──────────────────────────────────────────────────────
   ["wolf", "shadow_wolf"],
+  ["worg", "shadow_wolf"],
   ["cultist", "dark_cultist"],
   ["undead", "undead_knight"],
   ["skeleton", "undead_knight"],
   ["troll", "forest_troll"],
-  ["golem", "ancient_golem"],
   ["necromancer", "necromancer_boss"],
+  // ── Enemy pack ─────────────────────────────────────────────────────
+  ["viper", "snake_angry"],
+  ["cobra", "snake_angry"],
+  ["rattler", "snake_angry"],
+  ["adder", "snake_angry"],
+  ["basilisk", "snake_angry"],
+  ["serpent", "snake"],
+  ["snake", "snake"],
+  ["weaver", "spider"],
+  ["spider", "spider"],
+  ["scorpion", "spider"],
+  ["hornet", "wasp"],
+  ["wasp", "wasp"],
+  ["toad", "frog"],
+  ["frog", "frog"],
+  ["rat", "rat"],
+  ["mouse", "rat"],
+  // ── Dragons (Flying) ───────────────────────────────────────────────
+  ["wyrm", "flying_dragon"],
+  ["dragonkin", "flying_dragon"],
+  ["drake", "flying_dragon"],
+  ["dragon", "flying_dragon_evolved"],
+  // ── Ghosts / Wraiths / Wisps (Flying) ─────────────────────────────
+  ["wraith", "flying_ghost_skull"],
+  ["specter", "flying_ghost_skull"],
+  ["phantom", "flying_ghost"],
+  ["ghost", "flying_ghost"],
+  ["wisp", "flying_ghost"],
+  // ── Elementals (Flying Goleling) — before existing "golem" key ────
+  ["elemental", "flying_goleling"],
+  ["devil", "flying_goleling"],   // Dust Devil
+  ["golem", "ancient_golem"],
+  // ── Slimes / Blobs / Worms ─────────────────────────────────────────
+  ["slime", "blob_greenblob"],
+  ["slug", "blob_greenblob"],
+  ["crawler", "blob_greenblob"],
+  ["worm", "blob_greenspikyblob"],
+  ["weevil", "blob_greenspikyblob"],
+  ["beetle", "blob_greenspikyblob"],
+  // ── Mushrooms / Plants / Vines ─────────────────────────────────────
+  ["spore", "blob_mushnub"],
+  ["mushroom", "blob_mushnub"],
+  ["treant", "blob_mushnub_evolved"],
+  ["ent", "blob_mushnub_evolved"],   // Corrupted Ent — \b prevents matching "sentinel"
+  ["cactus", "big_cactoro"],
+  ["cactoro", "big_cactoro"],
+  ["vine", "flying_hywirl"],
+  ["nightbloom", "flying_hywirl"],
+  ["strangler", "flying_hywirl"],
+  ["lurker", "flying_hywirl"],
+  ["thorn sprite", "blob_greenspikyblob"],
+  ["sprite", "big_cactoro"],
+  // ── Birds ──────────────────────────────────────────────────────────
+  ["rooster", "blob_chicken"],
+  ["chicken", "blob_chicken"],
+  ["owl", "blob_pigeon"],
+  ["heron", "blob_pigeon"],
+  ["pigeon", "blob_pigeon"],
+  ["condor", "big_birb"],
+  ["eagle", "big_birb"],
+  ["hawk", "big_birb"],
+  ["harpy", "flying_tribal"],
+  ["bat", "flying_pigeon"],
+  ["moth", "flying_armabee"],
+  ["bee", "flying_armabee"],
+  // ── Mammals ────────────────────────────────────────────────────────
+  ["fox", "blob_cat"],
+  ["cat", "blob_cat"],
+  ["hound", "blob_dog"],
+  ["dog", "blob_dog"],
+  ["yeti", "big_yeti"],
+  ["titan", "big_yeti"],
+  ["giant", "big_yeti"],
+  ["bear", "big_monkroose"],
+  ["boar", "big_monkroose"],
+  ["stag", "big_monkroose"],
+  ["lion", "big_monkroose"],
+  // ── Humanoids ──────────────────────────────────────────────────────
+  ["forgemaster", "big_bluedemon"],
+  ["infernal", "big_bluedemon"],
+  ["forgebound", "big_demon"],
+  ["demon", "big_demon"],
+  ["horror", "big_demon"],
+  ["raider", "big_orc"],
+  ["goblin", "big_orc"],
+  ["orc", "big_orc"],
+  ["automaton", "big_orc_skull"],
+  ["zombie", "big_orc_skull"],
+  ["scarecrow", "big_orc_skull"],
+  ["drowned", "big_orc_skull"],   // Drowned Knight
+  ["scout", "big_ninja"],
+  ["bandit", "big_ninja"],
+  ["rogue", "big_ninja"],
+  ["stalker", "big_ninja"],
+  ["thief", "big_tribal"],
+  ["dwarf", "big_orc"],           // Corrupted Dwarf King → orc rig
+  ["king", "big_mushroomking"],
+  ["archdruid", "blob_wizard"],
+  ["druid", "blob_wizard"],
+  ["dryad", "blob_wizard"],
+  ["fae", "blob_wizard"],
+  ["warden", "flying_dragon_evolved"],   // Solaris Warden = boss
+  ["guardian", "ancient_golem"],
+  ["sentinel", "ancient_golem"],
+  ["sentry", "ancient_golem"],
+  ["guard", "ancient_golem"],
+  // ── Aquatic ────────────────────────────────────────────────────────
+  ["mudfish", "blob_fish"],
+  ["fish", "blob_fish"],
+  ["crab", "blob_fish"],
+  ["squidle", "flying_squidle"],
+  ["squid", "flying_squidle"],
+  ["devourer", "flying_squidle"],
+  ["dweller", "flying_squidle"],   // Deep Dweller
 ];
+
+/** Per-name tint applied to a GLB mob's MeshToonMaterial color (multiplied with texture).
+ *  Keep values close to white so the underlying texture detail stays visible:
+ *  e.g. 0xccffcc for subtle green, 0xffcccc for sickly red. Pure 0xffffff = no tint.
+ *  First whole-word match wins (same matching rules as MOB_NAME_TO_ASSET). */
+const MOB_NAME_TO_TINT: [string, number][] = [
+  // ── Affliction / corruption (sickly) ───────────────────────────────
+  ["diseased", 0xb8d8a0],   // pale plague-green
+  ["plague",   0xb8d8a0],
+  ["venom",    0xa8e0a0],   // toxic green
+  ["toxic",    0xa8e0a0],
+  ["corrupted",0x8a78a8],   // bruised purple
+  ["rot",      0x8a78a8],
+  ["dark",     0x88728a],   // muted violet
+  ["shadow",   0x88728a],
+  ["void",     0x6a4878],
+  // ── Cold / ice / moon (cool blue/silver) ───────────────────────────
+  ["frost",    0xb8d8ff],
+  ["ice",      0xb8d8ff],
+  ["snow",     0xe0e8f0],
+  ["moon",     0xc8d0f0],
+  ["lunar",    0xc8d0f0],
+  ["silver",   0xd8e0e8],
+  ["lumen",    0xd0e8ff],
+  ["luminous", 0xd0e8ff],
+  ["azure",    0x90b8e0],
+  ["azurshard",0x6890c8],
+  ["crystal",  0xbcddf0],
+  ["prismatic",0xddccff],   // iridescent lean
+  ["aurora",   0xc0e0d8],
+  ["storm",    0xa8b0c8],
+  ["sky",      0xb0c8e0],
+  // ── Heat / fire / forge (warm red/orange) ─────────────────────────
+  ["fire",     0xff9966],
+  ["flame",    0xff9966],
+  ["molten",   0xff8855],
+  ["infernal", 0xff7755],
+  ["forgemaster", 0xff7755],
+  ["forge",    0xffaa77],
+  ["sun",      0xffd890],
+  ["solaris",  0xffd890],
+  ["solar",    0xffd890],
+  ["golden",   0xffe8a8],
+  ["harvest",  0xffd098],
+  ["amber",    0xffcc77],
+  // ── Nature: forest / bog / bramble (greens & browns) ──────────────
+  ["bramble",  0xb0c890],
+  ["thorn",    0xb0c890],
+  ["bog",      0x9ab088],
+  ["marsh",    0x9ab088],
+  ["mire",     0x9ab088],
+  ["peat",     0xa89070],
+  ["mud",      0xa88858],
+  ["dust",     0xc8b890],
+  ["emerald",  0x80c890],
+  ["forest",   0x9cc098],
+  ["wild",     0xb8c8a0],
+  ["fenland",  0x9ab088],
+  ["swamp",    0x9ab088],
+  // ── Floral / pastel ────────────────────────────────────────────────
+  ["bloom",    0xffc8d8],
+  ["petal",    0xffc8d8],
+  ["moonpetal",0xe8c8e0],
+  ["blossom",  0xffd0d8],
+  ["garden",   0xddeec8],
+  ["orchard",  0xe0d098],
+  ["nightbloom",0xc090c8],
+  // ── Stone / metal (grey) ───────────────────────────────────────────
+  ["iron",     0xa8a8b0],
+  ["stone",    0xb8b8b8],
+  ["rock",     0xb0a890],
+  ["rune",     0xa0a8c0],
+  ["mountain", 0xb0a898],
+  ["highland", 0xb8b098],
+  ["gemloch",  0xa8c8b8],
+  ["fels",     0x988868],
+  ["felsrock", 0x988868],
+  // ── Dire / hungry (slight darken) ──────────────────────────────────
+  ["dire",     0x886e60],
+  ["hungry",   0xb89880],
+  ["feral",    0x988068],
+  ["rogue",    0xa89870],
+  ["bandit",   0xb09880],
+  ["ranch",    0xc0a888],
+  // ── Boss-tier prismatic glow ───────────────────────────────────────
+  ["necromancer", 0xc098d8],
+  ["archdruid",   0xc0e0a8],
+  ["forgemaster", 0xff7755],   // dup ok (first match)
+  ["warden",      0xffe0a0],
+];
+
+/** Match a mob entity name to a color tint. Returns null if no tint applies. */
+function getTintForMob(entityName: string): number | null {
+  const lower = entityName.toLowerCase();
+  for (const [keyword, color] of MOB_NAME_TO_TINT) {
+    const re = new RegExp(`\\b${keyword}\\b`, "i");
+    if (re.test(lower)) return color;
+  }
+  return null;
+}
 
 export {
   TILE_TO_ASSET,
   MOB_NAME_TO_ASSET,
+  MOB_NAME_TO_TINT,
   TOWN_ASSET_DEFS,
   LIGHT_TREE_TILES,
   DARK_TREE_TILES,
@@ -584,13 +854,21 @@ export class EnvironmentAssets {
     return Object.keys(TOWN_ASSET_DEFS);
   }
 
-  /** Match a mob entity name to a GLB asset. Returns undefined if no match. */
+  /** Match a mob entity name to a GLB asset. Word-boundary match prevents false
+   *  positives like "Gorath" matching the "rat" keyword. Returns undefined if no match. */
   getAssetForMob(entityName: string): string | undefined {
     const lower = entityName.toLowerCase();
     for (const [keyword, asset] of MOB_NAME_TO_ASSET) {
-      if (lower.includes(keyword)) return asset;
+      const re = new RegExp(`\\b${keyword}\\b`, "i");
+      if (re.test(lower)) return asset;
     }
     return undefined;
+  }
+
+  /** Returns a per-name color tint (0xRRGGBB) to multiply against MeshToonMaterial.color,
+   *  e.g. "Diseased Wolf" → sickly green, "Frost Giant" → ice blue. Null = no tint. */
+  getTintForMob(entityName: string): number | null {
+    return getTintForMob(entityName);
   }
 
   private async loadAsset(name: string, file: string, base = MODEL_BASE): Promise<THREE.Object3D> {

@@ -43,6 +43,12 @@ export interface GameEventMap {
   matchFound: { battleId: string; status: string };
   /** PvP battle ended — transition back to overworld */
   battleEnded: { battleId: string };
+  /** Player gained gold from a non-zone-event action (sell/recycle/auction). */
+  goldGained: { copper: number; source: "sell" | "recycle" | "auction" };
+  /** Open the trading-rules dialog, optionally pre-filling an item from the bag. */
+  tradingRulesOpen: { tokenId?: number; itemName?: string } | undefined;
+  /** Trading rules changed — the bag and other listeners should refresh. */
+  tradingRulesChanged: void;
 }
 
 type GameEventKey = keyof GameEventMap;

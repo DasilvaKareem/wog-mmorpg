@@ -19,6 +19,32 @@ export function registerProfessionTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "professions_learn",
+    {
+      description:
+        "Learn a new profession from a Profession Trainer NPC. You must be standing next to the trainer. Available professions: mining, herbalism, skinning, blacksmithing, alchemy, cooking, leatherworking, jewelcrafting.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        zoneId: z.string().describe("Zone where the trainer NPC is"),
+        trainerId: z.string().describe("Profession Trainer NPC entity ID (from scan_zone)"),
+        professionId: z
+          .enum(["mining", "herbalism", "skinning", "blacksmithing", "alchemy", "cooking", "leatherworking", "jewelcrafting"])
+          .describe("Profession to learn"),
+      },
+    },
+    async ({ sessionId, entityId, zoneId, trainerId, professionId }) => {
+      const { walletAddress, token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/professions/learn",
+        { walletAddress, zoneId, entityId, trainerId, professionId },
+        token
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
     "professions_get_player",
     {
       description: "Get the professions a player has learned and their skill levels.",
@@ -76,13 +102,13 @@ export function registerProfessionTools(server: McpServer): void {
   server.registerTool(
     "herbalism_list_flowers",
     {
-      description: "List all flower nodes in a zone with their positions.",
+      description: "List all herb nodes in a zone with their positions and remaining charges.",
       inputSchema: {
         zoneId: z.string().describe("Zone to inspect"),
       },
     },
     async ({ zoneId }) => {
-      const data = await shard.get<unknown>(`/herbalism/flowers/${zoneId}`);
+      const data = await shard.get<unknown>(`/herbalism/nodes/${zoneId}`);
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -91,19 +117,19 @@ export function registerProfessionTools(server: McpServer): void {
     "herbalism_gather",
     {
       description:
-        "Gather flowers from a herb node. Requires Herbalism profession. Returns herb type and quantity.",
+        "Gather herbs from a herb node. Requires Herbalism profession. Returns herb type and quantity.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
         entityId: z.string().describe("Your entity ID"),
         zoneId: z.string().describe("Zone ID"),
-        nodeId: z.string().describe("Flower node ID from herbalism_list_flowers"),
+        flowerNodeId: z.string().describe("Herb node ID from herbalism_list_flowers"),
       },
     },
-    async ({ sessionId, entityId, zoneId, nodeId }) => {
+    async ({ sessionId, entityId, zoneId, flowerNodeId }) => {
       const { walletAddress, token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/herbalism/gather",
-        { walletAddress, entityId, zoneId, nodeId },
+        { walletAddress, entityId, zoneId, flowerNodeId },
         token
       );
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -218,6 +244,82 @@ export function registerProfessionTools(server: McpServer): void {
     }
   );
 
+  // ── Leatherworking ──────────────────────────────────────────────────────
+
+  server.registerTool(
+    "leatherworking_list_recipes",
+    {
+      description: "List all leatherworking recipes for crafting leather armor and goods with material requirements.",
+      inputSchema: {},
+    },
+    async () => {
+      const data = await shard.get<unknown>("/leatherworking/recipes");
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "leatherworking_craft",
+    {
+      description:
+        "Craft a leather item using hides and leather from your inventory. Must be at a Tanning Rack NPC. Burns materials and mints the crafted item.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        zoneId: z.string().describe("Zone where the Tanning Rack is"),
+        stationId: z.string().describe("Tanning Rack NPC entity ID (from scan_zone)"),
+        recipeId: z.string().describe("Recipe ID from leatherworking_list_recipes"),
+      },
+    },
+    async ({ sessionId, entityId, zoneId, stationId, recipeId }) => {
+      const { walletAddress, token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/leatherworking/craft",
+        { walletAddress, zoneId, entityId, stationId, recipeId },
+        token
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  // ── Jewelcrafting ────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "jewelcrafting_list_recipes",
+    {
+      description: "List all jewelcrafting recipes for crafting rings, necklaces, and gems with material requirements.",
+      inputSchema: {},
+    },
+    async () => {
+      const data = await shard.get<unknown>("/jewelcrafting/recipes");
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "jewelcrafting_craft",
+    {
+      description:
+        "Craft a jewel item using gems and metals from your inventory. Must be at a Jeweler's Bench NPC. Burns materials and mints the crafted item.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        zoneId: z.string().describe("Zone where the Jeweler's Bench is"),
+        stationId: z.string().describe("Jeweler's Bench NPC entity ID (from scan_zone)"),
+        recipeId: z.string().describe("Recipe ID from jewelcrafting_list_recipes"),
+      },
+    },
+    async ({ sessionId, entityId, zoneId, stationId, recipeId }) => {
+      const { walletAddress, token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/jewelcrafting/craft",
+        { walletAddress, zoneId, entityId, stationId, recipeId },
+        token
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
   // ── Skinning ─────────────────────────────────────────────────────────────
 
   server.registerTool(
@@ -235,7 +337,7 @@ export function registerProfessionTools(server: McpServer): void {
     async ({ sessionId, entityId, zoneId, corpseId }) => {
       const { walletAddress, token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
-        "/skinning/skin",
+        "/skinning/harvest",
         { walletAddress, entityId, zoneId, corpseId },
         token
       );
@@ -246,13 +348,18 @@ export function registerProfessionTools(server: McpServer): void {
   // ── Quests ───────────────────────────────────────────────────────────────
 
   server.registerTool(
-    "quests_get_catalog",
+    "quests_get_from_npc",
     {
-      description: "List all available quests with objectives and rewards.",
-      inputSchema: {},
+      description: "Get quests available from a specific NPC quest-giver, filtered to show only quests relevant to your progress. Use scan_zone to find quest-giver NPCs, then pass their entityId here.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        npcEntityId: z.string().describe("Quest-giver NPC entity ID from scan_zone"),
+      },
     },
-    async () => {
-      const data = await shard.get<unknown>("/quests/catalog");
+    async ({ sessionId, entityId, npcEntityId }) => {
+      requireSession(sessionId);
+      const data = await shard.get<unknown>(`/quests/npc/${npcEntityId}?entityId=${entityId}`);
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -260,13 +367,15 @@ export function registerProfessionTools(server: McpServer): void {
   server.registerTool(
     "quests_get_active",
     {
-      description: "Get all active quests for a player and their progress.",
+      description: "Get all active quests for the current player and their progress.",
       inputSchema: {
-        walletAddress: z.string().describe("Player wallet address"),
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
       },
     },
-    async ({ walletAddress }) => {
-      const data = await shard.get<unknown>(`/quests/${walletAddress}`);
+    async ({ sessionId, entityId }) => {
+      requireSession(sessionId);
+      const data = await shard.get<unknown>(`/quests/active/${entityId}`);
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -277,16 +386,16 @@ export function registerProfessionTools(server: McpServer): void {
       description: "Accept a quest from a quest-giver NPC.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
-        questId: z.string().describe("Quest ID from quests_get_catalog"),
-        npcEntityId: z.string().describe("Quest-giver NPC entity ID"),
+        entityId: z.string().describe("Your entity ID"),
+        questId: z.string().describe("Quest ID from quests_get_from_npc"),
         zoneId: z.string().describe("Zone where the NPC is located"),
       },
     },
-    async ({ sessionId, questId, npcEntityId, zoneId }) => {
-      const { walletAddress, token } = requireSession(sessionId);
+    async ({ sessionId, entityId, questId, zoneId }) => {
+      const { token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/quests/accept",
-        { walletAddress, questId, npcEntityId, zoneId },
+        { entityId, questId, zoneId },
         token
       );
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -319,19 +428,20 @@ export function registerProfessionTools(server: McpServer): void {
   server.registerTool(
     "quests_complete",
     {
-      description: "Complete a quest and claim XP and gold rewards.",
+      description: "Turn in a completed quest to an NPC and claim XP and gold rewards.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
         questId: z.string().describe("Quest ID to complete"),
-        npcEntityId: z.string().describe("Quest-giver NPC entity ID"),
+        npcId: z.string().describe("Quest-giver NPC entity ID"),
         zoneId: z.string().describe("Zone where the NPC is located"),
       },
     },
-    async ({ sessionId, questId, npcEntityId, zoneId }) => {
-      const { walletAddress, token } = requireSession(sessionId);
+    async ({ sessionId, entityId, questId, npcId, zoneId }) => {
+      const { token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/quests/complete",
-        { walletAddress, questId, npcEntityId, zoneId },
+        { entityId, questId, npcId, zoneId },
         token
       );
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };

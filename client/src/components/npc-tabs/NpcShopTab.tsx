@@ -4,6 +4,7 @@ import type { Entity } from "@/types";
 import { useWallet } from "@/hooks/useWallet";
 import { useToast } from "@/components/ui/toast";
 import { formatCopperString } from "@/lib/currency";
+import { CurrencyDisplay } from "@/components/ui/currency-display";
 
 const BORDER = "#29334d";
 const TEXT = "#f1f5ff";
@@ -30,7 +31,7 @@ export function NpcShopTab({ entity, zoneId }: Props): React.ReactElement {
   const [activeCategory, setActiveCategory] = React.useState("");
   const [buyingTokenId, setBuyingTokenId] = React.useState<string | null>(null);
 
-  const { isConnected, buyItem } = useWallet();
+  const { isConnected, buyItem, balance } = useWallet();
   const { notify } = useToast();
 
   React.useEffect(() => {
@@ -56,8 +57,21 @@ export function NpcShopTab({ entity, zoneId }: Props): React.ReactElement {
 
   const categories = React.useMemo(() => Object.keys(grouped), [grouped]);
 
+  const goldAmount = balance?.gold != null ? Number(balance.gold) : 0;
+
   return (
     <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
+      {isConnected && (
+        <div
+          className="px-4 py-1.5 border-b flex items-center justify-between"
+          style={{ borderColor: BORDER, background: "#0d1322" }}
+        >
+          <span className="text-[9px] uppercase tracking-wider" style={{ color: DIM }}>
+            Your gold
+          </span>
+          <CurrencyDisplay amount={goldAmount} size="sm" hideZero />
+        </div>
+      )}
       {!isConnected && (
         <div className="px-4 py-2 border-b" style={{ borderColor: BORDER }}>
           <div className="text-[10px] font-bold" style={{ color: "#f25454" }}>

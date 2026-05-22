@@ -724,6 +724,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       targetName?: string;
       techniqueId?: string;
       techniqueName?: string;
+      edictId?: string;
       edictName?: string;
       edictAction?: string;
     } | null = null;
@@ -754,6 +755,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
             targetName: target?.name ?? edict?.targetName,
             techniqueId: order.techniqueId,
             techniqueName: technique?.name ?? edict?.techniqueName,
+            edictId: typeof edict?.edictId === "string" ? edict.edictId : undefined,
             edictName: typeof edict?.edictName === "string" ? edict.edictName : undefined,
             edictAction: typeof edict?.actionType === "string" ? edict.actionType : undefined,
           };
@@ -764,6 +766,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
             targetName: typeof edict.targetName === "string" ? edict.targetName : undefined,
             techniqueId: typeof edict.techniqueId === "string" ? edict.techniqueId : undefined,
             techniqueName: typeof edict.techniqueName === "string" ? edict.techniqueName : undefined,
+            edictId: typeof edict.edictId === "string" ? edict.edictId : undefined,
             edictName: typeof edict.edictName === "string" ? edict.edictName : undefined,
             edictAction: typeof edict.actionType === "string" ? edict.actionType : undefined,
           };
@@ -1746,16 +1749,16 @@ Strategy options: aggressive, balanced, defensive`;
       },
     ];
 
-    // When MCP is connected, replace hardcoded read tools with curated MCP subset
-    // Using chatOnly=true to keep tool count low (~13 MCP + 3 local = ~16 total)
-    // instead of dumping all ~60 MCP tools which bloats token count and confuses the LLM
+    // When MCP is connected, replace hardcoded read tools with focus-gated MCP subset.
+    // chatOnly=true provides the base curated set; focus further narrows to ~10-15
+    // relevant tools so the LLM doesn't see unrelated options (e.g. dungeon tools during shopping).
     if (mcpClient) {
       const localOnlyTools = new Set(["update_focus", "take_action", "send_message", "queue_actions", "clear_queue"]);
       const localTools = chatToolDecls.filter((t) => localOnlyTools.has(t.name!));
-      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true);
+      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true, config.focus);
       chatToolDecls.length = 0;
       chatToolDecls.push(...localTools, ...mcpTools);
-      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools + ${localTools.length} local tools (curated)`);
+      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools (focus=${config.focus}) + ${localTools.length} local tools`);
     }
 
     const fullSystemInstruction = recentActivity

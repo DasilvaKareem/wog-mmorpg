@@ -230,6 +230,35 @@ export function registerSocialTools(server: McpServer): void {
     }
   );
 
+  // ── NPC Dialogue ─────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "npc_dialogue",
+    {
+      description:
+        "Send a message to an NPC and receive their response. Use this to interact with quest-givers, trainers, merchants, and lore NPCs. The NPC may offer quests, teach professions, or provide information.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        npcEntityId: z.string().describe("NPC entity ID to talk to (from scan_zone)"),
+        message: z.string().describe("Your message or dialogue choice"),
+        recentHistory: z
+          .array(z.object({ role: z.enum(["player", "npc"]), text: z.string() }))
+          .optional()
+          .describe("Recent dialogue history for context (last 3-5 exchanges)"),
+      },
+    },
+    async ({ sessionId, entityId, npcEntityId, message, recentHistory }) => {
+      const { token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/npc/dialogue",
+        { entityId, npcEntityId, message, ...(recentHistory ? { recentHistory } : {}) },
+        token
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
   // ── Party ────────────────────────────────────────────────────────────────
 
   server.registerTool(

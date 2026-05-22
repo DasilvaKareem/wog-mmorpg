@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
+import { ItemMarksProvider } from "@/context/ItemMarksContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
@@ -110,6 +111,9 @@ const StoryPage = React.lazy(() =>
 );
 const X402AgentPage = React.lazy(() =>
   import("@/components/X402AgentPage").then((mod) => ({ default: mod.X402AgentPage }))
+);
+const AgentPage = React.lazy(() =>
+  import("@/components/AgentPage").then((mod) => ({ default: mod.AgentPage }))
 );
 const ChampionsPage = React.lazy(() =>
   import("@/components/ChampionsPage").then((mod) => ({ default: mod.ChampionsPage }))
@@ -938,6 +942,7 @@ function AppShell(): React.ReactElement {
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/market" element={<RealMoneyMarketPage />} />
               <Route path="/x402" element={<X402AgentPage />} />
+              <Route path="/agent" element={<AgentPage />} />
               <Route path="/races" element={<RacesClassesPage />} />
               <Route path="/story" element={<StoryPage />} />
               <Route path="/media" element={<MediaPage />} />
@@ -1024,6 +1029,7 @@ export default function App(): React.ReactElement {
     <BrowserRouter basename={resolveRouterBasename()}>
       <GameProvider>
         <WalletProvider>
+          <ItemMarksProvider>
           <ToastProvider>
             <Routes>
               {/* Farcaster Mini App — explicit route always works */}
@@ -1043,6 +1049,7 @@ export default function App(): React.ReactElement {
               <Route path="*" element={<AppShell />} />
             </Routes>
           </ToastProvider>
+          </ItemMarksProvider>
         </WalletProvider>
       </GameProvider>
     </BrowserRouter>

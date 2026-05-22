@@ -7,6 +7,7 @@ import { reputationManager, ReputationCategory } from "../economy/reputationMana
 import { getItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 export type EnchantmentType =
   | "fire"
@@ -267,6 +268,8 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
         entityName: entity.name,
         data: { craftType: "enchanting", itemName: itemInfo.name, enchantmentName: enchantment.name },
       });
+
+      advanceGatherQuests(entity, `Enchanted ${itemInfo.name}`);
 
       if (entity.agentId != null) {
         reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 3, `Enchanted: ${itemInfo.name} with ${enchantment.name}`);

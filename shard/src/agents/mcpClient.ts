@@ -69,7 +69,7 @@ const SUPERVISOR_TOOLS = new Set([
   "items_get_inventory",
   "world_list_zones",
   "quests_get_active",
-  "quests_get_catalog",
+  "quests_get_from_npc",
 ]);
 
 /** Chat allowlist — curated subset for user-facing chat. Keeps tool count low
@@ -82,13 +82,152 @@ const CHAT_TOOLS = new Set([
   "shop_get_catalog",
   "what_can_i_craft",
   "quests_get_active",
-  "quests_get_catalog",
+  "quests_get_from_npc",
   "world_list_zones",
   "fight_until_dead",
   "grind_mobs",
   "travel_to_zone",
   "navigate_to_npc",
+  "navigate_to_entity",
+  // Dungeon-key pipeline — brew essence → forge key → open gate.
+  // The chat LLM needs the full chain or it hallucinates instead of acting.
+  "alchemy_list_recipes",
+  "alchemy_brew",
+  "dungeon_list_gates",
+  "dungeon_forge_key",
+  "dungeon_open",
 ]);
+
+/**
+ * Focus-gated tool allowlists — each agent focus gets only the tools it needs.
+ * Reduces tool list from ~110 → ~10-15 per focus, cutting token usage ~85%.
+ * Unknown/undefined focus falls back to no filtering (all tools shown).
+ */
+const FOCUS_TOOLS: Record<string, Set<string>> = {
+  combat: new Set([
+    "get_my_status", "scan_zone", "find_mobs_for_level",
+    "fight_until_dead", "grind_mobs",
+    "player_move", "player_attack", "technique_cast", "technique_list_catalog",
+    "navigate_to", "navigate_to_entity", "travel_to_zone",
+    "cooking_consume", "items_get_inventory",
+  ]),
+  gathering: new Set([
+    "get_my_status", "scan_zone",
+    "mining_list_nodes", "mining_gather",
+    "herbalism_list_flowers", "herbalism_gather",
+    "skinning_skin_corpse",
+    "navigate_to", "navigate_to_entity", "travel_to_zone",
+    "items_get_inventory",
+  ]),
+  skinning: new Set([
+    "get_my_status", "scan_zone",
+    "skinning_skin_corpse",
+    "fight_until_dead", "grind_mobs",
+    "navigate_to", "navigate_to_entity", "travel_to_zone",
+    "items_get_inventory",
+  ]),
+  mining: new Set([
+    "get_my_status", "scan_zone",
+    "mining_list_nodes", "mining_gather",
+    "navigate_to", "navigate_to_entity", "travel_to_zone",
+    "items_get_inventory",
+  ]),
+  questing: new Set([
+    "get_my_status", "scan_zone",
+    "quests_get_from_npc", "quests_get_active", "quests_accept", "quests_complete",
+    "npc_dialogue",
+    "fight_until_dead", "grind_mobs",
+    "navigate_to_npc", "navigate_to", "travel_to_zone",
+    "items_get_inventory",
+  ]),
+  crafting: new Set([
+    "get_my_status", "what_can_i_craft", "items_get_inventory",
+    "crafting_list_recipes", "crafting_forge",
+    "navigate_to", "travel_to_zone",
+  ]),
+  alchemy: new Set([
+    "get_my_status", "what_can_i_craft", "items_get_inventory",
+    "alchemy_list_recipes", "alchemy_brew",
+    "dungeon_forge_key",
+    "navigate_to", "navigate_to_entity", "travel_to_zone",
+  ]),
+  cooking: new Set([
+    "get_my_status", "what_can_i_craft", "items_get_inventory",
+    "cooking_list_recipes", "cooking_cook", "cooking_consume",
+    "navigate_to", "travel_to_zone",
+  ]),
+  enchanting: new Set([
+    "get_my_status", "items_get_inventory",
+    "enchanting_catalog", "enchanting_apply", "enchanting_get_item", "enchanting_remove",
+    "navigate_to", "travel_to_zone",
+  ]),
+  leatherworking: new Set([
+    "get_my_status", "what_can_i_craft", "items_get_inventory",
+    "leatherworking_list_recipes", "leatherworking_craft",
+    "navigate_to", "travel_to_zone",
+  ]),
+  jewelcrafting: new Set([
+    "get_my_status", "what_can_i_craft", "items_get_inventory",
+    "jewelcrafting_list_recipes", "jewelcrafting_craft",
+    "navigate_to", "travel_to_zone",
+  ]),
+  shopping: new Set([
+    "get_my_status", "items_get_inventory",
+    "shop_get_catalog", "shop_get_npc_catalog", "shop_buy_item", "shop_sell_item",
+    "shop_get_sell_prices", "shop_recycle_item",
+    "auction_list_active", "auction_create", "auction_place_bid", "auction_buyout",
+    "navigate_to_npc", "travel_to_zone",
+  ]),
+  trading: new Set([
+    "get_my_status", "items_get_inventory",
+    "shop_get_catalog", "shop_buy_item", "shop_sell_item",
+    "auction_list_active", "auction_create", "auction_place_bid", "auction_buyout",
+    "navigate_to_npc", "travel_to_zone",
+  ]),
+  dungeon: new Set([
+    "get_my_status", "scan_zone", "find_mobs_for_level",
+    "fight_until_dead", "grind_mobs",
+    "dungeon_list_gates", "dungeon_open", "dungeon_get_instance", "dungeon_leave",
+    "dungeon_forge_key", "alchemy_list_recipes", "alchemy_brew",
+    "navigate_to", "navigate_to_entity", "player_attack", "technique_cast",
+    "cooking_consume", "items_get_inventory",
+  ]),
+  learning: new Set([
+    "get_my_status", "scan_zone",
+    "technique_list_catalog", "technique_learn",
+    "professions_learn", "professions_list", "professions_get_player",
+    "navigate_to_npc", "travel_to_zone",
+  ]),
+  party: new Set([
+    "get_my_status", "scan_zone",
+    "fight_until_dead", "grind_mobs",
+    "party_create", "party_invite",
+    "navigate_to", "navigate_to_entity", "travel_to_zone",
+    "world_send_chat", "inbox_read", "inbox_send",
+  ]),
+  traveling: new Set([
+    "get_my_status", "scan_zone",
+    "world_list_zones", "world_list_portals", "world_get_map",
+    "travel_to_zone", "navigate_to_portal", "estimate_travel_time",
+  ]),
+  farming: new Set([
+    "get_my_status", "scan_zone",
+    "farming_list_crops", "farming_list_nodes", "farming_harvest",
+    "plot_list_zone", "plot_list_owned", "plot_claim", "plot_release",
+    "building_list_blueprints", "building_status", "building_start", "building_advance",
+    "navigate_to", "travel_to_zone",
+  ]),
+  goto: new Set([
+    "get_my_status", "scan_zone",
+    "travel_to_zone", "navigate_to", "navigate_to_npc", "navigate_to_portal",
+    "world_list_zones", "world_list_portals",
+  ]),
+  idle: new Set([
+    "get_my_status", "scan_zone",
+    "world_get_events", "world_send_chat", "inbox_read",
+  ]),
+  // "user" focus intentionally omitted — falls back to no filter (all tools visible)
+};
 
 export class AgentMcpClient {
   private client: Client | null = null;
@@ -210,9 +349,12 @@ export class AgentMcpClient {
    *
    * @param includeBlocking If false, blocking tools (fight_until_dead, grind_mobs, etc.) are excluded.
    * @param supervisorOnly If true, only return the small set of read tools the supervisor needs.
-   * @param chatOnly If true, only return the curated chat subset (~13 tools instead of ~60).
+   * @param chatOnly If true, only return the curated chat subset (~13 tools instead of ~110).
+   * @param focus Agent focus mode — limits tools to the relevant subset (~10-15 tools). Falls back
+   *             to no filter if focus is undefined or "user".
    */
-  getGeminiTools(includeBlocking = true, supervisorOnly = false, chatOnly = false): FunctionDeclaration[] {
+  getGeminiTools(includeBlocking = true, supervisorOnly = false, chatOnly = false, focus?: string): FunctionDeclaration[] {
+    const focusSet = focus && focus !== "user" ? FOCUS_TOOLS[focus] : undefined;
     const decls: FunctionDeclaration[] = [];
 
     for (const tool of this.tools) {
@@ -220,6 +362,7 @@ export class AgentMcpClient {
       if (!includeBlocking && BLOCKING_TOOLS.has(tool.name)) continue;
       if (supervisorOnly && !SUPERVISOR_TOOLS.has(tool.name)) continue;
       if (chatOnly && !CHAT_TOOLS.has(tool.name)) continue;
+      if (focusSet && !focusSet.has(tool.name)) continue;
 
       // Deep clone schema so we can strip auto-inject params
       const schema = structuredClone(tool.inputSchema) as any;

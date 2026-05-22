@@ -1,4 +1,4 @@
-import { fetchNanopayStatus, submitTopUp, type NanopayStatus } from "../api.js";
+import { fetchNanopayStatus, submitTopUp, fetchNanopayBreakdown, fetchTelegramStatus, fetchTelegramBotLink, type NanopayStatus, type SpendBreakdown } from "../api.js";
 import { playSoundEffect } from "../sfx.js";
 
 export interface AgentStats {
@@ -16,17 +16,14 @@ interface WalletPanelOptions {
 
 const TOP_UP_AMOUNTS = [0.1, 0.25, 1.0];
 const POLL_MS = 2000;
-const MAX_SAMPLES = 150;                     // 5-minute rolling window at 2s polls
-const MIN_WINDOW_MS = 10_000;               // need ≥10s of data before showing rate
-const FALLBACK_DRAIN_PER_MS = 0.000001 / 1200;
+const MAX_SAMPLES = 150;
+const MIN_WINDOW_MS = 10_000;
 
 // ── formatting helpers ────────────────────────────────────────────────────────
 
 function fmtUsdc(n: number): string {
   if (n <= 0) return "$0.000000";
-  if (n < 0.0001) return `$${n.toFixed(6)}`;
-  if (n < 0.01)   return `$${n.toFixed(5)}`;
-  if (n < 0.1)    return `$${n.toFixed(4)}`;
+  if (n < 1)  return `$${n.toFixed(6)}`;
   return `$${n.toFixed(3)}`;
 }
 
@@ -42,6 +39,15 @@ function fmtXp(xp: number): string {
   if (xp >= 1_000_000) return `${(xp / 1_000_000).toFixed(2)}M`;
   if (xp >= 1_000)     return `${(xp / 1_000).toFixed(1)}k`;
   return Math.round(xp).toString();
+}
+
+function fmtAgo(ts: number): string {
+  if (!ts) return "";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60)   return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 function hoursRemaining(remaining: number): string {
@@ -93,6 +99,14 @@ export class WalletPanel {
   private goldPerHour: number | null = null;
   private xpPerHour: number | null = null;
 
+  // Telegram state
+  private telegramLinked = false;
+  private telegramUrl: string | null = null;
+
+  // Breakdown state
+  private breakdown: SpendBreakdown | null = null;
+  private breakdownLoaded = false;
+
   private options: WalletPanelOptions;
 
   constructor(options: WalletPanelOptions) {
@@ -128,6 +142,8 @@ export class WalletPanel {
     void this.poll();
     this.startPolling();
     this.startAnimation();
+    void this.fetchTelegramInfo();
+    void this.fetchBreakdown();
   }
 
   hide() {
@@ -147,6 +163,73 @@ export class WalletPanel {
 
   private stopPolling() {
     if (this.pollTimer !== null) { clearInterval(this.pollTimer); this.pollTimer = null; }
+  }
+
+  private async fetchTelegramInfo() {
+    const wallet = this.options.getWallet();
+    if (!wallet) return;
+    try {
+      const [statusRes, linkRes] = await Promise.all([
+        fetchTelegramStatus(wallet),
+        fetchTelegramBotLink(wallet),
+      ]);
+      const linked = statusRes?.linked ?? false;
+      const url    = linkRes?.url ?? null;
+      if (linked !== this.telegramLinked || url !== this.telegramUrl) {
+        this.telegramLinked = linked;
+        this.telegramUrl    = url;
+        this.updateTelegramRow();
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  private async fetchBreakdown() {
+    const wallet = this.options.getWallet();
+    const token  = await this.options.getToken();
+    if (!wallet || !token) return;
+    try {
+      const data = await fetchNanopayBreakdown(wallet, token);
+      this.breakdown = data;
+      this.breakdownLoaded = true;
+      const el = this.body.querySelector<HTMLElement>(".wp-history-list");
+      if (el) el.innerHTML = this.renderBreakdownHTML();
+    } catch { /* non-fatal */ }
+  }
+
+  private updateTelegramRow() {
+    const row = this.body.querySelector<HTMLElement>(".wp-telegram-row");
+    if (!row) return;
+    row.innerHTML = this.renderTelegramRowInnerHTML();
+    this.wireTelegramBtn(row);
+  }
+
+  private renderTelegramRowInnerHTML(): string {
+    if (this.telegramLinked) {
+      return `
+        <span class="wp-contact-icon">✈️</span>
+        <span class="wp-tg-connected">Telegram connected</span>
+      `;
+    }
+    if (this.telegramUrl) {
+      return `
+        <span class="wp-contact-icon">✈️</span>
+        <a class="wp-tg-btn" href="${this.telegramUrl}" target="_blank" rel="noopener">
+          Connect Telegram →
+        </a>
+      `;
+    }
+    return `
+      <span class="wp-contact-icon">✈️</span>
+      <span class="wp-tg-unavailable">Telegram not configured</span>
+    `;
+  }
+
+  private wireTelegramBtn(row: HTMLElement) {
+    row.querySelector<HTMLAnchorElement>(".wp-tg-btn")?.addEventListener("click", () => {
+      // After user opens the bot, re-poll status in a few seconds
+      setTimeout(() => { void this.fetchTelegramInfo(); }, 5000);
+      setTimeout(() => { void this.fetchTelegramInfo(); }, 15000);
+    });
   }
 
   private async poll() {
@@ -204,12 +287,13 @@ export class WalletPanel {
     const tick = (now: number) => {
       this.rafHandle = requestAnimationFrame(tick);
       if (!this.status) return;
-      const rate = this.drainPerMs > 0
-        ? this.drainPerMs
-        : (this.status.needsTopUp || !this.status.budget) ? 0 : FALLBACK_DRAIN_PER_MS;
-      const elapsed = now - this.lastPollAt;
-      this.displayed = Math.max(0, this.lastPollRemaining - rate * elapsed);
-      this.updateLiveElements();
+      // Only interpolate when we've measured a real drain from consecutive polls.
+      // Without it, display holds at the last server value — no false animation.
+      if (this.drainPerMs > 0) {
+        const elapsed = now - this.lastPollAt;
+        this.displayed = Math.max(0, this.lastPollRemaining - this.drainPerMs * elapsed);
+        this.updateLiveElements();
+      }
     };
     this.rafHandle = requestAnimationFrame(tick);
   }
@@ -272,6 +356,7 @@ export class WalletPanel {
         this.drainPerMs        = 0;
       }
       playSoundEffect("ui_button_click");
+      void this.fetchBreakdown();
     } catch (err: any) {
       console.warn("[WalletPanel] topUp error:", err.message);
       this.body.innerHTML = saved;
@@ -334,6 +419,64 @@ export class WalletPanel {
     return chips.join("");
   }
 
+  // ── history helpers ───────────────────────────────────────────────────────
+
+  private renderBreakdownHTML(): string {
+    if (!this.breakdownLoaded) return `<div class="wp-history-empty">Loading…</div>`;
+
+    const bd   = this.breakdown;
+    const LABELS: Record<string, string> = {
+      supervisor: "AI decisions",
+      chat:       "Chat messages",
+      combat:     "Combat",
+      gather:     "Gathering",
+    };
+    const ORDER = ["supervisor", "chat", "combat", "gather"];
+
+    const rows: string[] = [];
+
+    // Spending breakdown bars
+    const entries = ORDER
+      .map((k) => ({ key: k, val: bd?.breakdown[k] ?? 0 }))
+      .filter((e) => e.val > 0);
+
+    if (entries.length > 0) {
+      const total = entries.reduce((s, e) => s + e.val, 0);
+      for (const { key, val } of entries) {
+        const pct    = total > 0 ? Math.round((val / total) * 100) : 0;
+        const amt    = val < 0.001 ? val.toFixed(6) : val < 1 ? val.toFixed(4) : val.toFixed(2);
+        rows.push(`
+          <div class="wp-bd-row">
+            <span class="wp-bd-label">${LABELS[key] ?? key}</span>
+            <div class="wp-bd-bar-track">
+              <div class="wp-bd-bar-fill" style="width:${pct}%"></div>
+            </div>
+            <span class="wp-bd-pct">${pct}%</span>
+            <span class="wp-bd-amt">$${amt}</span>
+          </div>`);
+      }
+    } else {
+      rows.push(`<div class="wp-history-empty">No spend yet this session</div>`);
+    }
+
+    // Top-ups
+    const topups = bd?.topups ?? [];
+    if (topups.length > 0) {
+      rows.push(`<div class="wp-bd-divider">Top-ups</div>`);
+      for (const t of topups.slice(0, 5)) {
+        const amt = t.amount < 1 ? t.amount.toFixed(4) : t.amount.toFixed(2);
+        rows.push(`
+          <div class="wp-hist-row">
+            <span class="wp-hist-label">Added funds</span>
+            <span class="wp-hist-ago">${fmtAgo(t.ts)}</span>
+            <span class="wp-hist-amt wp-hist-credit">+$${amt}</span>
+          </div>`);
+      }
+    }
+
+    return rows.join("");
+  }
+
   // ── full structural render ────────────────────────────────────────────────
 
   private render() {
@@ -393,13 +536,31 @@ export class WalletPanel {
       </div>
 
       <div class="wp-section">
-        <div class="wp-section-label">Pricing <a class="wp-pricing-link" href="/pricing" target="_blank">Full table ↗</a></div>
-        <div class="wp-pricing-grid">
-          <span class="wp-prow-label">Combat / gather</span><span class="wp-prow-val">$0.000001 / tick</span>
-          <span class="wp-prow-label">AI decision</span><span class="wp-prow-val">$0.0001 / call</span>
-          <span class="wp-prow-label">Chat message</span><span class="wp-prow-val">$0.001 / msg</span>
-          <span class="wp-prow-label">Idle</span><span class="wp-prow-val">Free</span>
+        <div class="wp-section-label">Activity</div>
+        <div class="wp-history-list">${this.renderBreakdownHTML()}</div>
+      </div>
+
+      <div class="wp-section">
+        <div class="wp-section-label">Agent Contact</div>
+        <div class="wp-contact-hint">Get notified when your agent needs attention</div>
+        <div class="wp-contact-fields">
+          <div class="wp-contact-row">
+            <span class="wp-contact-icon">📧</span>
+            <input class="wp-contact-input" data-key="email" type="email" placeholder="Email" value="${this.loadContact("email")}" autocomplete="email" />
+          </div>
+          <div class="wp-contact-row wp-telegram-row">
+            ${this.renderTelegramRowInnerHTML()}
+          </div>
+          <div class="wp-contact-row">
+            <span class="wp-contact-icon">💬</span>
+            <input class="wp-contact-input" data-key="whatsapp" type="tel" placeholder="WhatsApp number" value="${this.loadContact("whatsapp")}" autocomplete="tel" />
+          </div>
+          <div class="wp-contact-row">
+            <span class="wp-contact-icon">📱</span>
+            <input class="wp-contact-input" data-key="phone" type="tel" placeholder="Phone / SMS" value="${this.loadContact("phone")}" autocomplete="tel" />
+          </div>
         </div>
+        <button class="wp-contact-save">Save</button>
       </div>
     `;
 
@@ -417,6 +578,29 @@ export class WalletPanel {
         setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("wp-copy-btn-ok"); }, 1500);
       }).catch(() => {});
     });
+
+    this.body.querySelector<HTMLButtonElement>(".wp-contact-save")?.addEventListener("click", (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      this.body.querySelectorAll<HTMLInputElement>(".wp-contact-input").forEach((inp) => {
+        this.saveContact(inp.dataset.key ?? "", inp.value.trim());
+      });
+      btn.textContent = "Saved ✓";
+      btn.classList.add("wp-contact-save-ok");
+      setTimeout(() => { btn.textContent = "Save"; btn.classList.remove("wp-contact-save-ok"); }, 1500);
+    });
+
+    const tgRow = this.body.querySelector<HTMLElement>(".wp-telegram-row");
+    if (tgRow) this.wireTelegramBtn(tgRow);
+  }
+
+  private loadContact(key: string): string {
+    return localStorage.getItem(`wog:contact:${key}`) ?? "";
+  }
+
+  private saveContact(key: string, value: string): void {
+    if (!key) return;
+    if (value) localStorage.setItem(`wog:contact:${key}`, value);
+    else localStorage.removeItem(`wog:contact:${key}`);
   }
 
   // ── styles ────────────────────────────────────────────────────────────────
@@ -426,6 +610,8 @@ export class WalletPanel {
     const style = document.createElement("style");
     style.id = "wp-styles";
     style.textContent = `
+      /* ── Panel shell ── */
+
       #wallet-panel {
         position: fixed;
         bottom: 72px;
@@ -433,6 +619,8 @@ export class WalletPanel {
         width: min(340px, calc(100vw - 24px));
         max-height: calc(100vh - 100px);
         overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
         z-index: 38;
         display: flex;
         flex-direction: column;
@@ -462,8 +650,11 @@ export class WalletPanel {
 
       .wp-close {
         background: none; border: none;
-        color: #8f8067; font-size: 20px;
-        cursor: pointer; line-height: 1; padding: 0 2px;
+        color: #8f8067; font-size: 22px;
+        cursor: pointer; line-height: 1;
+        padding: 4px 6px; margin: -4px -6px;
+        min-width: 44px; min-height: 44px;
+        display: flex; align-items: center; justify-content: flex-end;
       }
       .wp-close:hover { color: #f4ead0; }
 
@@ -484,12 +675,6 @@ export class WalletPanel {
         display: flex; align-items: center; gap: 8px;
       }
 
-      .wp-pricing-link {
-        color: #7fd6be; font-size: 10px;
-        text-decoration: none; margin-left: auto;
-      }
-      .wp-pricing-link:hover { text-decoration: underline; }
-
       /* ── Balance ── */
 
       .wp-balance-row {
@@ -499,7 +684,7 @@ export class WalletPanel {
 
       .wp-balance-usdc {
         color: #f4ead0;
-        font: 700 28px/1 "Courier New", monospace;
+        font: 700 22px/1 "Courier New", monospace;
         font-variant-numeric: tabular-nums;
         letter-spacing: -0.02em;
         transition: color 0.5s ease;
@@ -519,7 +704,6 @@ export class WalletPanel {
       .wp-bar-fill {
         height: 100%; border-radius: 99px;
         transition: background 0.5s ease;
-        /* width driven by rAF — no CSS transition */
       }
       .wp-bar-fill.wp-bar-ok    { background: linear-gradient(90deg, #3ab88a, #7fd6be); }
       .wp-bar-fill.wp-bar-low   { background: linear-gradient(90deg, #c07820, #f0a030); }
@@ -573,14 +757,9 @@ export class WalletPanel {
         gap: 3px;
       }
 
-      .wp-chip-dim {
-        opacity: 0.4;
-      }
+      .wp-chip-dim { opacity: 0.4; }
 
-      .wp-chip-icon {
-        font-size: 14px;
-        line-height: 1;
-      }
+      .wp-chip-icon { font-size: 14px; line-height: 1; }
 
       .wp-chip-val {
         color: #f4ead0;
@@ -602,22 +781,20 @@ export class WalletPanel {
       .wp-topup-row { display: flex; gap: 8px; }
 
       .wp-topup-btn {
-        flex: 1; padding: 10px 6px;
+        flex: 1;
+        min-height: 44px;
         border-radius: 12px;
         border: 1px solid rgba(127,214,190,0.2);
         background: rgba(127,214,190,0.07);
         color: #7fd6be;
         font: 700 11px/1 "Courier New", monospace;
         cursor: pointer;
-        transition: background 0.15s, border-color 0.15s, transform 0.15s;
+        transition: background 0.15s, border-color 0.15s;
         letter-spacing: 0.06em;
+        touch-action: manipulation;
       }
-      .wp-topup-btn:hover {
-        background: rgba(127,214,190,0.16);
-        border-color: rgba(127,214,190,0.4);
-        transform: translateY(-1px);
-      }
-      .wp-topup-btn:active { transform: translateY(0); }
+      .wp-topup-btn:hover  { background: rgba(127,214,190,0.16); border-color: rgba(127,214,190,0.4); }
+      .wp-topup-btn:active { background: rgba(127,214,190,0.22); }
 
       /* ── Receive ── */
 
@@ -627,6 +804,7 @@ export class WalletPanel {
         background: rgba(255,255,255,0.03);
         border: 1px solid rgba(255,255,255,0.06);
         border-radius: 10px; padding: 9px 12px;
+        min-height: 44px;
       }
 
       .wp-receive-addr {
@@ -640,12 +818,14 @@ export class WalletPanel {
       .wp-copy-btn {
         background: rgba(127,214,190,0.08);
         border: 1px solid rgba(127,214,190,0.2);
-        border-radius: 8px; padding: 5px 10px;
+        border-radius: 8px; padding: 0 14px;
+        min-height: 36px;
         color: #7fd6be;
         font: 700 10px/1 "Courier New", monospace;
         letter-spacing: 0.08em; cursor: pointer;
         transition: background 0.15s, border-color 0.15s;
         flex-shrink: 0;
+        touch-action: manipulation;
       }
       .wp-copy-btn:hover { background: rgba(127,214,190,0.16); border-color: rgba(127,214,190,0.4); }
       .wp-copy-btn.wp-copy-btn-ok { color: #3ab88a; border-color: rgba(58,184,138,0.4); }
@@ -656,11 +836,185 @@ export class WalletPanel {
         letter-spacing: 0.06em;
       }
 
-      /* ── Pricing ── */
+      /* ── Contact ── */
 
-      .wp-pricing-grid { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; }
-      .wp-prow-label { color: #6a7080; font: 500 10px/1.3 "Courier New", monospace; }
-      .wp-prow-val   { color: #8f9aaa; font: 600 10px/1.3 "Courier New", monospace; text-align: right; white-space: nowrap; }
+      .wp-contact-hint {
+        color: #3a4050;
+        font: 500 9px/1.3 "Courier New", monospace;
+        letter-spacing: 0.06em;
+        margin-bottom: 10px;
+      }
+
+      .wp-contact-fields { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
+
+      .wp-contact-row {
+        display: flex; align-items: center; gap: 8px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 10px; padding: 0 10px;
+        min-height: 44px;
+      }
+
+      .wp-contact-icon { font-size: 14px; line-height: 1; flex-shrink: 0; }
+
+      .wp-contact-input {
+        flex: 1; background: none; border: none; outline: none;
+        color: #f4ead0;
+        font: 500 16px/1 "Courier New", monospace;
+        letter-spacing: 0.02em;
+        min-width: 0;
+        padding: 13px 0;
+      }
+      .wp-contact-input::placeholder { color: #3a4050; }
+
+      .wp-contact-save {
+        width: 100%; min-height: 44px;
+        border-radius: 12px;
+        border: 1px solid rgba(127,214,190,0.2);
+        background: rgba(127,214,190,0.07);
+        color: #7fd6be;
+        font: 700 11px/1 "Courier New", monospace;
+        letter-spacing: 0.1em; cursor: pointer;
+        transition: background 0.15s, border-color 0.15s, color 0.15s;
+        touch-action: manipulation;
+      }
+      .wp-contact-save:hover { background: rgba(127,214,190,0.14); border-color: rgba(127,214,190,0.4); }
+      .wp-contact-save:active { background: rgba(127,214,190,0.22); }
+      .wp-contact-save.wp-contact-save-ok { color: #3ab88a; border-color: rgba(58,184,138,0.4); background: rgba(58,184,138,0.08); }
+
+      /* ── Telegram row ── */
+
+      .wp-tg-btn {
+        flex: 1;
+        display: flex; align-items: center; justify-content: center;
+        min-height: 36px;
+        border-radius: 8px;
+        border: 1px solid rgba(127,214,190,0.3);
+        background: rgba(127,214,190,0.08);
+        color: #7fd6be;
+        font: 700 11px/1 "Courier New", monospace;
+        letter-spacing: 0.08em;
+        text-decoration: none;
+        cursor: pointer;
+        text-align: center;
+        transition: background 0.15s, border-color 0.15s;
+        touch-action: manipulation;
+      }
+      .wp-tg-btn:hover  { background: rgba(127,214,190,0.16); border-color: rgba(127,214,190,0.5); }
+      .wp-tg-btn:active { background: rgba(127,214,190,0.22); }
+
+      .wp-tg-connected {
+        flex: 1;
+        color: #3ab88a;
+        font: 600 11px/1 "Courier New", monospace;
+        letter-spacing: 0.04em;
+      }
+      .wp-tg-connected::before { content: "✓ "; }
+
+      .wp-tg-unavailable {
+        flex: 1;
+        color: #3a4050;
+        font: 500 10px/1 "Courier New", monospace;
+        letter-spacing: 0.04em;
+      }
+
+      /* ── Spend breakdown ── */
+
+      .wp-history-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .wp-bd-row {
+        display: grid;
+        grid-template-columns: 90px 1fr auto auto;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .wp-bd-label {
+        color: #8f9aaa;
+        font: 500 10px/1 "Courier New", monospace;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .wp-bd-bar-track {
+        height: 4px;
+        background: rgba(255,255,255,0.06);
+        border-radius: 99px;
+        overflow: hidden;
+      }
+
+      .wp-bd-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #3a5060, #7fd6be);
+        border-radius: 99px;
+        transition: width 0.4s ease;
+      }
+
+      .wp-bd-pct {
+        color: #3a4050;
+        font: 500 9px/1 "Courier New", monospace;
+        white-space: nowrap;
+        min-width: 26px;
+        text-align: right;
+      }
+
+      .wp-bd-amt {
+        color: #6a7080;
+        font: 600 10px/1 "Courier New", monospace;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        min-width: 52px;
+        text-align: right;
+      }
+
+      .wp-bd-divider {
+        color: #3a4050;
+        font: 600 9px/1 "Courier New", monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255,255,255,0.04);
+        margin-top: 2px;
+      }
+
+      .wp-hist-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .wp-hist-label {
+        color: #8f9aaa;
+        font: 500 10px/1 "Courier New", monospace;
+        letter-spacing: 0.04em;
+      }
+
+      .wp-hist-ago {
+        color: #3a4050;
+        font: 500 9px/1 "Courier New", monospace;
+        white-space: nowrap;
+      }
+
+      .wp-hist-amt {
+        font: 700 10px/1 "Courier New", monospace;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .wp-hist-credit { color: #3ab88a; }
+
+      .wp-history-empty {
+        color: #3a4050;
+        font: 500 10px/1 "Courier New", monospace;
+        letter-spacing: 0.06em;
+        padding: 2px 0;
+      }
 
       .wp-loading, .wp-busy {
         padding: 24px 16px; color: #5a6070;
@@ -668,8 +1022,52 @@ export class WalletPanel {
         text-align: center; letter-spacing: 0.1em;
       }
 
-      @media (max-width: 480px) {
-        #wallet-panel { right: 8px; bottom: 68px; width: calc(100vw - 16px); border-radius: 16px; }
+      /* ── Mobile: bottom sheet ── */
+
+      @media (max-width: 600px) {
+        #wallet-panel {
+          left: 0; right: 0; bottom: 0;
+          width: 100%;
+          max-height: 70vh;
+          border-radius: 20px 20px 0 0;
+          border-left: none; border-right: none; border-bottom: none;
+          box-shadow: 0 -8px 40px rgba(0,0,0,0.7);
+        }
+
+        .wp-header {
+          padding: 10px 16px 8px;
+        }
+
+        /* drag handle visual cue */
+        .wp-header::before {
+          content: "";
+          position: absolute;
+          top: 6px; left: 50%;
+          transform: translateX(-50%);
+          width: 36px; height: 4px;
+          border-radius: 99px;
+          background: rgba(255,255,255,0.12);
+          pointer-events: none;
+        }
+        .wp-header { position: relative; }
+
+        .wp-section { padding: 10px 14px; }
+
+        .wp-section-label { margin-bottom: 8px; }
+
+        .wp-balance-usdc { font-size: 20px; }
+
+        .wp-stat-chips { gap: 5px; }
+
+        .wp-chip { padding: 7px 4px 6px; }
+
+        .wp-chip-val { font-size: 11px; }
+
+        .wp-topup-row { gap: 6px; }
+
+        .wp-contact-fields { gap: 5px; }
+
+        .wp-contact-input { font-size: 16px; }
       }
     `;
     document.head.appendChild(style);

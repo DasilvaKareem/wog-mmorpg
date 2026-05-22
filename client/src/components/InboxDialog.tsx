@@ -5,13 +5,23 @@ import { useGameBridge } from "@/hooks/useGameBridge";
 import { useWallet } from "@/hooks/useWallet";
 import { API_URL } from "@/config";
 import { getAuthToken } from "@/lib/agentAuth";
+import { gameBus } from "@/lib/eventBus";
 
 interface InboxMessage {
   id: string;
   from: string;
   fromName: string;
   to: string;
-  type: "direct" | "trade-request" | "party-invite" | "broadcast" | "quest-approval" | "friend-request" | "system";
+  type:
+    | "direct"
+    | "trade-request"
+    | "trade-offer"
+    | "trade-result"
+    | "party-invite"
+    | "broadcast"
+    | "quest-approval"
+    | "friend-request"
+    | "system";
   body: string;
   data?: Record<string, unknown>;
   ts: number;
@@ -20,6 +30,8 @@ interface InboxMessage {
 const TYPE_LABELS: Record<string, string> = {
   direct: "MSG",
   "trade-request": "TRADE",
+  "trade-offer": "TRADE",
+  "trade-result": "TRADE",
   "party-invite": "PARTY",
   broadcast: "ZONE",
   "quest-approval": "QUEST",
@@ -30,12 +42,46 @@ const TYPE_LABELS: Record<string, string> = {
 const TYPE_COLORS: Record<string, string> = {
   direct: "#54f28b",
   "trade-request": "#ffcc00",
+  "trade-offer": "#ffcc00",
+  "trade-result": "#ffcc00",
   "party-invite": "#6ea8fe",
   broadcast: "#c084fc",
   "quest-approval": "#e0af68",
   "friend-request": "#c084fc",
   system: "#ff9f43",
 };
+
+// Auction system messages (data.kind starts with "auction_") get a distinct
+// TRADE badge so they read as trades, not generic events.
+function getDisplayLabel(msg: InboxMessage): string {
+  if (msg.type === "system" && typeof msg.data?.kind === "string") {
+    const kind = msg.data.kind as string;
+    if (kind === "auction_sold" || kind === "auction_buyout") return "SOLD";
+    if (kind === "auction_expired") return "EXPIRED";
+  }
+  return TYPE_LABELS[msg.type] ?? msg.type;
+}
+
+function getDisplayColor(msg: InboxMessage): string {
+  if (msg.type === "system" && typeof msg.data?.kind === "string") {
+    const kind = msg.data.kind as string;
+    if (kind === "auction_sold" || kind === "auction_buyout") return "#ffcc00";
+    if (kind === "auction_expired") return "#9aa7cc";
+  }
+  return TYPE_COLORS[msg.type] ?? "#9aa7cc";
+}
+
+function isTradeMessage(msg: InboxMessage): boolean {
+  if (msg.type === "trade-request" || msg.type === "trade-offer" || msg.type === "trade-result") return true;
+  if (
+    msg.type === "system" &&
+    typeof msg.data?.kind === "string" &&
+    (msg.data.kind as string).startsWith("auction_")
+  ) {
+    return true;
+  }
+  return false;
+}
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
@@ -177,13 +223,13 @@ function MessageRow({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <span
-            className="text-[7px] font-bold uppercase px-1 py-[1px] border"
+            className="text-[8px] sm:text-[7px] font-bold uppercase px-1.5 py-[2px] sm:py-[1px] border"
             style={{
-              color: TYPE_COLORS[msg.type] ?? "#9aa7cc",
-              borderColor: (TYPE_COLORS[msg.type] ?? "#9aa7cc") + "44",
+              color: getDisplayColor(msg),
+              borderColor: getDisplayColor(msg) + "44",
             }}
           >
-            {TYPE_LABELS[msg.type] ?? msg.type}
+            {getDisplayLabel(msg)}
           </span>
           <span className="text-[9px] font-bold text-[#54f28b]">
             {msg.fromName || msg.from.slice(0, 8) + "..."}
@@ -351,6 +397,8 @@ function MessageRow({
   );
 }
 
+type InboxTab = "all" | "trades";
+
 export function InboxDialog({
   open,
   onClose,
@@ -362,7 +410,18 @@ export function InboxDialog({
   const [messages, setMessages] = React.useState<InboxMessage[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [total, setTotal] = React.useState(0);
+  const [tab, setTab] = React.useState<InboxTab>("all");
   const prevOpen = React.useRef(false);
+
+  // Refresh inbox when a trading-rule change happens — auto-trader hits may
+  // already have produced sale notifications by the time the user looks back.
+  React.useEffect(() => {
+    return gameBus.on("tradingRulesChanged", () => {
+      if (open && address) void fetchMessagesRef.current?.();
+    });
+  }, [open, address]);
+
+  const fetchMessagesRef = React.useRef<(() => Promise<void>) | null>(null);
 
   const fetchMessages = React.useCallback(async () => {
     if (!address) return;
@@ -379,6 +438,10 @@ export function InboxDialog({
       setLoading(false);
     }
   }, [address]);
+  fetchMessagesRef.current = fetchMessages;
+
+  const tradeMessages = React.useMemo(() => messages.filter(isTradeMessage), [messages]);
+  const visibleMessages = tab === "trades" ? tradeMessages : messages;
 
   // Fetch fresh messages every time dialog opens (not just on open state change)
   React.useEffect(() => {
@@ -395,7 +458,7 @@ export function InboxDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent className="max-w-md max-h-[70vh] flex flex-col bg-[#0a0f1e] border-2 border-[#29334d] text-[#f1f5ff]">
+      <DialogContent className="max-w-md max-h-[80vh] sm:max-h-[70vh] flex flex-col bg-[#0a0f1e] border-2 border-[#29334d] text-[#f1f5ff]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             Inbox
@@ -407,15 +470,65 @@ export function InboxDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto space-y-1 min-h-0">
+        {/* Tabs: All / Trades */}
+        <div className="flex border-b-2 border-[#29334d] -mx-6 px-6 sm:-mx-4 sm:px-4">
+          {(["all", "trades"] as InboxTab[]).map((t) => {
+            const active = tab === t;
+            const count = t === "trades" ? tradeMessages.length : messages.length;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={`flex-1 px-3 py-2 text-[11px] sm:text-[10px] font-bold uppercase tracking-widest transition ${
+                  active
+                    ? "text-[#54f28b] border-b-2 border-[#54f28b] -mb-[2px]"
+                    : "text-[#7a8b9e] hover:text-[#cdd6f4]"
+                }`}
+              >
+                {t === "trades" ? "Trades" : "All"}
+                {count > 0 && (
+                  <span className="ml-1.5 text-[8px] text-[#596a8a]">({count})</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Trades tab header: link to auto-trading rules editor */}
+        {tab === "trades" && (
+          <div className="-mx-6 sm:-mx-4 border-b border-[#29334d] bg-[#0d1525] px-3 py-2.5 sm:px-4 sm:py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest text-[#5dadec]">
+                  Auto-trading rules
+                </div>
+                <div className="text-[10px] sm:text-[8px] text-[#7a8b9e]">
+                  Your agent fires limit orders while it plays.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => gameBus.emit("tradingRulesOpen", undefined)}
+                className="shrink-0 border-2 border-black bg-[#5dadec] px-3 py-2 sm:py-1.5 text-[11px] sm:text-[9px] font-bold uppercase tracking-widest text-black shadow-[2px_2px_0_0_#000] transition hover:translate-x-px hover:translate-y-px hover:shadow-none"
+              >
+                Open rules
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto space-y-1 min-h-0 pt-2">
           {loading && messages.length === 0 ? (
-            <p className="text-[9px] text-[#9aa7cc] text-center py-4">Loading messages...</p>
-          ) : messages.length === 0 ? (
-            <p className="text-[9px] text-[#9aa7cc] text-center py-4">
-              No messages yet. Your agent will receive messages from other agents as they interact in the world.
+            <p className="text-[10px] sm:text-[9px] text-[#9aa7cc] text-center py-4">Loading messages...</p>
+          ) : visibleMessages.length === 0 ? (
+            <p className="text-[10px] sm:text-[9px] text-[#9aa7cc] text-center py-4">
+              {tab === "trades"
+                ? "No trade activity yet. Your auction sales, buyouts, and listing expirations will land here."
+                : "No messages yet. Your agent will receive messages from other agents as they interact in the world."}
             </p>
           ) : (
-            messages.map((msg) => (
+            visibleMessages.map((msg) => (
               <MessageRow key={msg.id} msg={msg} address={address} onQuestResponded={fetchMessages} />
             ))
           )}

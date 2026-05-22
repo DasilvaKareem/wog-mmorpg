@@ -84,7 +84,7 @@ function diaryTimeAgo(ts: number): string {
 }
 
 export function CharacterDialog({ open, onOpenChange, onRequestCreate }: CharacterDialogProps): React.ReactElement {
-  const { address, isConnected, balance } = useWallet();
+  const { address, isConnected, balance, disconnect } = useWallet();
   const { characters, loading, load } = useCharacters();
 
   const [view, setView] = React.useState<View>("list");
@@ -252,6 +252,16 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
             ) : null}
 
             <DialogFooter>
+              <Button
+                onClick={() => {
+                  disconnect();
+                  onOpenChange(false);
+                }}
+                type="button"
+                variant="secondary"
+              >
+                Log Out
+              </Button>
               <Button onClick={() => onOpenChange(false)} type="button" variant="secondary">
                 Close
               </Button>

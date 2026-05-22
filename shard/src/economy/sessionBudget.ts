@@ -17,11 +17,14 @@ export const ACTION_COSTS_USDC: Record<ActionType, number> = {
 export const FREE_STARTER_USDC = 0.05;
 const LOW_BALANCE_RATIO = 0.2;
 
-const budgetKey = (w: string) => `agent:nanopay:budget:${w}`;
-const spentKey  = (w: string) => `agent:nanopay:spent:${w}`;
-const authKey   = (w: string) => `agent:nanopay:auth:${w}`;
-const freeKey   = (w: string) => `agent:nanopay:free:${w}`;
+const budgetKey    = (w: string) => `agent:nanopay:budget:${w}`;
+const spentKey     = (w: string) => `agent:nanopay:spent:${w}`;
+const authKey      = (w: string) => `agent:nanopay:auth:${w}`;
+const freeKey      = (w: string) => `agent:nanopay:free:${w}`;
+const breakdownKey = (w: string) => `agent:nanopay:breakdown:${w}`;
+const topupsKey    = (w: string) => `agent:nanopay:topups:${w}`;
 const PENDING_SET = "agent:nanopay:pending_settle";
+const TOPUPS_MAX = 20;
 
 // Called on first deploy — idempotent.
 export async function grantFreeStarterCredit(wallet: string): Promise<void> {
@@ -48,38 +51,75 @@ export async function initTopUp(wallet: string, signedAuth: string, budgetUsdc: 
     JSON.stringify({ auth: signedAuth, budgetUsdc, createdAt: Date.now() }),
   );
   await redis.sadd(PENDING_SET, wallet);
+  // Reset per-budget breakdown so it reflects current session only
+  await redis.del(breakdownKey(wallet));
+  // Append to top-up log (these are the meaningful individual events)
+  try {
+    await redis.lPush(topupsKey(wallet), JSON.stringify({ ts: Date.now(), amount: budgetUsdc }));
+    await redis.lTrim(topupsKey(wallet), 0, TOPUPS_MAX - 1);
+  } catch { /* non-fatal */ }
+}
+
+export interface TopUpEntry {
+  ts: number;
+  amount: number;
+}
+
+export async function getSpendBreakdown(wallet: string): Promise<{
+  breakdown: Record<string, number>;
+  topups: TopUpEntry[];
+}> {
+  try {
+    const redis = getRedis();
+    const [rawBreakdown, rawTopups] = await Promise.all([
+      redis.hGetAll(breakdownKey(wallet)),
+      redis.lRange(topupsKey(wallet), 0, TOPUPS_MAX - 1),
+    ]);
+    const breakdown: Record<string, number> = {};
+    for (const [k, v] of Object.entries(rawBreakdown)) {
+      breakdown[k] = parseFloat(v as string);
+    }
+    const topups = rawTopups.map((s: string) => JSON.parse(s) as TopUpEntry);
+    return { breakdown, topups };
+  } catch {
+    return { breakdown: {}, topups: [] };
+  }
 }
 
 // Deducts cost for one action. Returns ok=false when budget is exhausted.
 export async function deductCost(
   wallet: string,
   action: ActionType,
-): Promise<{ ok: boolean; remaining: number }> {
+): Promise<{ ok: boolean; remaining: number; lowBalance: boolean }> {
   const cost = ACTION_COSTS_USDC[action];
   if (cost === 0) {
     try {
       const redis = getRedis();
-      return { ok: true, remaining: await getRemainingBalance(redis, wallet) };
+      const remaining = await getRemainingBalance(redis, wallet);
+      return { ok: true, remaining, lowBalance: false };
     } catch {
-      return { ok: true, remaining: 0 };
+      return { ok: true, remaining: 0, lowBalance: false };
     }
   }
 
   try {
     const redis = getRedis();
-    const budget = parseFloat((await redis.get(budgetKey(wallet))) ?? "0");
-    const spent  = parseFloat((await redis.get(spentKey(wallet)))  ?? "0");
+    const budget    = parseFloat((await redis.get(budgetKey(wallet))) ?? "0");
+    const spent     = parseFloat((await redis.get(spentKey(wallet)))  ?? "0");
     const remaining = budget - spent;
 
-    if (remaining <= 0) return { ok: false, remaining: 0 };
+    if (remaining <= 0) return { ok: false, remaining: 0, lowBalance: true };
 
-    const newSpent = spent + cost;
+    const newSpent    = spent + cost;
+    const newRemaining = budget - newSpent;
     await redis.set(spentKey(wallet), newSpent.toFixed(8));
-    return { ok: true, remaining: budget - newSpent };
+    void redis.hIncrByFloat(breakdownKey(wallet), action, cost).catch(() => {});
+    const lowBalance = budget > 0 && newRemaining / budget <= LOW_BALANCE_RATIO;
+    return { ok: true, remaining: newRemaining, lowBalance };
   } catch (err: any) {
     // Redis down — fail open so the agent keeps running
     console.warn("[sessionBudget] deductCost error:", err.message);
-    return { ok: true, remaining: 0 };
+    return { ok: true, remaining: 0, lowBalance: false };
   }
 }
 

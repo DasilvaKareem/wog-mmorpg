@@ -1,6 +1,8 @@
 import * as React from "react";
 import { API_URL } from "@/config";
 import { useWalletContext } from "@/context/WalletContext";
+import { itemMarkKey, useItemMarks, type ItemMarkAction } from "@/context/ItemMarksContext";
+import { ProcessMarksModal, type MarkedItemSummary } from "@/components/ProcessMarksModal";
 import { gameBus } from "@/lib/eventBus";
 import { formatCopperString } from "@/lib/currency";
 import { getAuthToken } from "@/lib/agentAuth";
@@ -57,6 +59,17 @@ const CATEGORY_ICONS: Record<string, string> = {
 
 const CATEGORIES: Category[] = ["all", "weapon", "armor", "consumable", "material"];
 
+const MARK_COLORS: Record<ItemMarkAction, string> = {
+  sell: "#54f28b",
+  auction: "#ffcc00",
+  destroy: "#ff6b6b",
+};
+const MARK_GLYPHS: Record<ItemMarkAction, string> = {
+  sell: "S",
+  auction: "A",
+  destroy: "D",
+};
+
 /* ── Component ────────────────────────────────────────────── */
 
 export function InventoryDialog(): React.ReactElement | null {
@@ -71,6 +84,43 @@ export function InventoryDialog(): React.ReactElement | null {
   const [notice, setNotice] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<number | null>(null);
   const [fetchSeq, setFetchSeq] = React.useState(0);
+  const [contextMenu, setContextMenu] = React.useState<{
+    x: number;
+    y: number;
+    markKey: string;
+    itemName: string;
+    tokenId: number;
+  } | null>(null);
+
+  const { setMark, clearMark, getMark, counts, marks } = useItemMarks();
+  const [processOpen, setProcessOpen] = React.useState(false);
+
+  // Set of tokenIds that have an active (enabled) trading rule. Drives the
+  // small "AUTO" badge on item rows and the highlight in the context menu.
+  const [autoTradedTokenIds, setAutoTradedTokenIds] = React.useState<Set<number>>(new Set());
+
+  // Resolve every marked key back to the actual inventory item, skipping
+  // any that no longer exist (e.g. user already sold one via another path).
+  const markedItems: MarkedItemSummary[] = React.useMemo(() => {
+    if (counts.total === 0) return [];
+    const result: MarkedItemSummary[] = [];
+    for (const item of items) {
+      const key = itemMarkKey(item.tokenId);
+      const action = marks.get(key);
+      if (!action) continue;
+      result.push({
+        markKey: key,
+        action,
+        tokenId: item.tokenId,
+        name: item.displayName ?? item.name,
+        quantity: item.quantity,
+        rarity: item.rarity,
+        recycleCopperValue: item.recycleCopperValue,
+        equipped: item.equipped,
+      });
+    }
+    return result;
+  }, [items, marks, counts.total]);
 
   // Custodial wallet (holds items on-chain). Resolved async from agent API.
   const [custodialWallet, setCustodialWallet] = React.useState<string | null>(null);
@@ -139,16 +189,61 @@ export function InventoryDialog(): React.ReactElement | null {
     if (open && itemWallet) void fetchInventory();
   }, [open, itemWallet, fetchInventory, fetchSeq]);
 
+  // Fetch active auto-trading rules so we can flag items the agent is already
+  // managing. Refreshes on open and whenever the trading dialog emits a change.
+  const fetchTradingRules = React.useCallback(async () => {
+    if (!address) return;
+    const token = await getAuthToken(address).catch(() => null);
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/agent/trading-rules/${address}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const ids = new Set<number>();
+      for (const r of data.rules ?? []) {
+        if (r.enabled !== false) ids.add(r.tokenId);
+      }
+      setAutoTradedTokenIds(ids);
+    } catch { /* ignore */ }
+  }, [address]);
+
+  React.useEffect(() => {
+    if (open) void fetchTradingRules();
+  }, [open, fetchTradingRules]);
+
+  React.useEffect(() => {
+    return gameBus.on("tradingRulesChanged", () => { void fetchTradingRules(); });
+  }, [fetchTradingRules]);
+
   /* ── Keyboard ─────────────────────────────────────────── */
 
   React.useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        if (contextMenu) setContextMenu(null);
+        else setOpen(false);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open]);
+  }, [open, contextMenu]);
+
+  // Dismiss the context menu on any outside click. Capture phase so we beat
+  // child handlers and don't accidentally re-open from the right-click that
+  // spawned it (the right-click target is gone by the time mousedown fires).
+  React.useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener("mousedown", handler, true);
+    window.addEventListener("scroll", handler, true);
+    return () => {
+      window.removeEventListener("mousedown", handler, true);
+      window.removeEventListener("scroll", handler, true);
+    };
+  }, [contextMenu]);
 
   /* ── Actions ──────────────────────────────────────────── */
 
@@ -169,7 +264,9 @@ export function InventoryDialog(): React.ReactElement | null {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "Sell failed"); setBusy(null); return; }
-      setNotice(`Sold ${quantity}x ${item.name} for ${formatCopperString(data.totalPayoutCopper ?? 0)}.`);
+      const payoutCopper = data.totalPayoutCopper ?? 0;
+      setNotice(`Sold ${quantity}x ${item.name} for ${formatCopperString(payoutCopper)}.`);
+      if (payoutCopper > 0) gameBus.emit("goldGained", { copper: payoutCopper, source: "recycle" });
       void fetchInventory();
     } catch {
       setError("Network error");
@@ -267,10 +364,24 @@ export function InventoryDialog(): React.ReactElement | null {
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-[#29334d] bg-[#11182b] px-4 py-2.5">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[16px]">{"\uD83C\uDF92"}</span>
             <span className="text-[13px] font-bold text-[#f1f5ff]">Inventory</span>
             <span className="text-[10px] text-[#596a8a]">({items.length} items)</span>
+            {counts.total > 0 && (
+              <span className="flex items-center gap-1.5 ml-2 text-[9px] font-bold">
+                {counts.sell > 0 && (
+                  <span style={{ color: MARK_COLORS.sell }}>{counts.sell}S</span>
+                )}
+                {counts.auction > 0 && (
+                  <span style={{ color: MARK_COLORS.auction }}>{counts.auction}A</span>
+                )}
+                {counts.destroy > 0 && (
+                  <span style={{ color: MARK_COLORS.destroy }}>{counts.destroy}D</span>
+                )}
+              </span>
+            )}
+            <span className="text-[8px] text-[#596a8a] uppercase ml-2">right-click to mark</span>
           </div>
           <button
             onClick={() => setOpen(false)}
@@ -326,6 +437,15 @@ export function InventoryDialog(): React.ReactElement | null {
               {s}
             </button>
           ))}
+          {counts.total > 0 && (
+            <button
+              onClick={() => setProcessOpen(true)}
+              className="ml-2 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide border-2 border-[#ffcc00] bg-[#2a2210] text-[#ffcc00] hover:bg-[#3d3218] transition"
+              style={{ cursor: "pointer" }}
+            >
+              Process {counts.total}
+            </button>
+          )}
         </div>
 
         {/* Body */}
@@ -347,11 +467,24 @@ export function InventoryDialog(): React.ReactElement | null {
                 {sorted.map((item) => {
                   const rc = RARITY_COLORS[item.rarity] ?? "#9aa7cc";
                   const isSelected = selected === item.tokenId;
+                  const markKey = itemMarkKey(item.tokenId);
+                  const mark = getMark(markKey);
+                  const markColor = mark ? MARK_COLORS[mark] : null;
                   return (
                     <button
                       key={item.tokenId}
                       type="button"
                       onClick={() => setSelected(isSelected ? null : item.tokenId)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          markKey,
+                          itemName: item.displayName ?? item.name,
+                          tokenId: item.tokenId,
+                        });
+                      }}
                       className={`w-full text-left border-2 px-3 py-2 transition ${
                         isSelected
                           ? "bg-[#1a2240]"
@@ -361,6 +494,8 @@ export function InventoryDialog(): React.ReactElement | null {
                         borderColor: isSelected ? rc : item.equipped ? rc + "44" : "#1e2842",
                         borderLeftWidth: item.equipped ? 4 : 2,
                         borderLeftColor: item.equipped ? rc : undefined,
+                        borderRightWidth: markColor ? 4 : 2,
+                        borderRightColor: markColor ?? undefined,
                         cursor: "pointer",
                       }}
                     >
@@ -375,6 +510,32 @@ export function InventoryDialog(): React.ReactElement | null {
                               <span className="text-[7px] uppercase px-1 py-px border"
                                 style={{ color: "#54f28b", borderColor: "#54f28b44", background: "#0a1a0e" }}>
                                 EQ
+                              </span>
+                            )}
+                            {mark && (
+                              <span
+                                className="text-[7px] uppercase px-1 py-px border font-bold"
+                                style={{
+                                  color: markColor!,
+                                  borderColor: markColor! + "66",
+                                  background: markColor! + "11",
+                                }}
+                                title={`Marked for ${mark}`}
+                              >
+                                {MARK_GLYPHS[mark]}
+                              </span>
+                            )}
+                            {autoTradedTokenIds.has(item.tokenId) && (
+                              <span
+                                className="text-[7px] uppercase px-1 py-px border font-bold"
+                                style={{
+                                  color: "#5dadec",
+                                  borderColor: "#5dadec66",
+                                  background: "#5dadec11",
+                                }}
+                                title="Auto-trading rule active"
+                              >
+                                AUTO
                               </span>
                             )}
                           </div>
@@ -410,6 +571,11 @@ export function InventoryDialog(): React.ReactElement | null {
                 onEquip={handleEquip}
                 onUnequip={handleUnequip}
                 onRecycle={handleRecycle}
+                onAutoTrade={(it) => gameBus.emit("tradingRulesOpen", {
+                  tokenId: it.tokenId,
+                  itemName: it.displayName ?? it.name,
+                })}
+                hasAutoTradeRule={autoTradedTokenIds.has(selectedItem.tokenId)}
               />
             ) : (
               <div className="flex items-center justify-center flex-1 p-4">
@@ -429,10 +595,143 @@ export function InventoryDialog(): React.ReactElement | null {
               onEquip={handleEquip}
               onUnequip={handleUnequip}
               onRecycle={handleRecycle}
+              onAutoTrade={(it) => gameBus.emit("tradingRulesOpen", {
+                tokenId: it.tokenId,
+                itemName: it.displayName ?? it.name,
+              })}
+              hasAutoTradeRule={autoTradedTokenIds.has(selectedItem.tokenId)}
             />
           </div>
         )}
       </div>
+
+      {/* Right-click context menu — floats over everything */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          itemName={contextMenu.itemName}
+          currentMark={getMark(contextMenu.markKey)}
+          hasAutoTrade={autoTradedTokenIds.has(contextMenu.tokenId)}
+          onPick={(action) => {
+            if (action === null) clearMark(contextMenu.markKey);
+            else setMark(contextMenu.markKey, action);
+            setContextMenu(null);
+          }}
+          onAutoTrade={() => {
+            gameBus.emit("tradingRulesOpen", {
+              tokenId: contextMenu.tokenId,
+              itemName: contextMenu.itemName,
+            });
+            setContextMenu(null);
+          }}
+        />
+      )}
+
+      {/* Process Marks modal — fires the actual sell/auction/destroy calls */}
+      {processOpen && itemWallet && address && (
+        <ProcessMarksModal
+          open={processOpen}
+          onClose={() => setProcessOpen(false)}
+          markedItems={markedItems}
+          itemWallet={itemWallet}
+          authWallet={address}
+          zoneId={zoneId}
+          onItemProcessed={(key, success) => {
+            // Successful items: drop the mark so the inventory refresh below
+            // doesn't re-show them as marked once the row disappears.
+            if (success) clearMark(key);
+          }}
+          onAllComplete={() => {
+            void fetchInventory();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Right-click context menu ─────────────────────────────── */
+
+function ContextMenu({
+  x,
+  y,
+  itemName,
+  currentMark,
+  hasAutoTrade,
+  onPick,
+  onAutoTrade,
+}: {
+  x: number;
+  y: number;
+  itemName: string;
+  currentMark: ItemMarkAction | undefined;
+  hasAutoTrade: boolean;
+  onPick: (action: ItemMarkAction | null) => void;
+  onAutoTrade: () => void;
+}): React.ReactElement {
+  // Estimate menu size and clamp to viewport so the menu never spawns
+  // off-screen. Exact size depends on font metrics so we use safe defaults.
+  const W = 200;
+  const H = (currentMark ? 156 : 124) + 32; // +32 for the auto-trade row
+  const px = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 1000) - W - 8);
+  const py = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 800) - H - 8);
+
+  // Stop propagation so the global mousedown handler doesn't dismiss the menu
+  // before our buttons' onClick fires.
+  return (
+    <div
+      className="fixed z-[201] border-2 border-black bg-[#0a0f1e] shadow-[4px_4px_0_0_#000]"
+      style={{ left: px, top: py, width: W, fontFamily: "monospace" }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="border-b border-[#29334d] bg-[#11182b] px-2 py-1 text-[9px] uppercase tracking-wide text-[#9aa7cc] truncate" title={itemName}>
+        {itemName}
+      </div>
+      {(["sell", "auction", "destroy"] as ItemMarkAction[]).map((action) => {
+        const isActive = currentMark === action;
+        const color = MARK_COLORS[action];
+        return (
+          <button
+            key={action}
+            type="button"
+            onClick={() => onPick(action)}
+            className="flex w-full items-center gap-2 px-2 py-2 sm:py-1.5 text-left text-[11px] sm:text-[10px] uppercase tracking-wide transition hover:bg-[#131d35]"
+            style={{ color, cursor: "pointer", background: isActive ? "#11182b" : "transparent" }}
+          >
+            <span className="inline-block w-4 text-center font-bold" style={{ color }}>
+              {MARK_GLYPHS[action]}
+            </span>
+            <span>Mark for {action}</span>
+            {isActive && <span className="ml-auto text-[9px]">✓</span>}
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        onClick={onAutoTrade}
+        className="flex w-full items-center gap-2 border-t border-[#29334d] px-2 py-2 sm:py-1.5 text-left text-[11px] sm:text-[10px] uppercase tracking-wide transition hover:bg-[#131d35]"
+        style={{ color: "#5dadec", cursor: "pointer" }}
+        title="Open auto-trading rules with this item pre-filled"
+      >
+        <span className="inline-block w-4 text-center font-bold" style={{ color: "#5dadec" }}>
+          T
+        </span>
+        <span>{hasAutoTrade ? "Edit auto-trade rule" : "Set auto-trade rule…"}</span>
+        {hasAutoTrade && <span className="ml-auto text-[9px]">✓</span>}
+      </button>
+      {currentMark && (
+        <button
+          type="button"
+          onClick={() => onPick(null)}
+          className="flex w-full items-center gap-2 border-t border-[#29334d] px-2 py-1.5 text-left text-[10px] uppercase tracking-wide text-[#6b7a9e] hover:bg-[#131d35]"
+          style={{ cursor: "pointer" }}
+        >
+          <span className="inline-block w-4 text-center">×</span>
+          <span>Clear mark</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -446,6 +745,8 @@ function ItemDetail({
   onEquip,
   onUnequip,
   onRecycle,
+  onAutoTrade,
+  hasAutoTradeRule,
 }: {
   item: InventoryItem;
   zoneId: string | null;
@@ -453,6 +754,8 @@ function ItemDetail({
   onEquip: (item: InventoryItem) => void;
   onUnequip: (item: InventoryItem) => void;
   onRecycle: (item: InventoryItem, qty: number) => void;
+  onAutoTrade: (item: InventoryItem) => void;
+  hasAutoTradeRule: boolean;
 }): React.ReactElement {
   const rc = RARITY_COLORS[item.rarity] ?? "#9aa7cc";
   const durPct =
@@ -553,7 +856,7 @@ function ItemDetail({
             <button
               onClick={() => onRecycle(item, 1)}
               disabled={busy !== null}
-              className="w-full border-2 border-[#54f28b44] bg-[#09160d] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#54f28b] hover:bg-[#54f28b22] transition disabled:opacity-40"
+              className="w-full border-2 border-[#54f28b44] bg-[#09160d] px-3 py-2 sm:py-1.5 text-[11px] sm:text-[10px] uppercase tracking-wide text-[#54f28b] hover:bg-[#54f28b22] transition disabled:opacity-40"
               style={{ cursor: "pointer" }}
             >
               {isBusy ? "SELLING..." : `SELL 1 \u00B7 ${formatCopperString(item.recycleCopperValue)}`}
@@ -562,7 +865,7 @@ function ItemDetail({
               <button
                 onClick={() => onRecycle(item, item.recyclableQuantity)}
                 disabled={busy !== null}
-                className="w-full border-2 border-[#54f28b22] bg-[#08110b] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#8af7b0] hover:bg-[#54f28b18] transition disabled:opacity-40"
+                className="w-full border-2 border-[#54f28b22] bg-[#08110b] px-3 py-2 sm:py-1.5 text-[11px] sm:text-[10px] uppercase tracking-wide text-[#8af7b0] hover:bg-[#54f28b18] transition disabled:opacity-40"
                 style={{ cursor: "pointer" }}
               >
                 {isBusy ? "SELLING..." : `SELL ALL (${item.recyclableQuantity}) \u00B7 ${formatCopperString(recycleValueTotal)}`}
@@ -570,6 +873,14 @@ function ItemDetail({
             )}
           </>
         )}
+        <button
+          onClick={() => onAutoTrade(item)}
+          className="w-full border-2 border-[#5dadec66] bg-[#0a1424] px-3 py-2 sm:py-1.5 text-[11px] sm:text-[10px] uppercase tracking-wide text-[#5dadec] hover:bg-[#5dadec22] transition"
+          style={{ cursor: "pointer" }}
+          title="Open the auto-trading rules editor with this item pre-filled"
+        >
+          {hasAutoTradeRule ? "EDIT AUTO-TRADE RULE" : "AUTO-TRADE…"}
+        </button>
       </div>
     </div>
   );
