@@ -23,6 +23,7 @@ import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfi
 import { logZoneEvent } from "./zoneEvents.js";
 import { enqueueGoldMint } from "../blockchain/blockchain.js";
 import { notifyDungeonClearForQuests } from "../social/questSystem.js";
+import { spawnGateInZone } from "./dungeonGateTick.js";
 
 // --- Types ---
 
@@ -984,6 +985,24 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       returnedToZone: foundInstance.sourceZoneId,
       position: { x: player.x, y: player.y },
     };
+  });
+
+  // POST /admin/dungeon/spawn-gate — force-spawn a gate (testing/debug)
+  server.post<{
+    Body: { zoneId: string; rank?: GateRank; isDanger?: boolean };
+  }>("/admin/dungeon/spawn-gate", async (request, reply) => {
+    const { zoneId, rank, isDanger } = request.body ?? ({} as any);
+    if (!zoneId) {
+      reply.code(400);
+      return { error: "zoneId is required" };
+    }
+    try {
+      const entityId = spawnGateInZone(zoneId, rank, isDanger ?? false);
+      return { ok: true, entityId, zoneId, rank: rank ?? "rolled", isDanger: !!isDanger };
+    } catch (err: any) {
+      reply.code(400);
+      return { error: err.message ?? "Failed to spawn gate" };
+    }
   });
 
   server.log.info("[dungeon] Gate routes registered");

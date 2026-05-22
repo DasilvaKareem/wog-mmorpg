@@ -2523,6 +2523,11 @@ export class EntityManager {
         leftArm = result.leftArm;
         rightArm = result.rightArm;
         rig = result.rig;
+        if (result.mixer && result.glbClips) {
+          mixer = result.mixer;
+          glbClipMap = result.glbClips;
+          actionMap = buildGlbActionMap(result.glbClips);
+        }
         break;
       }
       case "resource":
@@ -3193,7 +3198,7 @@ export class EntityManager {
 
   // ── Mob ───────────────────────────────────────────────────────────
 
-  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike } {
+  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; mixer?: THREE.AnimationMixer; glbClips?: Map<string, THREE.AnimationClip> } {
     const isBoss = ent.type === "boss";
     const color = isBoss ? 0xaa33ff : 0xcc4444;
     const s = isBoss ? 1.4 : 1.0;
@@ -3202,7 +3207,12 @@ export class EntityManager {
     if (this.envAssets?.isReady()) {
       const assetName = this.envAssets.getAssetForMob(ent.name);
       if (assetName) {
-        const model = this.envAssets.place(assetName, 0, 0, 0);
+        // Skinned/animated assets use SkeletonUtils.clone via placeAnimatedMob;
+        // static assets (e.g. shadow_wolf with 0 skins) fall through to place().
+        const animated = this.envAssets.isAnimatedAsset(assetName)
+          ? this.envAssets.placeAnimatedMob(assetName)
+          : null;
+        const model = animated?.model ?? this.envAssets.place(assetName, 0, 0, 0);
         if (model) {
           model.name = "glb_mob";
           const tint = this.envAssets.getTintForMob(ent.name);
@@ -3221,11 +3231,14 @@ export class EntityManager {
             }
           });
           group.add(model);
-          // Return dummy rig refs — GLB mobs don't use the bone animation system
           const dummyMesh = new THREE.Mesh();
           const dummyGroup = new THREE.Group();
           const rig = new CharacterRig({ scale: s });
           (group as any)._hasGlbModel = true;
+          if (animated) {
+            const mixer = new THREE.AnimationMixer(model);
+            return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig, mixer, glbClips: animated.clips };
+          }
           return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig };
         }
       }

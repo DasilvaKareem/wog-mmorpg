@@ -56,7 +56,7 @@ import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
 import { WalletPanel } from "./hud/WalletPanel.js";
 import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, fetchPartyStatus, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
 import type { InventoryItem } from "./types.js";
-import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
+import { getAuthToken, getCachedToken, getSavedWalletAddress, xrAuth } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import { GauntletCursor } from "./hud/GauntletCursor.js";
@@ -537,6 +537,21 @@ const charSelect = !isAnimationLab
     onBack: () => {
       charSelect!.hide();
       landing!.show();
+    },
+    onLogout: () => {
+      void (async () => {
+        try {
+          await xrAuth.disconnect();
+        } catch {
+          // Ignore disconnect failures — proceed with UI reset anyway.
+        }
+        ownWalletAddress = null;
+        ownCustodialWallet = null;
+        playerSession.reset();
+        entities.setOwnWallet(null);
+        charSelect!.hide();
+        landing!.show();
+      })();
     },
   })
   : null;

@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { getGradientMap } from "./ToonPipeline.js";
 
 const MODEL_BASE = new URL(
@@ -51,52 +52,52 @@ const ASSET_DEFS: Record<string, { file: string; scale: number; yOffset: number 
   snake_angry:      { file: "snake_angry.glb",       scale: 2.2, yOffset: 0 },
   spider:           { file: "spider.glb",            scale: 1.5, yOffset: 0 },
   wasp:             { file: "wasp.glb",              scale: 1.4, yOffset: 1.2 },
-  // Quaternius Ultimate Monsters — Big (humanoid/large, scale 2.0-3.0)
-  big_birb:         { file: "big_birb.glb",          scale: 2.2, yOffset: 1.5 },
-  big_bluedemon:    { file: "big_bluedemon.glb",     scale: 2.6, yOffset: 0 },
-  big_cactoro:      { file: "big_cactoro.glb",       scale: 2.0, yOffset: 0 },
-  big_demon:        { file: "big_demon.glb",         scale: 2.5, yOffset: 0 },
-  big_fish:         { file: "big_fish.glb",          scale: 1.8, yOffset: 0 },
-  big_monkroose:    { file: "big_monkroose.glb",     scale: 2.4, yOffset: 0 },
-  big_mushroomking: { file: "big_mushroomking.glb",  scale: 2.8, yOffset: 0 },
-  big_ninja:        { file: "big_ninja.glb",         scale: 2.2, yOffset: 0 },
-  big_orc:          { file: "big_orc.glb",           scale: 2.3, yOffset: 0 },
-  big_orc_skull:    { file: "big_orc_skull.glb",     scale: 2.4, yOffset: 0 },
-  big_tribal:       { file: "big_tribal.glb",        scale: 2.2, yOffset: 0 },
-  big_yeti:         { file: "big_yeti.glb",          scale: 2.8, yOffset: 0 },
-  // Quaternius Ultimate Monsters — Blob (chibi, scale 1.5-2.0)
-  blob_birb:        { file: "blob_birb.glb",         scale: 1.4, yOffset: 0 },
-  blob_cactoro:     { file: "blob_cactoro.glb",      scale: 1.5, yOffset: 0 },
-  blob_cat:         { file: "blob_cat.glb",          scale: 1.4, yOffset: 0 },
-  blob_chicken:     { file: "blob_chicken.glb",      scale: 1.2, yOffset: 0 },
-  blob_dog:         { file: "blob_dog.glb",          scale: 1.4, yOffset: 0 },
-  blob_fish:        { file: "blob_fish.glb",         scale: 1.4, yOffset: 0 },
-  blob_greenblob:   { file: "blob_greenblob.glb",    scale: 1.5, yOffset: 0 },
-  blob_greenspikyblob:    { file: "blob_greenspikyblob.glb",    scale: 1.5, yOffset: 0 },
-  blob_mushnub:     { file: "blob_mushnub.glb",      scale: 1.5, yOffset: 0 },
-  blob_mushnub_evolved:   { file: "blob_mushnub_evolved.glb",   scale: 2.0, yOffset: 0 },
-  blob_ninja:       { file: "blob_ninja.glb",        scale: 1.5, yOffset: 0 },
-  blob_orc:         { file: "blob_orc.glb",          scale: 1.6, yOffset: 0 },
-  blob_pigeon:      { file: "blob_pigeon.glb",       scale: 1.3, yOffset: 0 },
-  blob_pinkblob:    { file: "blob_pinkblob.glb",     scale: 1.5, yOffset: 0 },
-  blob_wizard:      { file: "blob_wizard.glb",       scale: 1.7, yOffset: 0 },
-  blob_yeti:        { file: "blob_yeti.glb",         scale: 1.7, yOffset: 0 },
+  // Quaternius Ultimate Monsters — Big (humanoid/large)
+  big_birb:         { file: "big_birb.glb",          scale: 1.4, yOffset: 1.0 },
+  big_bluedemon:    { file: "big_bluedemon.glb",     scale: 1.7, yOffset: 0 },
+  big_cactoro:      { file: "big_cactoro.glb",       scale: 1.3, yOffset: 0 },
+  big_demon:        { file: "big_demon.glb",         scale: 1.6, yOffset: 0 },
+  big_fish:         { file: "big_fish.glb",          scale: 1.2, yOffset: 0 },
+  big_monkroose:    { file: "big_monkroose.glb",     scale: 1.5, yOffset: 0 },
+  big_mushroomking: { file: "big_mushroomking.glb",  scale: 1.9, yOffset: 0 },   // boss
+  big_ninja:        { file: "big_ninja.glb",         scale: 1.4, yOffset: 0 },
+  big_orc:          { file: "big_orc.glb",           scale: 1.5, yOffset: 0 },
+  big_orc_skull:    { file: "big_orc_skull.glb",     scale: 1.5, yOffset: 0 },
+  big_tribal:       { file: "big_tribal.glb",        scale: 1.4, yOffset: 0 },
+  big_yeti:         { file: "big_yeti.glb",          scale: 1.9, yOffset: 0 },   // boss
+  // Quaternius Ultimate Monsters — Blob (chibi/small)
+  blob_birb:        { file: "blob_birb.glb",         scale: 0.9, yOffset: 0 },
+  blob_cactoro:     { file: "blob_cactoro.glb",      scale: 1.0, yOffset: 0 },
+  blob_cat:         { file: "blob_cat.glb",          scale: 0.9, yOffset: 0 },
+  blob_chicken:     { file: "blob_chicken.glb",      scale: 0.8, yOffset: 0 },
+  blob_dog:         { file: "blob_dog.glb",          scale: 0.9, yOffset: 0 },
+  blob_fish:        { file: "blob_fish.glb",         scale: 0.9, yOffset: 0 },
+  blob_greenblob:   { file: "blob_greenblob.glb",    scale: 1.0, yOffset: 0 },
+  blob_greenspikyblob:    { file: "blob_greenspikyblob.glb",    scale: 1.0, yOffset: 0 },
+  blob_mushnub:     { file: "blob_mushnub.glb",      scale: 1.0, yOffset: 0 },
+  blob_mushnub_evolved:   { file: "blob_mushnub_evolved.glb",   scale: 1.3, yOffset: 0 },
+  blob_ninja:       { file: "blob_ninja.glb",        scale: 1.0, yOffset: 0 },
+  blob_orc:         { file: "blob_orc.glb",          scale: 1.0, yOffset: 0 },
+  blob_pigeon:      { file: "blob_pigeon.glb",       scale: 0.8, yOffset: 0 },
+  blob_pinkblob:    { file: "blob_pinkblob.glb",     scale: 1.0, yOffset: 0 },
+  blob_wizard:      { file: "blob_wizard.glb",       scale: 1.1, yOffset: 0 },
+  blob_yeti:        { file: "blob_yeti.glb",         scale: 1.1, yOffset: 0 },
   // Quaternius Ultimate Monsters — Flying (yOffset lifts actual flyers off ground)
-  flying_armabee:   { file: "flying_armabee.glb",    scale: 1.6, yOffset: 1.5 },
-  flying_armabee_evolved: { file: "flying_armabee_evolved.glb", scale: 2.0, yOffset: 1.8 },
-  flying_demon:     { file: "flying_demon.glb",      scale: 1.8, yOffset: 1.0 },
-  flying_dragon:    { file: "flying_dragon.glb",     scale: 2.4, yOffset: 1.5 },
-  flying_dragon_evolved:  { file: "flying_dragon_evolved.glb",  scale: 3.2, yOffset: 2.0 },
-  flying_ghost:     { file: "flying_ghost.glb",      scale: 1.8, yOffset: 1.2 },
-  flying_ghost_skull:     { file: "flying_ghost_skull.glb",     scale: 2.0, yOffset: 1.2 },
-  flying_glub:      { file: "flying_glub.glb",       scale: 1.5, yOffset: 1.0 },
-  flying_glub_evolved:    { file: "flying_glub_evolved.glb",    scale: 1.9, yOffset: 1.2 },
-  flying_goleling:  { file: "flying_goleling.glb",   scale: 1.8, yOffset: 0.8 },
-  flying_goleling_evolved:{ file: "flying_goleling_evolved.glb",scale: 2.4, yOffset: 1.0 },
-  flying_hywirl:    { file: "flying_hywirl.glb",     scale: 1.8, yOffset: 1.0 },
-  flying_pigeon:    { file: "flying_pigeon.glb",     scale: 1.4, yOffset: 1.5 },
-  flying_squidle:   { file: "flying_squidle.glb",    scale: 2.0, yOffset: 1.5 },
-  flying_tribal:    { file: "flying_tribal.glb",     scale: 2.0, yOffset: 1.5 },
+  flying_armabee:   { file: "flying_armabee.glb",    scale: 1.0, yOffset: 1.0 },
+  flying_armabee_evolved: { file: "flying_armabee_evolved.glb", scale: 1.3, yOffset: 1.2 },
+  flying_demon:     { file: "flying_demon.glb",      scale: 1.2, yOffset: 0.8 },
+  flying_dragon:    { file: "flying_dragon.glb",     scale: 1.6, yOffset: 1.0 },   // boss
+  flying_dragon_evolved:  { file: "flying_dragon_evolved.glb",  scale: 2.2, yOffset: 1.5 },   // epic boss
+  flying_ghost:     { file: "flying_ghost.glb",      scale: 1.2, yOffset: 0.9 },
+  flying_ghost_skull:     { file: "flying_ghost_skull.glb",     scale: 1.3, yOffset: 0.9 },
+  flying_glub:      { file: "flying_glub.glb",       scale: 1.0, yOffset: 0.8 },
+  flying_glub_evolved:    { file: "flying_glub_evolved.glb",    scale: 1.2, yOffset: 0.9 },
+  flying_goleling:  { file: "flying_goleling.glb",   scale: 1.2, yOffset: 0.6 },
+  flying_goleling_evolved:{ file: "flying_goleling_evolved.glb",scale: 1.5, yOffset: 0.8 },
+  flying_hywirl:    { file: "flying_hywirl.glb",     scale: 1.2, yOffset: 0.8 },
+  flying_pigeon:    { file: "flying_pigeon.glb",     scale: 0.9, yOffset: 1.0 },
+  flying_squidle:   { file: "flying_squidle.glb",    scale: 1.3, yOffset: 1.1 },
+  flying_tribal:    { file: "flying_tribal.glb",     scale: 1.3, yOffset: 1.1 },
 };
 
 /** Kenney Fantasy Town Kit 2.0 — 167 modular building pieces (CC0) */
@@ -590,6 +591,8 @@ export class EnvironmentAssets {
   private cache = new Map<string, THREE.Object3D>();
   /** Stores the Y offset needed to place each model's bottom on the ground */
   private groundOffsets = new Map<string, number>();
+  /** Per-asset animation clips, captured from gltf.animations at load time */
+  private animations = new Map<string, THREE.AnimationClip[]>();
   private loading = new Map<string, Promise<THREE.Object3D>>();
   private loader: GLTFLoader;
   private ready = false;
@@ -673,6 +676,48 @@ export class EnvironmentAssets {
       wrapper.rotation.y = Math.random() * Math.PI * 2;
     }
     return wrapper;
+  }
+
+  /**
+   * Clone a mob asset for animation: preserves skeleton via SkeletonUtils.clone
+   * so each instance has its own bones and can be animated independently.
+   * Returns the cloned model (already scaled & ground-lifted) plus its clip map.
+   * For non-skinned assets (e.g. shadow_wolf which has 0 anims) returns null —
+   * caller should fall back to place().
+   */
+  placeAnimatedMob(assetName: string): { model: THREE.Object3D; clips: Map<string, THREE.AnimationClip> } | null {
+    const template = this.cache.get(assetName);
+    if (!template) return null;
+    const def = ASSET_DEFS[assetName];
+    if (!def) return null;
+    const sourceClips = this.animations.get(assetName);
+    if (!sourceClips || sourceClips.length === 0) return null;
+
+    const wrapper = new THREE.Group();
+    wrapper.name = `env_${assetName}`;
+    const cloned = SkeletonUtils.clone(template);
+    cloned.traverse((c) => {
+      if (c instanceof THREE.Mesh || c instanceof THREE.SkinnedMesh) {
+        c.castShadow = true;
+        c.receiveShadow = true;
+      }
+    });
+    wrapper.add(cloned);
+
+    const s = def.scale;
+    wrapper.scale.set(s, s, s);
+    const groundLift = (this.groundOffsets.get(assetName) ?? 0) * s;
+    const extraLift = def.yOffset * s;
+    wrapper.position.set(0, groundLift + extraLift, 0);
+
+    const clips = new Map<string, THREE.AnimationClip>();
+    for (const clip of sourceClips) clips.set(clip.name, clip);
+    return { model: wrapper, clips };
+  }
+
+  /** True if the asset has at least one animation clip (skinned mob). */
+  isAnimatedAsset(assetName: string): boolean {
+    return (this.animations.get(assetName)?.length ?? 0) > 0;
   }
 
   /**
@@ -908,7 +953,10 @@ export class EnvironmentAssets {
               c.material = toonMats.length === 1 ? toonMats[0] : toonMats;
             }
           });
-          console.log(`[EnvAssets] ${name}: ${meshCount} meshes (toon), bottomY=${bottomY.toFixed(3)}`);
+          if (gltf.animations && gltf.animations.length > 0) {
+            this.animations.set(name, gltf.animations);
+          }
+          console.log(`[EnvAssets] ${name}: ${meshCount} meshes (toon), ${gltf.animations?.length ?? 0} anims, bottomY=${bottomY.toFixed(3)}`);
           this.cache.set(name, root);
           this.loading.delete(name);
           resolve(root);

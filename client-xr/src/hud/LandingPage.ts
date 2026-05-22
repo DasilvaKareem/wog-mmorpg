@@ -27,6 +27,10 @@ interface NavMenu {
   label: string;
   path?: string;
   items?: NavMenuItem[];
+  /** If true, treat `path` as a same-origin URL (don't route through clientPageUrl). */
+  sameOrigin?: boolean;
+  /** Optional CSS class added to the nav item for distinctive styling. */
+  highlight?: boolean;
 }
 
 const NAV_MENUS: NavMenu[] = [
@@ -60,6 +64,12 @@ const NAV_MENUS: NavMenu[] = [
     label: "CHAMPIONS",
     path: "/champions",
   },
+  {
+    label: "AGENT",
+    path: "/agent",
+    sameOrigin: true,
+    highlight: true,
+  },
 ];
 
 function clientPageUrl(path: string): string {
@@ -74,8 +84,11 @@ function clientPageUrl(path: string): string {
 
 function renderNavMenuHtml(menu: NavMenu, index: number): string {
   if (menu.path && !menu.items) {
-    const href = clientPageUrl(menu.path);
-    return `<a class="xr-landing-nav-item" data-nav-link="${index}" href="${href}">${menu.label}</a>`;
+    const href = menu.sameOrigin ? menu.path : clientPageUrl(menu.path);
+    const cls = menu.highlight
+      ? "xr-landing-nav-item xr-landing-nav-item-highlight"
+      : "xr-landing-nav-item";
+    return `<a class="${cls}" data-nav-link="${index}" href="${href}">${menu.label}</a>`;
   }
   return `
     <div class="xr-landing-nav-group" data-nav-group="${index}">
@@ -663,6 +676,21 @@ export class LandingPage {
       .xr-landing-nav-item:hover,
       .xr-landing-nav-trigger.is-open {
         color: #ffcc24;
+      }
+
+      .xr-landing-nav-item-highlight {
+        color: #54f28b;
+        border: 2px solid rgba(84, 242, 139, 0.6);
+        padding: 4px 10px;
+        background: rgba(14, 43, 26, 0.7);
+        box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.6);
+        font-size: 16px;
+      }
+
+      .xr-landing-nav-item-highlight:hover {
+        color: #54f28b;
+        background: rgba(20, 61, 36, 0.9);
+        border-color: #54f28b;
       }
 
       .xr-landing-nav .caret {

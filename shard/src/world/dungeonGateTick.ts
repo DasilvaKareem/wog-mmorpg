@@ -29,10 +29,19 @@ const DANGER_GATE_CHANCE = 0.05; // 5%
 type GateRank = "E" | "D" | "C" | "B" | "A" | "S";
 
 // Zone sizes for position randomization (with 40-unit margin)
+// All 10 Arcadia zones — gates surge in every zone so high-level agents
+// can find rank-appropriate gates without travelling back to starter zones.
 const ZONE_BOUNDS: Record<string, { width: number; height: number }> = {
   "village-square": { width: 640, height: 640 },
   "wild-meadow": { width: 640, height: 640 },
   "dark-forest": { width: 640, height: 640 },
+  "emerald-woods": { width: 640, height: 640 },
+  "auroral-plains": { width: 640, height: 640 },
+  "viridian-range": { width: 640, height: 640 },
+  "moondancer-glade": { width: 640, height: 640 },
+  "felsrock-citadel": { width: 640, height: 640 },
+  "lake-lumina": { width: 640, height: 640 },
+  "azurshard-chasm": { width: 640, height: 640 },
 };
 
 // Rank distribution per zone (cumulative probability thresholds)
@@ -56,6 +65,40 @@ const RANK_DISTRIBUTIONS: Record<string, Array<{ rank: GateRank; threshold: numb
     { rank: "C", threshold: 0.30 },
     { rank: "B", threshold: 0.60 },
     { rank: "A", threshold: 0.85 },
+    { rank: "S", threshold: 1.00 },
+  ],
+  // Higher-level zones — gates skew toward ranks players in this zone qualify for.
+  "auroral-plains": [
+    { rank: "C", threshold: 0.20 },
+    { rank: "B", threshold: 0.60 },
+    { rank: "A", threshold: 0.90 },
+    { rank: "S", threshold: 1.00 },
+  ],
+  "emerald-woods": [
+    { rank: "C", threshold: 0.15 },
+    { rank: "B", threshold: 0.50 },
+    { rank: "A", threshold: 0.85 },
+    { rank: "S", threshold: 1.00 },
+  ],
+  "viridian-range": [
+    { rank: "B", threshold: 0.20 },
+    { rank: "A", threshold: 0.70 },
+    { rank: "S", threshold: 1.00 },
+  ],
+  "moondancer-glade": [
+    { rank: "B", threshold: 0.15 },
+    { rank: "A", threshold: 0.65 },
+    { rank: "S", threshold: 1.00 },
+  ],
+  "felsrock-citadel": [
+    { rank: "A", threshold: 0.30 },
+    { rank: "S", threshold: 1.00 },
+  ],
+  "lake-lumina": [
+    { rank: "A", threshold: 0.20 },
+    { rank: "S", threshold: 1.00 },
+  ],
+  "azurshard-chasm": [
     { rank: "S", threshold: 1.00 },
   ],
 };
@@ -82,6 +125,38 @@ function bumpRank(rank: GateRank): GateRank {
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/**
+ * Force-spawn a single dungeon gate (admin/test). Returns the spawned gate's entity ID.
+ * Throws if zoneId isn't a valid surge zone.
+ */
+export function spawnGateInZone(zoneId: string, rank?: GateRank, isDanger = false): string {
+  const bounds = ZONE_BOUNDS[zoneId];
+  if (!bounds) throw new Error(`Zone "${zoneId}" is not a surge zone`);
+  const margin = 40;
+  const finalRank = rank ?? rollRank(zoneId);
+  const now = Date.now();
+  const gateEntity: Entity = {
+    id: randomUUID(),
+    type: "dungeon-gate",
+    name: isDanger ? `Danger Gate [${finalRank}]` : `Dungeon Gate [${finalRank}]`,
+    x: randomInt(margin, bounds.width - margin),
+    y: randomInt(margin, bounds.height - margin),
+    hp: 9999,
+    maxHp: 9999,
+    createdAt: now,
+    gateRank: finalRank,
+    isDangerGate: isDanger,
+    gateExpiresAt: now + GATE_LIFETIME_MS,
+    gateOpened: false,
+  };
+  const zone = getOrCreateZone(zoneId);
+  zone.entities.set(gateEntity.id, gateEntity);
+  console.log(
+    `[dungeon] ADMIN spawned ${isDanger ? "DANGER " : ""}Rank ${finalRank} gate in ${zoneId} at (${gateEntity.x}, ${gateEntity.y})`
+  );
+  return gateEntity.id;
 }
 
 function spawnGateSurge(): void {
@@ -204,7 +279,9 @@ function monitorDungeonInstances(): void {
 }
 
 export function registerDungeonGateTick(server: FastifyInstance): void {
-  lastSurgeTime = Date.now();
+  // First surge fires ~30s after boot (give zones time to populate),
+  // not 5 minutes — agents shouldn't wait through an empty world.
+  lastSurgeTime = Date.now() - SURGE_INTERVAL_MS + 30_000;
 
   setInterval(() => {
     const now = Date.now();

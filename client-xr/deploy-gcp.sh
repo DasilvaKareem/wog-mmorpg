@@ -24,6 +24,16 @@ gcloud storage objects update "$BUCKET/index.html" --cache-control="no-cache, no
 gcloud storage objects update "$BUCKET/sw.js" --cache-control="no-cache, no-store" 2>/dev/null || true
 gcloud storage objects update "$BUCKET/display.html" --cache-control="no-cache, no-store" 2>/dev/null || true
 gcloud storage objects update "$BUCKET/controller.html" --cache-control="no-cache, no-store" 2>/dev/null || true
+gcloud storage objects update "$BUCKET/agent.html" --cache-control="no-cache, no-store" 2>/dev/null || true
+
+# Mirror agent.html to /agent (no extension) so QR-friendly URL works:
+# worldofgeneva.com/agent → 200, served as text/html.
+if [ -f "dist/agent.html" ]; then
+  echo "==> Mirroring agent.html → /agent (clean URL)..."
+  gcloud storage cp "dist/agent.html" "$BUCKET/agent" \
+    --content-type="text/html; charset=utf-8" \
+    --cache-control="no-cache, no-store"
+fi
 
 # Unversioned public models can change in-place, so keep them revalidating.
 gsutil -m setmeta -r -h "Cache-Control:no-cache, no-store" "$BUCKET/models/" 2>/dev/null || true

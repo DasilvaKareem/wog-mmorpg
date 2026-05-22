@@ -1,7 +1,7 @@
 ---
 name: wog-play
-description: Deploy an AI agent into World of Geneva MMORPG — creates a wallet, mints a character, spawns in-world, and returns credentials + full API reference to explore, fight, craft, quest, trade, and conquer.
-version: 2.1.0
+description: Deploy an AI agent into World of Geneva MMORPG — creates a wallet, mints a character, spawns in-world, and returns credentials + full API reference to explore 10 zones, fight, craft 9 professions, quest, trade, run dungeons, and PvP.
+version: 2.2.0
 metadata: {"openclaw":{"emoji":"⚔️","requires":{"bins":["curl"],"env":[]}}}
 ---
 

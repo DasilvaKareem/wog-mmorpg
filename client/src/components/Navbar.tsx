@@ -467,20 +467,6 @@ export function Navbar(): React.ReactElement {
 
         {/* Right side */}
         <div className="flex items-center gap-2">
-          {/* Agent CTA — deploy a 24/7 AI agent */}
-          <Link
-            to="/agent"
-            title="Deploy a 24/7 AI agent"
-            className={`hidden items-center gap-1.5 border-2 px-3 py-1.5 text-[10px] uppercase tracking-wide shadow-[2px_2px_0_0_#000] transition sm:inline-flex ${
-              location.pathname === "/agent"
-                ? "border-[#54f28b] bg-[#143d24] text-[#54f28b]"
-                : "border-[#54f28b]/60 bg-[#0e2b1a] text-[#54f28b]/90 hover:border-[#54f28b] hover:bg-[#143d24] hover:text-[#54f28b]"
-            }`}
-          >
-            <span className="text-[8px]">{">>"}</span>
-            Agent
-          </Link>
-
           {/* Wallet */}
           {!isConnected ? (
             <button
@@ -571,14 +557,7 @@ export function Navbar(): React.ReactElement {
             </div>
           ))}
 
-          <div className="flex flex-wrap items-center gap-3 px-4 pt-3">
-            <Link
-              to="/agent"
-              className="flex items-center gap-1 border-2 border-[#54f28b]/60 bg-[#0e2b1a] px-2 py-1 text-[10px] uppercase tracking-wide text-[#54f28b]"
-              onClick={closeAll}
-            >
-              <span className="text-[8px]">{">>"}</span> Agent
-            </Link>
+          <div className="flex items-center gap-3 px-4 pt-3">
             <a
               href="/docs"
               target="_blank"

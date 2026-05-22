@@ -18,6 +18,7 @@ export interface CharacterReadyDetail {
 interface CharacterSelectOptions {
   onCharacterReady: (detail: CharacterReadyDetail) => void;
   onBack: () => void;
+  onLogout?: () => void;
   charAssets: CharacterAssets;
 }
 
@@ -93,6 +94,7 @@ export class CharacterSelect {
         <button type="button" class="cs-btn cs-btn-ghost cs-header-back" data-action="back">Back</button>
         <span class="cs-kicker">World of Geneva XR</span>
         <h1>Select Character</h1>
+        <button type="button" class="cs-btn cs-btn-ghost cs-header-logout" data-action="logout">Log Out</button>
       </div>
       <div class="cs-preview-wrap">
         <button type="button" class="cs-arrow cs-arrow-left" data-action="prev">&lsaquo;</button>
@@ -123,6 +125,11 @@ export class CharacterSelect {
       } else {
         this.options.onBack();
       }
+    });
+
+    // Log out
+    this.panel.querySelector("[data-action='logout']")!.addEventListener("click", () => {
+      this.options.onLogout?.();
     });
 
     this.root.style.display = "none";
@@ -908,6 +915,19 @@ export class CharacterSelect {
         position: absolute;
         top: 0;
         left: 0;
+      }
+
+      .cs-header-logout {
+        position: absolute;
+        top: 0;
+        right: 0;
+        color: #efc97f;
+        opacity: 0.7;
+      }
+
+      .cs-header-logout:hover {
+        opacity: 1;
+        color: #ff8a8a;
       }
 
       .cs-kicker {

@@ -112,9 +112,6 @@ const StoryPage = React.lazy(() =>
 const X402AgentPage = React.lazy(() =>
   import("@/components/X402AgentPage").then((mod) => ({ default: mod.X402AgentPage }))
 );
-const AgentPage = React.lazy(() =>
-  import("@/components/AgentPage").then((mod) => ({ default: mod.AgentPage }))
-);
 const ChampionsPage = React.lazy(() =>
   import("@/components/ChampionsPage").then((mod) => ({ default: mod.ChampionsPage }))
 );
@@ -942,7 +939,6 @@ function AppShell(): React.ReactElement {
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/market" element={<RealMoneyMarketPage />} />
               <Route path="/x402" element={<X402AgentPage />} />
-              <Route path="/agent" element={<AgentPage />} />
               <Route path="/races" element={<RacesClassesPage />} />
               <Route path="/story" element={<StoryPage />} />
               <Route path="/media" element={<MediaPage />} />

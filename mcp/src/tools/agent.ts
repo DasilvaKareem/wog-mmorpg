@@ -204,10 +204,28 @@ export function registerAgentTools(server: McpServer): void {
           secondsRemaining: Math.round((e.skinnableUntil - Date.now()) / 1000),
         }));
 
+      // Dungeon gates — surfaced as a top-level field so the LLM sees them
+      // instead of having to dig into npcs["dungeon-gate"].
+      const dungeonGates = allEntities
+        .filter((e) => e.type === "dungeon-gate" && !e.gateOpened
+          && (!e.gateExpiresAt || e.gateExpiresAt > Date.now()))
+        .map((e) => ({
+          id: e.id,
+          rank: e.gateRank,
+          isDangerGate: e.isDangerGate ?? false,
+          x: Math.round(e.x),
+          y: Math.round(e.y),
+          distance: Math.round(dist(myX, myY, e.x, e.y)),
+          secondsRemaining: e.gateExpiresAt
+            ? Math.max(0, Math.round((e.gateExpiresAt - Date.now()) / 1000))
+            : null,
+        }))
+        .sort((a, b) => a.distance - b.distance);
+
       // NPCs by function
       const npcsByType: Record<string, any[]> = {};
       for (const e of allEntities) {
-        if (["player", "mob", "boss", "ore_node", "flower_node", "corpse"].includes(e.type)) continue;
+        if (["player", "mob", "boss", "ore_node", "flower_node", "corpse", "dungeon-gate"].includes(e.type)) continue;
         const key = e.type;
         if (!npcsByType[key]) npcsByType[key] = [];
         npcsByType[key].push({
@@ -265,6 +283,7 @@ export function registerAgentTools(server: McpServer): void {
         myHpPct: me ? Math.round((me.hp / me.maxHp) * 100) : null,
         mobs: { count: mobs.length, list: mobs.slice(0, 20) },
         skinnableCorpses: corpses,
+        dungeonGates: { count: dungeonGates.length, list: dungeonGates },
         npcs: npcsByType,
         oreNodes: { count: oreNodes.length, list: oreNodes },
         flowerNodes: { count: flowerNodes.length, list: flowerNodes },
