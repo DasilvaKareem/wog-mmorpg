@@ -524,7 +524,9 @@ interface SpeechBubble {
 
 // ── Floating combat text (stylized) ─────────────────────────────────
 
-type FloatingKind = "damage" | "crit" | "heal" | "xp" | "dodge" | "block" | "miss" | "levelup";
+type FloatingKind =
+  | "damage" | "crit" | "heal" | "xp" | "dodge" | "block" | "miss" | "levelup"
+  | "craft-common" | "craft-uncommon" | "craft-rare" | "craft-epic" | "craft-fail";
 
 interface FloatingStyle {
   fontPx: number;
@@ -546,6 +548,12 @@ const FLOATING_STYLES: Record<FloatingKind, FloatingStyle> = {
   block:   { fontPx: 64,  topHex: "#ffffff", midHex: "#ddd6a8", bottomHex: "#9d9250", strokeHex: "#1a1608", glowHex: "#d8c48a", scaleX: 2.0, scaleY: 1.2 },
   miss:    { fontPx: 60,  topHex: "#ffffff", midHex: "#dddddd", bottomHex: "#888888", strokeHex: "#111111", glowHex: "#ffffff", scaleX: 1.8, scaleY: 1.1 },
   levelup: { fontPx: 104, topHex: "#ffffff", midHex: "#fff0a0", bottomHex: "#ffaa22", strokeHex: "#3c1a00", glowHex: "#ffcc44", scaleX: 3.6, scaleY: 1.6 },
+  // Craft outcomes — colored by rarity tier
+  "craft-common":   { fontPx: 64, topHex: "#ffffff", midHex: "#dddddd", bottomHex: "#888888", strokeHex: "#111111", glowHex: "#cccccc", scaleX: 2.2, scaleY: 1.2 },
+  "craft-uncommon": { fontPx: 72, topHex: "#f0ffe6", midHex: "#7fee9a", bottomHex: "#1f9c3e", strokeHex: "#04200d", glowHex: "#3ddc84", scaleX: 2.4, scaleY: 1.3 },
+  "craft-rare":     { fontPx: 88, topHex: "#e8f3ff", midHex: "#7fb8ff", bottomHex: "#1d63d8", strokeHex: "#031628", glowHex: "#4a9eff", scaleX: 2.7, scaleY: 1.4 },
+  "craft-epic":     { fontPx: 104,topHex: "#fff0ff", midHex: "#d089ff", bottomHex: "#7a1ed8", strokeHex: "#1a0028", glowHex: "#bb44ff", scaleX: 3.2, scaleY: 1.6 },
+  "craft-fail":     { fontPx: 80, topHex: "#fff0f0", midHex: "#ff6a6a", bottomHex: "#a00000", strokeHex: "#200000", glowHex: "#ff4444", scaleX: 2.5, scaleY: 1.3 },
 };
 
 function makeFloatingNumber(text: string, kind: FloatingKind): THREE.Sprite {
@@ -689,6 +697,27 @@ function locomotionAction(
   const threshold = inLocomotion ? LOCOMOTION_STOP_THRESHOLD : LOCOMOTION_START_THRESHOLD;
   if (movingSmooth <= threshold) return "idle";
   return entity.isRunning ? "run" : "walk";
+}
+
+function subtypeLabel(equipSlot: string | undefined, category: string | undefined): string {
+  switch (equipSlot) {
+    case "weapon": return "Weapon";
+    case "shield": return "Shield";
+    case "helm": return "Helm";
+    case "chest": return "Chest";
+    case "legs": return "Legs";
+    case "boots": return "Boots";
+    case "shoulders": return "Shoulders";
+    case "gloves": return "Gauntlets";
+    case "belt": return "Belt";
+    case "cape": return "Cape";
+    case "ring": return "Ring";
+    case "amulet": return "Amulet";
+  }
+  if (category === "weapon") return "Weapon";
+  if (category === "armor") return "Armor";
+  if (category === "consumable") return "Brew";
+  return "Item";
 }
 
 interface FloatingText {
@@ -2186,6 +2215,34 @@ export class EntityManager {
         const obj = this.entities.get(ev.entityId);
         const action = CRAFT_ACTION[ev.data.craftType as string] ?? "craft";
         if (obj && obj.currentAction !== action) this.playOneShot(obj, action);
+
+        if (obj) {
+          if (ev.data.craftFailed) {
+            this.spawnFloating(obj, "CRAFT FAILED", "craft-fail", {
+              startY: 2.3, riseAmount: 2.0, lifetime: 1.6,
+            });
+          } else {
+            const quality = (ev.data.quality as string | undefined) ?? "common";
+            const itemName = (ev.data.itemName as string | undefined) ?? "Item";
+            const kind: FloatingKind =
+              quality === "epic" ? "craft-epic" :
+              quality === "rare" ? "craft-rare" :
+              quality === "uncommon" ? "craft-uncommon" :
+              "craft-common";
+            const subType = subtypeLabel(
+              ev.data.equipSlot as string | undefined,
+              ev.data.category as string | undefined,
+            );
+            const tierLabel = quality.charAt(0).toUpperCase() + quality.slice(1);
+            const ornament = quality === "epic" ? "✦ " : "";
+            this.spawnFloating(obj, `${ornament}${tierLabel} ${subType}${ornament ? " ✦" : ""}`, kind, {
+              startY: 2.5, riseAmount: 2.0, lifetime: 2.0,
+            });
+            this.spawnFloating(obj, itemName, "xp", {
+              startY: 2.1, riseAmount: 1.6, lifetime: 1.8, offsetX: 0,
+            });
+          }
+        }
       }
 
       // ── Chat: speech bubble ──
