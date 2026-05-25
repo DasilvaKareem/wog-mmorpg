@@ -1,5 +1,4 @@
-import { fetchNanopayStatus, submitTopUp, fetchNanopayBreakdown, fetchTelegramStatus, fetchTelegramBotLink, type NanopayStatus, type SpendBreakdown } from "../api.js";
-import { playSoundEffect } from "../sfx.js";
+import { fetchNanopayStatus, fetchNanopayBreakdown, fetchTelegramStatus, fetchTelegramBotLink, type NanopayStatus, type SpendBreakdown } from "../api.js";
 
 export interface AgentStats {
   goldCopper: number;   // raw copper (10,000 copper = 1 gold)
@@ -14,7 +13,6 @@ interface WalletPanelOptions {
   getStats?: () => AgentStats | null;
 }
 
-const TOP_UP_AMOUNTS = [0.1, 0.25, 1.0];
 const POLL_MS = 2000;
 const MAX_SAMPLES = 150;
 const MIN_WINDOW_MS = 10_000;
@@ -91,7 +89,6 @@ export class WalletPanel {
   private lastPollRemaining = 0;
   private rafHandle = 0;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private busy = false;
 
   // Stat tracking
   private statSamples: StatSample[] = [];
@@ -336,37 +333,6 @@ export class WalletPanel {
     chips.innerHTML = this.renderStatChipsHTML();
   }
 
-  // ── top-up ────────────────────────────────────────────────────────────────
-
-  private async topUp(amount: number) {
-    if (this.busy) return;
-    this.busy = true;
-    const saved = this.body.innerHTML;
-    this.body.innerHTML = `<div class="wp-busy">Adding ${fmtUsdc(amount)}…</div>`;
-    try {
-      const token = await this.options.getToken();
-      if (!token) throw new Error("Not authenticated");
-      const res = await submitTopUp(token, amount);
-      if (!res.ok) throw new Error(res.error ?? "Top up failed");
-      if (res.balance) {
-        this.status            = res.balance;
-        this.displayed         = res.balance.remaining;
-        this.lastPollRemaining = res.balance.remaining;
-        this.lastPollAt        = performance.now();
-        this.drainPerMs        = 0;
-      }
-      playSoundEffect("ui_button_click");
-      void this.fetchBreakdown();
-    } catch (err: any) {
-      console.warn("[WalletPanel] topUp error:", err.message);
-      this.body.innerHTML = saved;
-      return;
-    } finally {
-      this.busy = false;
-    }
-    this.render();
-  }
-
   // ── render helpers ────────────────────────────────────────────────────────
 
   private renderStatChipsHTML(): string {
@@ -493,10 +459,6 @@ export class WalletPanel {
     const barClass = isEmpty ? "wp-bar-empty" : isLow ? "wp-bar-low" : "wp-bar-ok";
     const balClass = isEmpty ? "wp-balance-empty" : isLow ? "wp-balance-low" : "";
 
-    const topUpButtons = TOP_UP_AMOUNTS.map(
-      (amt) => `<button class="wp-topup-btn" data-amt="${amt}">+ ${fmtUsdc(amt)}</button>`,
-    ).join("");
-
     this.body.innerHTML = `
       <div class="wp-section">
         <div class="wp-section-label">Compute Budget</div>
@@ -522,17 +484,12 @@ export class WalletPanel {
       </div>
 
       <div class="wp-section">
-        <div class="wp-section-label">Top Up</div>
-        <div class="wp-topup-row">${topUpButtons}</div>
-      </div>
-
-      <div class="wp-section">
-        <div class="wp-section-label">Receive USDC</div>
+        <div class="wp-section-label">Add Funds</div>
         <div class="wp-receive-row">
           <span class="wp-receive-addr">${wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : "—"}</span>
           <button class="wp-copy-btn" data-addr="${wallet ?? ""}" aria-label="Copy wallet address">Copy</button>
         </div>
-        <div class="wp-receive-hint">Send USDC to this address from any wallet</div>
+        <div class="wp-receive-hint">Send USDC on Base to this address from any wallet</div>
       </div>
 
       <div class="wp-section">
@@ -563,10 +520,6 @@ export class WalletPanel {
         <button class="wp-contact-save">Save</button>
       </div>
     `;
-
-    this.body.querySelectorAll<HTMLButtonElement>(".wp-topup-btn").forEach((btn) => {
-      btn.addEventListener("click", () => void this.topUp(parseFloat(btn.dataset.amt ?? "0.1")));
-    });
 
     this.body.querySelector<HTMLButtonElement>(".wp-copy-btn")?.addEventListener("click", (e) => {
       const btn  = e.currentTarget as HTMLButtonElement;
@@ -775,26 +728,6 @@ export class WalletPanel {
         text-transform: uppercase;
         white-space: nowrap;
       }
-
-      /* ── Top-up ── */
-
-      .wp-topup-row { display: flex; gap: 8px; }
-
-      .wp-topup-btn {
-        flex: 1;
-        min-height: 44px;
-        border-radius: 12px;
-        border: 1px solid rgba(127,214,190,0.2);
-        background: rgba(127,214,190,0.07);
-        color: #7fd6be;
-        font: 700 11px/1 "Courier New", monospace;
-        cursor: pointer;
-        transition: background 0.15s, border-color 0.15s;
-        letter-spacing: 0.06em;
-        touch-action: manipulation;
-      }
-      .wp-topup-btn:hover  { background: rgba(127,214,190,0.16); border-color: rgba(127,214,190,0.4); }
-      .wp-topup-btn:active { background: rgba(127,214,190,0.22); }
 
       /* ── Receive ── */
 
@@ -1062,8 +995,6 @@ export class WalletPanel {
         .wp-chip { padding: 7px 4px 6px; }
 
         .wp-chip-val { font-size: 11px; }
-
-        .wp-topup-row { gap: 6px; }
 
         .wp-contact-fields { gap: 5px; }
 

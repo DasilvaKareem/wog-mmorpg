@@ -2445,14 +2445,15 @@ export class AgentRunner {
             void this.logActivity(`[utility] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
             return;
           }
-          // Deduct supervisor LLM cost — skip call (not pause) if budget gone
+          // Deduct supervisor LLM cost — pause agent if budget exhausted
           const supervisorBudget = await deductCost(this.userWallet, "supervisor");
           if (!supervisorBudget.ok) {
-            this.currentScript = utilityDecision.winner.script;
-            this.ticksOnCurrentScript = 0;
-            void this.logActivity("[nanopay] Budget low — using utility decision, supervisor skipped");
+            console.log(`[agent:${this.walletTag}] Budget exhausted at supervisor — pausing agent`);
+            void this.logActivity("[nanopay] Budget exhausted — agent paused");
+            await patchAgentConfig(this.userWallet, { enabled: false });
             void sendInstantAlert(this.userWallet,
-              `⏸️ Your agent's compute budget is exhausted and has been paused.\n\nOpen the Wallet panel in-game to top up and resume.`);
+              `⏸️ Your agent has been paused — compute budget exhausted.\n\nOpen the Wallet panel in-game to top up and resume.`);
+            this.running = false;
             return;
           }
           if (supervisorBudget.lowBalance) {

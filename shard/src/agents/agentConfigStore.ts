@@ -9,6 +9,7 @@
 
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { clearWalletEntityLink, upsertWalletLink } from "../character/characterProjectionStore.js";
+import { registerWatchedAgentWallet } from "../economy/usdcDepositWatcher.js";
 import { enqueueOutboxEvent } from "../db/outbox.js";
 import { getWalletRuntimeState, listWalletRuntimeStatesByPrefix, putWalletRuntimeState } from "../db/walletInfraStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
@@ -595,6 +596,7 @@ async function writeWallet(redisKey: string, userWallet: string, normalized: str
   if (redis) {
     try {
       await redis.set(redisKey, normalized);
+      void registerWatchedAgentWallet(normalized).catch(() => { /* non-fatal */ });
       await upsertWalletLink({ ownerWallet: userWallet, custodialWallet: normalized }).catch((err) => {
         console.warn(`[walletLinks] Failed to sync custodial mapping for ${userWallet}: ${err.message?.slice(0, 140) ?? err}`);
       });
@@ -605,6 +607,7 @@ async function writeWallet(redisKey: string, userWallet: string, normalized: str
   } else {
     if (!isPostgresConfigured()) assertRedisAvailable("setAgentCustodialWallet");
   }
+  void registerWatchedAgentWallet(normalized).catch(() => { /* non-fatal */ });
   memWallet.set(userWallet, normalized);
   await upsertWalletLink({ ownerWallet: userWallet, custodialWallet: normalized }).catch((err) => {
     console.warn(`[walletLinks] Failed to sync custodial mapping for ${userWallet}: ${err.message?.slice(0, 140) ?? err}`);

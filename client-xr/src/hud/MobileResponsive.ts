@@ -1,11 +1,9 @@
 /**
  * Global mobile responsive overrides for HUD panels.
  *
- * Each panel injects its own CSS at construction time with a fixed pixel
- * width (300–320px) and `right: 12px`. On narrow phones (≤ 600px) those
- * widths cause horizontal overflow because the panels plus the action-bar
- * column don't fit. This single stylesheet uses higher-specificity ID
- * selectors + `!important` to clamp all panel widths to the viewport.
+ * On narrow phones (≤ 600px) every HUD panel becomes a full-width
+ * bottom-sheet — mirroring the WalletPanel pattern. This avoids the
+ * fixed-width right-anchored panels overlapping with the action bar.
  */
 
 const PANEL_IDS = [
@@ -32,36 +30,31 @@ export function installMobileResponsiveStyles(): void {
   const style = document.createElement("style");
   style.id = "mobile-responsive-styles";
   style.textContent = `
-    /* Phone-sized viewport: shrink panel widths so they don't bleed off
-       the right edge. The action bar wraps to multiple rows automatically
-       (see ActionBar.ts). Panels keep their right anchor but cap width to
-       the viewport minus a small gutter. */
+    /* Phone-sized viewport: every HUD panel becomes a bottom-sheet —
+       full-width, anchored to the bottom of the viewport, with rounded
+       top corners. Slides up over the action bar like WalletPanel. */
     @media (max-width: 600px) {
       ${panelSelector} {
-        width: calc(100vw - 16px) !important;
-        max-width: 380px !important;
-        right: 8px !important;
-        left: auto !important;
-      }
-      /* Single-row action bar (~38-44px tall + 12px bottom inset) — give
-         the panels a little headroom so they don't sit on top of icons. */
-      #notifications-panel,
-      #inbox-panel,
-      #outgoing-trades-panel,
-      #bets-panel,
-      #bag-panel,
-      #skills-panel,
-      #quest-panel,
-      #player-panel,
-      #settings-panel,
-      #world-map {
-        bottom: 60px !important;
-        max-height: calc(100vh - 80px) !important;
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        top: auto !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        max-height: 75vh !important;
+        overflow-y: auto !important;
+        border-radius: 20px 20px 0 0 !important;
+        border-left: none !important;
+        border-right: none !important;
+        border-bottom: none !important;
+        box-shadow: 0 -8px 40px rgba(0,0,0,0.7) !important;
+        transform: none !important;
       }
     }
     @media (max-width: 400px) {
       ${panelSelector} {
-        right: 4px !important;
         font-size: 11px;
       }
     }

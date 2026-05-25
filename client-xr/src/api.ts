@@ -1130,15 +1130,6 @@ export async function fetchNanopayStatus(wallet: string, token: string): Promise
   return null;
 }
 
-export async function submitTopUp(
-  token: string,
-  budgetUsdc: number,
-): Promise<{ ok: boolean; balance?: NanopayStatus; error?: string }> {
-  const result = await postJsonWithFallback<{ balance: NanopayStatus }>("/nanopay/topup", token, { budgetUsdc });
-  if (!result.ok) return { ok: false, error: result.error };
-  return { ok: true, balance: result.data?.balance };
-}
-
 export interface SpendBreakdown {
   breakdown: Record<string, number>;
   topups: Array<{ ts: number; amount: number }>;

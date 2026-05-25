@@ -11,7 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { type Content, type FunctionDeclaration, type Part, type Type, FunctionCallingConfigMode } from "@google/genai";
 import { gemini, GEMINI_MODEL } from "./geminiClient.js";
 import { authenticateRequest } from "../auth/auth.js";
-import { grantFreeStarterCredit, deductCost } from "../economy/sessionBudget.js";
+import { grantFreeStarterCredit, deductCost, getSessionBalance } from "../economy/sessionBudget.js";
 import { agentManager } from "./agentManager.js";
 import {
   getAgentConfig,
@@ -1387,6 +1387,22 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
           isCommand: true,
         });
       }
+    }
+
+    // ── Budget gate — short-circuit before LLM if compute budget exhausted ─
+    const chatBalance = await getSessionBalance(authWallet);
+    if (chatBalance.remaining <= 0) {
+      const outOfBudgetMsg = "💸 I'm out of compute budget — top up USDC in the Wallet panel and I'll be back.";
+      const ts = Date.now();
+      await appendChatMessage(authWallet, { role: "user",  text: message,         ts });
+      await appendChatMessage(authWallet, { role: "agent", text: outOfBudgetMsg, ts: ts + 1 });
+      return reply.send({
+        response: outOfBudgetMsg,
+        configUpdated: false,
+        agentRunning: agentManager.isRunning(authWallet),
+        actionResults: [],
+        budgetExhausted: true,
+      });
     }
 
     // ── Natural-language directive capture ────────────────────────────────

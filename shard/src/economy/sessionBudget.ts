@@ -40,6 +40,21 @@ export async function grantFreeStarterCredit(wallet: string): Promise<void> {
   }
 }
 
+// Called when an on-chain USDC deposit is detected on the agent's wallet.
+// Skips the Circle PENDING_SET (deposit is already settled on-chain).
+export async function creditOnChainDeposit(wallet: string, budgetUsdc: number): Promise<void> {
+  const redis = getRedis();
+  const key = wallet.toLowerCase();
+  const remaining = await getRemainingBalance(redis, key);
+  await redis.set(budgetKey(key), (remaining + budgetUsdc).toFixed(8));
+  await redis.set(spentKey(key), "0");
+  await redis.del(breakdownKey(key));
+  try {
+    await redis.lPush(topupsKey(key), JSON.stringify({ ts: Date.now(), amount: budgetUsdc }));
+    await redis.lTrim(topupsKey(key), 0, TOPUPS_MAX - 1);
+  } catch { /* non-fatal */ }
+}
+
 // Called when user submits a top-up EIP-3009 auth.
 export async function initTopUp(wallet: string, signedAuth: string, budgetUsdc: number): Promise<void> {
   const redis = getRedis();

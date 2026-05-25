@@ -20,20 +20,34 @@ function getItemBonuses(tokenId: number | string | undefined): Record<string, nu
   return cachedCatalog.get(String(tokenId))?.statBonuses ?? null;
 }
 
-function formatStatRows(stats: Record<string, number> | undefined): string {
-  if (!stats) return "";
+function formatStatEntry(label: string, effective: number, base: number | undefined): string {
+  const delta = base != null ? effective - base : 0;
+  let deltaHtml = "";
+  if (delta > 0) {
+    deltaHtml = ` <span style="color:#7ee8a2;font-weight:bold;">+${delta}</span>`;
+  } else if (delta < 0) {
+    deltaHtml = ` <span style="color:#ff8080;font-weight:bold;">${delta}</span>`;
+  }
+  return `<span style="color:#aab;">${label}</span> <span style="color:#dfe8ff;font-weight:bold;">${effective}</span>${deltaHtml}`;
+}
+
+function formatStatRows(
+  effective: Record<string, number> | undefined,
+  base?: Record<string, number> | undefined,
+): string {
+  if (!effective) return "";
   const entries: string[] = [];
   for (const key of STAT_ORDER) {
-    if (stats[key] == null) continue;
+    if (effective[key] == null) continue;
     const label = STAT_LABELS[key] ?? key.toUpperCase();
-    entries.push(`<span style="color:#aab;">${label}</span> <span style="color:#dfe8ff;font-weight:bold;">${stats[key]}</span>`);
+    entries.push(formatStatEntry(label, effective[key], base?.[key]));
   }
   // Catch any remaining keys not in STAT_ORDER
-  for (const [key, val] of Object.entries(stats)) {
+  for (const [key, val] of Object.entries(effective)) {
     if (STAT_ORDER.includes(key)) continue;
     if (val == null) continue;
     const label = STAT_LABELS[key] ?? key.toUpperCase();
-    entries.push(`<span style="color:#aab;">${label}</span> <span style="color:#dfe8ff;font-weight:bold;">${val}</span>`);
+    entries.push(formatStatEntry(label, val, base?.[key]));
   }
   return entries.join('<span style="color:#445;margin:0 6px;">·</span>');
 }
@@ -176,7 +190,19 @@ export class EntityInspector {
     this.positionAt(screenX, screenY);
   }
 
+  private isMobile(): boolean {
+    return window.innerWidth <= 600;
+  }
+
   private positionAt(screenX: number, screenY: number) {
+    if (this.isMobile() && !this._locked) {
+      // Bottom-sheet mode — let CSS handle positioning.
+      this.panel.style.left = "";
+      this.panel.style.top = "";
+      this.panel.style.right = "";
+      return;
+    }
+
     const w = this.panel.offsetWidth;
     const h = this.panel.offsetHeight;
 
@@ -307,11 +333,17 @@ export class EntityInspector {
       }
       const statsToShow = e.effectiveStats ?? e.stats;
       if (statsToShow && Object.keys(statsToShow).length > 0) {
-        const rows = formatStatRows(statsToShow);
+        const rows = formatStatRows(statsToShow, e.effectiveStats ? e.stats : undefined);
         if (rows) {
+          const hasBonus = e.effectiveStats && e.stats && STAT_ORDER.some(
+            (k) => (e.effectiveStats?.[k] ?? 0) !== (e.stats?.[k] ?? 0),
+          );
+          const hint = hasBonus
+            ? ` <span style="color:#7ee8a2;font-weight:normal;text-transform:none;letter-spacing:0;">(green = gear bonus)</span>`
+            : "";
           html += `
             <div style="margin-top:8px; padding:6px 8px; border-radius:5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
-              <div style="font:bold 10px monospace; color:#998; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:3px;">Stats</div>
+              <div style="font:bold 10px monospace; color:#998; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:3px;">Stats${hint}</div>
               <div style="font:11px monospace; line-height:1.5;">${rows}</div>
             </div>
           `;
@@ -492,8 +524,40 @@ export class EntityInspector {
         display: flex; align-items: center; justify-content: center;
         box-shadow: 0 0 4px rgba(0,0,0,0.6);
       }
+      /* ── Mobile: bottom sheet (mirrors WalletPanel UX) ── */
+      @media (max-width: 600px) {
+        #entity-inspector {
+          left: 0 !important;
+          right: 0 !important;
+          top: auto !important;
+          bottom: 0 !important;
+          width: 100% !important;
+          min-width: 0 !important;
+          max-width: none !important;
+          max-height: 75vh !important;
+          overflow-y: auto;
+          border-radius: 20px 20px 0 0 !important;
+          border-left: none !important;
+          border-right: none !important;
+          border-bottom: none !important;
+          padding: 18px 14px 16px !important;
+          box-shadow: 0 -8px 40px rgba(0,0,0,0.7) !important;
+        }
+        /* Drag-handle cue at the top */
+        #entity-inspector::before {
+          content: "";
+          position: sticky;
+          top: 0;
+          display: block;
+          width: 36px;
+          height: 4px;
+          margin: -6px auto 8px;
+          border-radius: 99px;
+          background: rgba(255,255,255,0.18);
+          pointer-events: none;
+        }
+      }
       @media (max-width: 480px) {
-        #entity-inspector { max-width: calc(100vw - 24px) !important; }
         .ei-paperdoll-center { min-height: 140px; }
         .ei-paperdoll-portrait { width: 44px; height: 44px; font-size: 16px; }
       }

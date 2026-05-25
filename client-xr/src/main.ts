@@ -1726,6 +1726,10 @@ actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", on
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => togglePanel("players") });
 actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => togglePanel("inbox") });
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
+  if (inspector.inspectedEntity?.id === ownEntityId) {
+    inspector.hide();
+    return;
+  }
   if (ownEntityId) {
     const ent = entities.getEntity(ownEntityId);
     if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
@@ -2973,7 +2977,9 @@ window.addEventListener("keydown", (e) => {
     togglePanel("skills");
   }
   if (e.key === "e" || e.key === "E") {
-    if (ownEntityId) {
+    if (inspector.inspectedEntity?.id === ownEntityId) {
+      inspector.hide();
+    } else if (ownEntityId) {
       const ent = entities.getEntity(ownEntityId);
       if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
     }

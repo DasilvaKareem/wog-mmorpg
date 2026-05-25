@@ -1191,6 +1191,11 @@ const start = async () => {
   await server.listen({ port, host });
   server.log.info(`Shard listening on ${host}:${port}`);
 
+  // USDC deposit watcher: credits compute budget when USDC lands on an agent wallet (Base mainnet).
+  void (await import("./economy/usdcDepositWatcher.js")).startUsdcDepositWatcher().catch((err: any) => {
+    server.log.warn(`[usdcWatcher] startup failed: ${err.message?.slice(0, 140) ?? err}`);
+  });
+
   if (LAZY_RUNTIME_HYDRATION) {
     server.log.info("[runtime] Lazy hydration enabled; skipping eager restore of live sessions, parties, PvP, merchants, agents, plots, and gold reservations");
   } else {
