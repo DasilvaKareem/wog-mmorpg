@@ -2881,10 +2881,19 @@ if (navigator.xr) {
             xrControllers = new XRControllers(
               renderer, scene,
               world.group.children as THREE.Object3D[],
-              xrSession.cameraRig
+              xrSession.cameraRig,
+              (x, z) => world.getElevationAt(x, z)
             );
+            // Lift the rig onto terrain immediately so we don't fall through
+            // the map at spawn while the headset pose initializes.
+            {
+              const rig = xrSession.cameraRig.position;
+              rig.y = world.getElevationAt(rig.x, rig.z);
+            }
             xrControllers.onTeleport = (pos) => {
-              xrSession.cameraRig.position.set(pos.x, 0, pos.z);
+              // Land on the actual terrain Y from the ray hit (not 0) so we
+              // don't end up below sloped ground.
+              xrSession.cameraRig.position.set(pos.x, pos.y, pos.z);
             };
             xrControllers.onSelect = (_ctrl, hits) => {
               const ent = entities.getEntityAt(hits);
@@ -3030,7 +3039,7 @@ function animate() {
   }
 
   if (xrSession.isPresenting) {
-    xrControllers?.update();
+    xrControllers?.update(dt);
   } else {
     // Follow own character. Resolve by PlayerSession.entityId (auto-heals across
     // relogin) when locked to self. During REACQUIRING, hold last target — don't

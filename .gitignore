@@ -38,3 +38,6 @@ test-*.sh
 *.output
 .vercel
 
+# QR codes (generated)
+qr-codes/
+

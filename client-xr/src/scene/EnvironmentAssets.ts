@@ -38,66 +38,67 @@ const ASSET_DEFS: Record<string, { file: string; scale: number; yOffset: number 
   // Resources
   rare_ore:     { file: "rare_ore.glb",     scale: 1.5, yOffset: 0 },
   flower_patch: { file: "flower_patch.glb", scale: 1.2, yOffset: 0 },
-  // Mobs
-  shadow_wolf:      { file: "shadow_wolf.glb",      scale: 2.0, yOffset: 0 },
-  dark_cultist:     { file: "dark_cultist.glb",      scale: 2.2, yOffset: 0 },
-  undead_knight:    { file: "undead_knight.glb",     scale: 2.4, yOffset: 0 },
-  forest_troll:     { file: "forest_troll.glb",      scale: 2.8, yOffset: 0 },
-  ancient_golem:    { file: "ancient_golem.glb",     scale: 3.0, yOffset: 0 },
-  necromancer_boss: { file: "necromancer_boss.glb",  scale: 3.5, yOffset: 0 },
+  // Mobs — scales target player-relative size (player is ~1.7 units tall at 0.7).
+  // Source GLBs are ~2.4 units tall, so a scale of 0.7 ≈ player height.
+  shadow_wolf:      { file: "shadow_wolf.glb",      scale: 0.9, yOffset: 0 },
+  dark_cultist:     { file: "dark_cultist.glb",      scale: 1.0, yOffset: 0 },
+  undead_knight:    { file: "undead_knight.glb",     scale: 1.1, yOffset: 0 },
+  forest_troll:     { file: "forest_troll.glb",      scale: 1.3, yOffset: 0 },
+  ancient_golem:    { file: "ancient_golem.glb",     scale: 1.4, yOffset: 0 },
+  necromancer_boss: { file: "necromancer_boss.glb",  scale: 1.6, yOffset: 0 },
   // Quaternius Easy Animated Enemy Pack (CC0)
-  frog:             { file: "frog.glb",              scale: 1.3, yOffset: 0 },
-  rat:              { file: "rat.glb",               scale: 1.2, yOffset: 0 },
-  snake:            { file: "snake.glb",             scale: 1.8, yOffset: 0 },
-  snake_angry:      { file: "snake_angry.glb",       scale: 2.2, yOffset: 0 },
-  spider:           { file: "spider.glb",            scale: 1.5, yOffset: 0 },
-  wasp:             { file: "wasp.glb",              scale: 1.4, yOffset: 1.2 },
+  frog:             { file: "frog.glb",              scale: 0.45, yOffset: 0 },
+  rat:              { file: "rat.glb",               scale: 0.4, yOffset: 0 },
+  snake:            { file: "snake.glb",             scale: 0.7, yOffset: 0 },
+  snake_angry:      { file: "snake_angry.glb",       scale: 0.9, yOffset: 0 },
+  spider:           { file: "spider.glb",            scale: 0.55, yOffset: 0 },
+  wasp:             { file: "wasp.glb",              scale: 0.55, yOffset: 1.0 },
   // Quaternius Ultimate Monsters — Big (humanoid/large)
-  big_birb:         { file: "big_birb.glb",          scale: 1.4, yOffset: 1.0 },
-  big_bluedemon:    { file: "big_bluedemon.glb",     scale: 1.7, yOffset: 0 },
-  big_cactoro:      { file: "big_cactoro.glb",       scale: 1.3, yOffset: 0 },
-  big_demon:        { file: "big_demon.glb",         scale: 1.6, yOffset: 0 },
-  big_fish:         { file: "big_fish.glb",          scale: 1.2, yOffset: 0 },
-  big_monkroose:    { file: "big_monkroose.glb",     scale: 1.5, yOffset: 0 },
-  big_mushroomking: { file: "big_mushroomking.glb",  scale: 1.9, yOffset: 0 },   // boss
-  big_ninja:        { file: "big_ninja.glb",         scale: 1.4, yOffset: 0 },
-  big_orc:          { file: "big_orc.glb",           scale: 1.5, yOffset: 0 },
-  big_orc_skull:    { file: "big_orc_skull.glb",     scale: 1.5, yOffset: 0 },
-  big_tribal:       { file: "big_tribal.glb",        scale: 1.4, yOffset: 0 },
-  big_yeti:         { file: "big_yeti.glb",          scale: 1.9, yOffset: 0 },   // boss
+  big_birb:         { file: "big_birb.glb",          scale: 0.75, yOffset: 0.8 },
+  big_bluedemon:    { file: "big_bluedemon.glb",     scale: 0.9, yOffset: 0 },
+  big_cactoro:      { file: "big_cactoro.glb",       scale: 0.7, yOffset: 0 },
+  big_demon:        { file: "big_demon.glb",         scale: 0.85, yOffset: 0 },
+  big_fish:         { file: "big_fish.glb",          scale: 0.65, yOffset: 0 },
+  big_monkroose:    { file: "big_monkroose.glb",     scale: 0.8, yOffset: 0 },
+  big_mushroomking: { file: "big_mushroomking.glb",  scale: 1.05, yOffset: 0 },   // boss
+  big_ninja:        { file: "big_ninja.glb",         scale: 0.75, yOffset: 0 },
+  big_orc:          { file: "big_orc.glb",           scale: 0.8, yOffset: 0 },
+  big_orc_skull:    { file: "big_orc_skull.glb",     scale: 0.8, yOffset: 0 },
+  big_tribal:       { file: "big_tribal.glb",        scale: 0.75, yOffset: 0 },
+  big_yeti:         { file: "big_yeti.glb",          scale: 1.05, yOffset: 0 },   // boss
   // Quaternius Ultimate Monsters — Blob (chibi/small)
-  blob_birb:        { file: "blob_birb.glb",         scale: 0.9, yOffset: 0 },
-  blob_cactoro:     { file: "blob_cactoro.glb",      scale: 1.0, yOffset: 0 },
-  blob_cat:         { file: "blob_cat.glb",          scale: 0.9, yOffset: 0 },
-  blob_chicken:     { file: "blob_chicken.glb",      scale: 0.8, yOffset: 0 },
-  blob_dog:         { file: "blob_dog.glb",          scale: 0.9, yOffset: 0 },
-  blob_fish:        { file: "blob_fish.glb",         scale: 0.9, yOffset: 0 },
-  blob_greenblob:   { file: "blob_greenblob.glb",    scale: 1.0, yOffset: 0 },
-  blob_greenspikyblob:    { file: "blob_greenspikyblob.glb",    scale: 1.0, yOffset: 0 },
-  blob_mushnub:     { file: "blob_mushnub.glb",      scale: 1.0, yOffset: 0 },
-  blob_mushnub_evolved:   { file: "blob_mushnub_evolved.glb",   scale: 1.3, yOffset: 0 },
-  blob_ninja:       { file: "blob_ninja.glb",        scale: 1.0, yOffset: 0 },
-  blob_orc:         { file: "blob_orc.glb",          scale: 1.0, yOffset: 0 },
-  blob_pigeon:      { file: "blob_pigeon.glb",       scale: 0.8, yOffset: 0 },
-  blob_pinkblob:    { file: "blob_pinkblob.glb",     scale: 1.0, yOffset: 0 },
-  blob_wizard:      { file: "blob_wizard.glb",       scale: 1.1, yOffset: 0 },
-  blob_yeti:        { file: "blob_yeti.glb",         scale: 1.1, yOffset: 0 },
+  blob_birb:        { file: "blob_birb.glb",         scale: 0.5, yOffset: 0 },
+  blob_cactoro:     { file: "blob_cactoro.glb",      scale: 0.55, yOffset: 0 },
+  blob_cat:         { file: "blob_cat.glb",          scale: 0.5, yOffset: 0 },
+  blob_chicken:     { file: "blob_chicken.glb",      scale: 0.45, yOffset: 0 },
+  blob_dog:         { file: "blob_dog.glb",          scale: 0.5, yOffset: 0 },
+  blob_fish:        { file: "blob_fish.glb",         scale: 0.5, yOffset: 0 },
+  blob_greenblob:   { file: "blob_greenblob.glb",    scale: 0.55, yOffset: 0 },
+  blob_greenspikyblob:    { file: "blob_greenspikyblob.glb",    scale: 0.55, yOffset: 0 },
+  blob_mushnub:     { file: "blob_mushnub.glb",      scale: 0.55, yOffset: 0 },
+  blob_mushnub_evolved:   { file: "blob_mushnub_evolved.glb",   scale: 0.7, yOffset: 0 },
+  blob_ninja:       { file: "blob_ninja.glb",        scale: 0.55, yOffset: 0 },
+  blob_orc:         { file: "blob_orc.glb",          scale: 0.55, yOffset: 0 },
+  blob_pigeon:      { file: "blob_pigeon.glb",       scale: 0.45, yOffset: 0 },
+  blob_pinkblob:    { file: "blob_pinkblob.glb",     scale: 0.55, yOffset: 0 },
+  blob_wizard:      { file: "blob_wizard.glb",       scale: 0.6, yOffset: 0 },
+  blob_yeti:        { file: "blob_yeti.glb",         scale: 0.6, yOffset: 0 },
   // Quaternius Ultimate Monsters — Flying (yOffset lifts actual flyers off ground)
-  flying_armabee:   { file: "flying_armabee.glb",    scale: 1.0, yOffset: 1.0 },
-  flying_armabee_evolved: { file: "flying_armabee_evolved.glb", scale: 1.3, yOffset: 1.2 },
-  flying_demon:     { file: "flying_demon.glb",      scale: 1.2, yOffset: 0.8 },
-  flying_dragon:    { file: "flying_dragon.glb",     scale: 1.6, yOffset: 1.0 },   // boss
-  flying_dragon_evolved:  { file: "flying_dragon_evolved.glb",  scale: 2.2, yOffset: 1.5 },   // epic boss
-  flying_ghost:     { file: "flying_ghost.glb",      scale: 1.2, yOffset: 0.9 },
-  flying_ghost_skull:     { file: "flying_ghost_skull.glb",     scale: 1.3, yOffset: 0.9 },
-  flying_glub:      { file: "flying_glub.glb",       scale: 1.0, yOffset: 0.8 },
-  flying_glub_evolved:    { file: "flying_glub_evolved.glb",    scale: 1.2, yOffset: 0.9 },
-  flying_goleling:  { file: "flying_goleling.glb",   scale: 1.2, yOffset: 0.6 },
-  flying_goleling_evolved:{ file: "flying_goleling_evolved.glb",scale: 1.5, yOffset: 0.8 },
-  flying_hywirl:    { file: "flying_hywirl.glb",     scale: 1.2, yOffset: 0.8 },
-  flying_pigeon:    { file: "flying_pigeon.glb",     scale: 0.9, yOffset: 1.0 },
-  flying_squidle:   { file: "flying_squidle.glb",    scale: 1.3, yOffset: 1.1 },
-  flying_tribal:    { file: "flying_tribal.glb",     scale: 1.3, yOffset: 1.1 },
+  flying_armabee:   { file: "flying_armabee.glb",    scale: 0.55, yOffset: 0.8 },
+  flying_armabee_evolved: { file: "flying_armabee_evolved.glb", scale: 0.7, yOffset: 1.0 },
+  flying_demon:     { file: "flying_demon.glb",      scale: 0.65, yOffset: 0.7 },
+  flying_dragon:    { file: "flying_dragon.glb",     scale: 0.9, yOffset: 0.8 },   // boss
+  flying_dragon_evolved:  { file: "flying_dragon_evolved.glb",  scale: 1.2, yOffset: 1.2 },   // epic boss
+  flying_ghost:     { file: "flying_ghost.glb",      scale: 0.65, yOffset: 0.8 },
+  flying_ghost_skull:     { file: "flying_ghost_skull.glb",     scale: 0.7, yOffset: 0.8 },
+  flying_glub:      { file: "flying_glub.glb",       scale: 0.55, yOffset: 0.7 },
+  flying_glub_evolved:    { file: "flying_glub_evolved.glb",    scale: 0.65, yOffset: 0.8 },
+  flying_goleling:  { file: "flying_goleling.glb",   scale: 0.65, yOffset: 0.5 },
+  flying_goleling_evolved:{ file: "flying_goleling_evolved.glb",scale: 0.8, yOffset: 0.7 },
+  flying_hywirl:    { file: "flying_hywirl.glb",     scale: 0.65, yOffset: 0.7 },
+  flying_pigeon:    { file: "flying_pigeon.glb",     scale: 0.5, yOffset: 0.9 },
+  flying_squidle:   { file: "flying_squidle.glb",    scale: 0.7, yOffset: 1.0 },
+  flying_tribal:    { file: "flying_tribal.glb",     scale: 0.7, yOffset: 1.0 },
 };
 
 /** Kenney Fantasy Town Kit 2.0 — 167 modular building pieces (CC0) */
@@ -710,8 +711,19 @@ export class EnvironmentAssets {
     const extraLift = def.yOffset * s;
     wrapper.position.set(0, groundLift + extraLift, 0);
 
+    // Some source GLBs (Quaternius Easy Enemy Pack: frog/rat/snake/spider/wasp)
+    // were exported with sibling armatures' clips bundled in. Filter to only
+    // clips whose name starts with the matching `{Asset}Armature|` prefix so
+    // a spider doesn't play the frog attack. Assets without that prefix
+    // pattern (Big/Blob/Flying packs use plain "Idle", "Walk", …) pass
+    // through unchanged.
+    const armaturePrefix = `${assetName.toLowerCase()}armature`;
+    const hasArmaturePrefixed = sourceClips.some((c) => /^[A-Za-z]+Armature\|/.test(c.name));
     const clips = new Map<string, THREE.AnimationClip>();
-    for (const clip of sourceClips) clips.set(clip.name, clip);
+    for (const clip of sourceClips) {
+      if (hasArmaturePrefixed && !clip.name.toLowerCase().startsWith(armaturePrefix)) continue;
+      clips.set(clip.name, clip);
+    }
     return { model: wrapper, clips };
   }
 

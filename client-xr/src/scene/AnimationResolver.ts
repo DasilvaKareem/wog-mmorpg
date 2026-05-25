@@ -768,6 +768,27 @@ export function getClipFromMap(
     return direct;
   }
 
+  // Locomotion (idle/walk/run) must NEVER fall back to a combat clip — otherwise
+  // a rig with only an "Attack" clip (e.g. Quaternius Easy Enemy pack) plays
+  // attack on loop while standing still. Walk/run can borrow from each other;
+  // idle returns null (mob holds bind pose), which reads cleanly.
+  const isLocomotion = action === "idle" || action === "walk" || action === "run";
+  if (isLocomotion) {
+    const locomotionFallback: Action[] =
+      action === "walk" ? ["run", "idle"]
+      : action === "run"  ? ["walk", "idle"]
+      : ["walk", "run"];
+    for (const fb of locomotionFallback) {
+      const c = actionMap.get(fb);
+      if (c) {
+        animLogFor(debugName, `${action} → locomotion-fallback(${fb})=${c.name}`);
+        return c;
+      }
+    }
+    animLogFor(debugName, `${action} → no locomotion clip; holding bind pose`);
+    return null;
+  }
+
   const chain = ACTION_FALLBACKS[action] ?? [];
   for (const fb of chain) {
     const c = actionMap.get(fb);
