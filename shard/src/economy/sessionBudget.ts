@@ -40,11 +40,26 @@ export async function grantFreeStarterCredit(wallet: string): Promise<void> {
   }
 }
 
-// Called when an on-chain USDC deposit is detected on the agent's wallet.
+// Called when an on-chain USDC deposit is detected on an agent's wallet.
 // Skips the Circle PENDING_SET (deposit is already settled on-chain).
+//
+// The receiving address `wallet` is normally the agent's custodial wallet —
+// but the compute-budget ledger and `/nanopay/status` endpoint are keyed on
+// the OWNER wallet (the human's signed-in wallet). Resolve owner from the
+// custodial address before crediting so the wallet panel actually reflects
+// the top-up.
 export async function creditOnChainDeposit(wallet: string, budgetUsdc: number): Promise<void> {
   const redis = getRedis();
-  const key = wallet.toLowerCase();
+  let key = wallet.toLowerCase();
+  try {
+    const { isPostgresConfigured } = await import("../db/postgres.js");
+    if (isPostgresConfigured()) {
+      const { getOwnerByCustodialWallet } = await import("../character/characterProjectionStore.js");
+      const owner = await getOwnerByCustodialWallet(key);
+      if (owner) key = owner.toLowerCase();
+    }
+  } catch { /* no owner mapping — credit the receiving address directly */ }
+
   const remaining = await getRemainingBalance(redis, key);
   await redis.set(budgetKey(key), (remaining + budgetUsdc).toFixed(8));
   await redis.set(spentKey(key), "0");

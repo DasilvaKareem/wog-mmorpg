@@ -354,6 +354,17 @@ function resolveTargetPreference(
     return tagged ? { edict, targetOverride: tagged } : null;
   }
 
+  // Friendly-target preferences for heal / buff actions.
+  if (pref === "self") {
+    return { edict, targetOverride: entity };
+  }
+
+  if (pref === "ally_lowest_hp") {
+    const ally = resolveSubject("ally_lowest_hp", entity, zone, null);
+    // Solo player → fall back to self so heal-ally gambits still trigger.
+    return { edict, targetOverride: ally ?? entity };
+  }
+
   let best: Entity | null = null;
   let bestScore = -Infinity;
   const RANGE = 100;

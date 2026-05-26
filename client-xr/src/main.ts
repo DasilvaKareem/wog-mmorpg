@@ -2395,6 +2395,10 @@ async function pollNearbyZones() {
     // Inventory poll (only when bag is open)
     if (bagPanel.isVisible()) void pollInventory();
     if (skillsPanel.isVisible()) kickSkillsPollForActiveTab(false);
+    // Always poll learned techniques in background so the "skill learned" banner
+    // fires (and the panel stays fresh) even when the Skills panel is closed.
+    // Self-throttled to LEARNED_TECH_POLL_INTERVAL.
+    void pollLearnedTechniques();
     // Inbox always polls in background so the unread badge stays fresh.
     void pollInbox();
     // Friends poll in background for request badges and online status.

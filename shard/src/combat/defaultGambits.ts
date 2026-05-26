@@ -63,6 +63,31 @@ export function getDefaultGambits(classId: string | undefined): Edict[] {
     });
   }
 
+  // Heal rules — clerics keep themselves and party alive before attacking.
+  // Inserted BEFORE the attack rules so a low-HP ally outranks "default attack".
+  if (isHealer) {
+    edicts.splice(1, 0,
+      {
+        id: id("heal-self-low"),
+        name: "Heal self when HP low",
+        enabled: true,
+        conditions: [
+          { subject: "self", field: "hp_pct", operator: "lt", value: 60 },
+        ],
+        action: { type: "use_technique", techniqueId: "cleric_holy_light", targetPreference: "self" },
+      },
+      {
+        id: id("heal-ally-low"),
+        name: "Heal ally when HP low",
+        enabled: true,
+        conditions: [
+          { subject: "ally_lowest_hp", field: "hp_pct", operator: "lt", value: 60 },
+        ],
+        action: { type: "use_technique", techniqueId: "cleric_holy_light", targetPreference: "ally_lowest_hp" },
+      },
+    );
+  }
+
   edicts.push({
     id: id("default-attack"),
     name: "Use best technique on nearest foe",

@@ -40,7 +40,7 @@ export type EdictActionType =
   | "flee"              // disengage, move away
   | "skip";             // do nothing this tick
 
-export type EdictTargetPreference = "nearest" | "weakest" | "strongest" | "boss" | "leader_target" | "party_tagged";
+export type EdictTargetPreference = "nearest" | "weakest" | "strongest" | "boss" | "leader_target" | "party_tagged" | "self" | "ally_lowest_hp";
 
 export interface EdictAction {
   type: EdictActionType;
