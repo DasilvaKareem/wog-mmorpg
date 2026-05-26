@@ -1,6 +1,6 @@
 import { playSoundEffect } from "../sfx.js";
 
-export type RequestKind = "duel" | "party" | "trade";
+export type RequestKind = "duel" | "party" | "trade" | "friend";
 
 export interface RequestPopupItem {
   /** Unique id (challengeId / inviteId / tradeId-as-string). Used for dedupe. */
@@ -21,9 +21,10 @@ export interface RequestPopupItem {
 }
 
 const KIND_THEME: Record<RequestKind, { color: string; icon: string }> = {
-  duel:  { color: "#ff4466", icon: "\u2694" },          // crossed swords
-  party: { color: "#b48cff", icon: "\u{1F465}" },        // busts in silhouette
-  trade: { color: "#5dff9a", icon: "\u{1F381}" },        // wrapped gift
+  duel:   { color: "#ff4466", icon: "\u2694" },          // crossed swords
+  party:  { color: "#b48cff", icon: "\u{1F465}" },        // busts in silhouette
+  trade:  { color: "#5dff9a", icon: "\u{1F381}" },        // wrapped gift
+  friend: { color: "#7fd6be", icon: "\u{1F91D}" },        // handshake
 };
 
 const NOTIFICATION_SFX_DEBOUNCE_MS = 500;

@@ -2985,7 +2985,27 @@ Truth contract:
     const actualZoneId = targetEntity.region ?? zoneId;
     const crossZone = actualZoneId !== zoneId;
 
+    // Budget gate — refuse silently-failing goto if compute budget exhausted
+    const gotoBalance = await getSessionBalance(authWallet);
+    if (gotoBalance.remaining <= 0) {
+      return reply.code(402).send({
+        error: "agent has no compute budget — top up USDC in the Wallet panel to resume",
+        budgetExhausted: true,
+      });
+    }
+
     const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
+
+    // Self-heal: re-enable + restart the agent loop if it's paused or dead.
+    // Without this, setGotoTarget below silently no-ops on a stopped runner
+    // and the client sees "heading to quest giver" but the agent never moves.
+    if (!existingConfig.enabled) {
+      await patchAgentConfig(authWallet, { enabled: true, sessionStartedAt: Date.now() });
+      existingConfig.enabled = true;
+    }
+    if (!agentManager.isRunning(authWallet)) {
+      await agentManager.ensureRunning(authWallet);
+    }
 
     if (existingConfig.focus === "user") {
       return reply.code(409).send({

@@ -19,7 +19,7 @@ import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteSigner, biteWallet } from "./biteChain.js";
-import { bumpServerNonceFloor, isLocalServerNonceMode, isTransientRpcSendError, queueAccountTransaction, queueBiteTransaction, queueServerWalletTransaction, reserveServerNonce, resetServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
+import { bumpCustodialNonceFloor, bumpServerNonceFloor, isLocalServerNonceMode, isTransientRpcSendError, queueAccountTransaction, queueBiteTransaction, queueServerWalletTransaction, reserveCustodialNonce, reserveServerNonce, resetServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
 import { ethers } from "ethers";
 import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
@@ -392,12 +392,13 @@ async function sendTransactionWithManagedGas(
   account: Account
 ): Promise<Awaited<ReturnType<typeof sendTransaction>>> {
   let lastError: unknown;
+  const isServer = isServerSignerAccount(account);
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const managedNonce = isServerSignerAccount(account)
+    const managedNonce = isServer
       ? await reserveServerNonce()
-      : null;
+      : await reserveCustodialNonce(account.address);
     try {
-      if (!isServerSignerAccount(account)) {
+      if (!isServer) {
         await ensureAccountHasGasBalance(account.address);
       }
       const managedFees = await resolveManagedFeeOverrides(skaleProvider);
@@ -418,10 +419,18 @@ async function sendTransactionWithManagedGas(
       if (managedNonce != null) {
         err.attemptedNonce = managedNonce;
         if (String(err?.message ?? err ?? "").toLowerCase().includes("nonce")) {
-          if (isLocalServerNonceMode()) {
-            resetServerNonce();
+          if (isServer) {
+            if (isLocalServerNonceMode()) {
+              resetServerNonce();
+            } else {
+              bumpServerNonceFloor(managedNonce + 1);
+            }
           } else {
-            bumpServerNonceFloor(managedNonce + 1);
+            // Custodial wallet — bump past the failed nonce. SKALE's chain
+            // RPC keeps returning the same pending count even when the
+            // mempool has a stuck tx, so resetting just re-reads the same
+            // bad nonce; incrementing skips past it.
+            bumpCustodialNonceFloor(account.address, managedNonce + 1);
           }
         }
       }

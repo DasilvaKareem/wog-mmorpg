@@ -15,6 +15,7 @@ const LOCAL_AUTOMINE_CHAIN_ID = "31337";
 
 const signerTxChains = new Map<string, Promise<void>>();
 let nextServerNonce: number | null = null;
+const nextCustodialNonce = new Map<string, number>();
 
 function normalizeQueueKey(key: string): string {
   return key.trim().toLowerCase();
@@ -55,6 +56,38 @@ export function bumpServerNonceFloor(nonce: number): void {
   if (!Number.isFinite(nonce) || nonce < 0) return;
   if (nextServerNonce == null || nextServerNonce < nonce) {
     nextServerNonce = nonce;
+  }
+}
+
+/**
+ * Per-wallet pinned-nonce tracking for custodial wallets (treasury, agent
+ * wallets, etc.). Without this, thirdweb caches a stale nonce internally and
+ * gets stuck against SKALE's "Pending transaction with same nonce already
+ * exists" rejection — which kills new-player welcome bonuses, auction payouts,
+ * merchant gold flows, and every other custodial transfer.
+ */
+export async function reserveCustodialNonce(address: string): Promise<number> {
+  const key = address.toLowerCase();
+  const chainNonce = await biteProvider.getTransactionCount(
+    address,
+    isLocalServerNonceMode() ? "latest" : "pending"
+  );
+  const cached = nextCustodialNonce.get(key);
+  const next = cached == null || cached < chainNonce ? chainNonce : cached;
+  nextCustodialNonce.set(key, next + 1);
+  return next;
+}
+
+export function resetCustodialNonce(address: string): void {
+  nextCustodialNonce.delete(address.toLowerCase());
+}
+
+export function bumpCustodialNonceFloor(address: string, nonce: number): void {
+  if (!Number.isFinite(nonce) || nonce < 0) return;
+  const key = address.toLowerCase();
+  const cached = nextCustodialNonce.get(key);
+  if (cached == null || cached < nonce) {
+    nextCustodialNonce.set(key, nonce);
   }
 }
 
@@ -179,6 +212,18 @@ export async function queueAccountTransaction<T>(
             } else {
               resetServerNonce();
             }
+          }
+        } else if (isNonceError(err)) {
+          // Custodial wallet nonce got out of sync. On SKALE the most common
+          // failure is "Pending transaction with same nonce already exists" —
+          // chain RPC still reports the old pending count, so a plain reset
+          // re-reads the same stuck nonce forever. Bump past the attempted
+          // nonce so the next try uses N+1 (mirrors the server-signer path).
+          const attemptedNonce = Number((err as { attemptedNonce?: unknown })?.attemptedNonce);
+          if (Number.isFinite(attemptedNonce) && attemptedNonce >= 0) {
+            bumpCustodialNonceFloor(accountAddress, attemptedNonce + 1);
+          } else {
+            resetCustodialNonce(accountAddress);
           }
         }
         const retryable = isNonceError(err) || isTransientRpcSendError(err);

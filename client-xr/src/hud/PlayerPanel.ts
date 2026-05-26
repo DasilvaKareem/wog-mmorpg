@@ -194,6 +194,7 @@ export class PlayerPanel {
     this.friendRequests = [];
     this.friendsStatus = "";
     this.callbacks.onFriendRequestCountChange?.(0);
+    this.updateFriendsTabBadge();
     this.render();
   }
 
@@ -216,7 +217,17 @@ export class PlayerPanel {
       this.friendRequests = requestsData.requests ?? [];
       this.callbacks.onFriendRequestCountChange?.(this.friendRequests.length);
     }
+    this.updateFriendsTabBadge();
     this.render();
+  }
+
+  private updateFriendsTabBadge() {
+    const btn = this.tabBar.querySelector<HTMLButtonElement>('.pp-tab[data-tab="friends"]');
+    if (!btn) return;
+    const count = this.friendRequests.length;
+    btn.innerHTML = count > 0
+      ? `Friends <span class="pp-tab-badge">${count}</span>`
+      : "Friends";
   }
 
   private render() {
@@ -544,6 +555,20 @@ export class PlayerPanel {
       }
       .pp-tab:hover { color: #aab; }
       .pp-tab.active { color: #4f8; border-bottom-color: #4f8; }
+
+      .pp-tab-badge {
+        display: inline-block;
+        min-width: 16px;
+        padding: 0 5px;
+        margin-left: 4px;
+        background: #ff4466;
+        color: #fff;
+        font: bold 10px monospace;
+        line-height: 14px;
+        border-radius: 8px;
+        text-align: center;
+        vertical-align: 1px;
+      }
 
       .pp-sort {
         display: flex;

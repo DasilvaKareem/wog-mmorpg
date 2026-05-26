@@ -9,7 +9,10 @@ export interface AgentStats {
 
 interface WalletPanelOptions {
   getToken: () => Promise<string | null>;
+  /** Owner wallet — used for auth-bound API calls (status/breakdown). */
   getWallet: () => string | null;
+  /** Optional custodial deposit address — shown in the copy button. Falls back to getWallet(). */
+  getReceiveAddress?: () => string | null;
   getStats?: () => AgentStats | null;
 }
 
@@ -448,6 +451,9 @@ export class WalletPanel {
   private render() {
     const s      = this.status;
     const wallet = this.options.getWallet();
+    // Copy-button shows the custodial deposit address (in the watcher's set).
+    // Fall back to the owner wallet if not configured.
+    const recvAddr = this.options.getReceiveAddress?.() ?? wallet;
     if (!s) {
       this.body.innerHTML = `<div class="wp-loading">Loading…</div>`;
       return;
@@ -486,10 +492,10 @@ export class WalletPanel {
       <div class="wp-section">
         <div class="wp-section-label">Add Funds</div>
         <div class="wp-receive-row">
-          <span class="wp-receive-addr">${wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : "—"}</span>
-          <button class="wp-copy-btn" data-addr="${wallet ?? ""}" aria-label="Copy wallet address">Copy</button>
+          <span class="wp-receive-addr">${recvAddr ? `${recvAddr.slice(0, 6)}…${recvAddr.slice(-4)}` : "—"}</span>
+          <button class="wp-copy-btn" data-addr="${recvAddr ?? ""}" aria-label="Copy wallet address">Copy</button>
         </div>
-        <div class="wp-receive-hint">Send USDC on Base to this address from any wallet</div>
+        <div class="wp-receive-hint">Send USDC to this address on <b>Base mainnet</b> or <b>Arc testnet</b> from any wallet</div>
       </div>
 
       <div class="wp-section">

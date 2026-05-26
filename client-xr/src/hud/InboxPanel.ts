@@ -35,6 +35,7 @@ const TYPE_ICONS: Record<string, string> = {
   "duel-request": "\u2694",
   "duel-result": "\u{1F4DC}",
   "party-invite": "\u{1F465}",
+  "friend-request": "\u{1F91D}",
   broadcast: "\u{1F4E2}",
 };
 
@@ -66,6 +67,7 @@ const TYPE_COLORS: Record<string, string> = {
   "duel-request": "#ff4466",
   "duel-result": "#ffc850",
   "party-invite": "#b48cff",
+  "friend-request": "#7fd6be",
   broadcast: "#ff88aa",
 };
 
@@ -111,6 +113,14 @@ export interface InboxPanelCallbacks {
   onAcceptPartyInvite?: (inviteId: string) => Promise<{ ok: boolean; error?: string }>;
   /** Decline a party invite. */
   onDeclinePartyInvite?: (inviteId: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * A `friend-request` message just arrived. First-sight only.
+   */
+  onFriendRequestArrived?: (req: { requestId: string; fromName: string; fromWallet: string }) => void;
+  /** Accept a friend request. */
+  onAcceptFriendRequest?: (requestId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Decline a friend request. */
+  onDeclineFriendRequest?: (requestId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const COUNTDOWN_TICK_MS = 30_000;
@@ -138,10 +148,14 @@ export class InboxPanel {
   private seenPartyInviteIds = new Set<string>();
   /** First-sight tracking for trade-offer notifications. */
   private seenTradeOfferIds = new Set<string>();
+  /** First-sight tracking for friend-request notifications. */
+  private seenFriendRequestIds = new Set<string>();
   /** challengeIds whose Accept/Decline buttons are pending or settled. */
   private duelActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
   /** inviteIds whose Join/Decline buttons are pending or settled. */
   private partyInviteActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
+  /** requestIds whose Accept/Decline buttons are pending or settled. */
+  private friendRequestActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
   /** Local timer that re-renders countdown chips while the panel is open. */
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -200,6 +214,15 @@ export class InboxPanel {
         void this.handlePartyInviteAction(action ?? "", inviteId);
         return;
       }
+
+      const friendBtn = (e.target as HTMLElement).closest("[data-friend-action]") as HTMLElement | null;
+      if (friendBtn) {
+        const action = friendBtn.dataset.friendAction;
+        const requestId = friendBtn.dataset.requestId;
+        if (!requestId) return;
+        void this.handleFriendRequestAction(action ?? "", requestId);
+        return;
+      }
     });
     this.container.appendChild(this.listEl);
 
@@ -240,6 +263,14 @@ export class InboxPanel {
     this.render();
   }
 
+  /** Mark a friend request as actioned from outside (e.g. popup). */
+  markFriendRequestActioned(requestId: string, state: "accepted" | "declined" | "failed") {
+    if (!requestId) return;
+    this.friendRequestActionState.set(requestId, state);
+    if (state === "failed") this.friendRequestActionState.delete(requestId);
+    this.render();
+  }
+
   setCustodialWallet(wallet: string | null) {
     this.custodialWallet = wallet ? wallet.toLowerCase() : null;
     this.messages = [];
@@ -274,12 +305,14 @@ export class InboxPanel {
           && this.seenMatchFoundIds.size === 0
           && this.seenDuelRequestIds.size === 0
           && this.seenPartyInviteIds.size === 0
-          && this.seenTradeOfferIds.size === 0;
+          && this.seenTradeOfferIds.size === 0
+          && this.seenFriendRequestIds.size === 0;
         const freshTradeResults: InboxMessage[] = [];
         const freshMatchFound: InboxMessage[] = [];
         const freshDuelRequests: InboxMessage[] = [];
         const freshPartyInvites: InboxMessage[] = [];
         const freshTradeOffers: InboxMessage[] = [];
+        const freshFriendRequests: InboxMessage[] = [];
         for (const m of msgs) {
           if (m.type === "trade-result") {
             if (this.seenTradeResultIds.has(m.id)) continue;
@@ -314,6 +347,13 @@ export class InboxPanel {
             const expired = typeof data.expiresAtMs === "number" && data.expiresAtMs < Date.now();
             if (actioned || expired) continue;
             if (!isFirstFetch) freshTradeOffers.push(m);
+          } else if (m.type === "friend-request") {
+            if (this.seenFriendRequestIds.has(m.id)) continue;
+            this.seenFriendRequestIds.add(m.id);
+            const data = (m.data ?? {}) as { requestId?: string };
+            if (!data.requestId) continue;
+            if (this.friendRequestActionState.get(data.requestId)) continue;
+            if (!isFirstFetch) freshFriendRequests.push(m);
           }
         }
 
@@ -370,6 +410,15 @@ export class InboxPanel {
           const data = m.data as TradeOfferPayload | undefined;
           if (!data) continue;
           this.callbacks.onTradeOfferArrived?.(data);
+        }
+        for (const m of freshFriendRequests) {
+          const data = (m.data ?? {}) as { requestId?: string; fromName?: string };
+          if (!data.requestId) continue;
+          this.callbacks.onFriendRequestArrived?.({
+            requestId: data.requestId,
+            fromName: data.fromName || m.fromName || "A player",
+            fromWallet: m.from || "",
+          });
         }
         return;
       } catch {
@@ -527,6 +576,8 @@ export class InboxPanel {
           html += this.renderDuelRequestControls(m);
         } else if (m.type === "party-invite") {
           html += this.renderPartyInviteControls(m);
+        } else if (m.type === "friend-request") {
+          html += this.renderFriendRequestControls(m);
         }
         html += `</div></div>`;
       }
@@ -560,9 +611,11 @@ export class InboxPanel {
         this.serverUnread = 0;
         this.seenTradeResultIds.clear();
         this.seenMatchFoundIds.clear();
+        this.seenFriendRequestIds.clear();
         this.tradeActionState.clear();
         this.duelActionState.clear();
         this.partyInviteActionState.clear();
+        this.friendRequestActionState.clear();
         this.render();
         this.onUnreadChange(0);
         return;
@@ -735,6 +788,47 @@ export class InboxPanel {
 
     if (this.partyInviteActionState.get(inviteId) === "failed") {
       this.partyInviteActionState.delete(inviteId);
+    }
+    this.render();
+  }
+
+  private renderFriendRequestControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { requestId?: string };
+    if (!data.requestId) return "";
+    const state = this.friendRequestActionState.get(data.requestId);
+
+    if (state === "accepted") return `<div class="ibx-trade-result ibx-trade-success">Friend added.</div>`;
+    if (state === "declined") return `<div class="ibx-trade-result ibx-trade-muted">Request declined.</div>`;
+
+    const disabled = state === "pending";
+    const busy = state === "pending" ? ` <span class="ibx-trade-busy">working…</span>` : "";
+    return `<div class="ibx-trade-actions" style="border-left-color:rgba(127,214,190,0.5)">
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-friend-action="accept" data-request-id="${esc(data.requestId)}"${disabled ? " disabled" : ""}>Accept</button>
+        <button class="ibx-trade-btn ibx-trade-decline" data-friend-action="decline" data-request-id="${esc(data.requestId)}"${disabled ? " disabled" : ""}>Decline</button>${busy}
+      </div>
+    </div>`;
+  }
+
+  private async handleFriendRequestAction(action: string, requestId: string) {
+    if (this.friendRequestActionState.get(requestId) === "pending") return;
+    this.friendRequestActionState.set(requestId, "pending");
+    this.render();
+
+    try {
+      if (action === "accept") {
+        const result = await this.callbacks.onAcceptFriendRequest?.(requestId);
+        this.friendRequestActionState.set(requestId, result?.ok ? "accepted" : "failed");
+      } else if (action === "decline") {
+        const result = await this.callbacks.onDeclineFriendRequest?.(requestId);
+        this.friendRequestActionState.set(requestId, result?.ok ? "declined" : "failed");
+      }
+    } catch {
+      this.friendRequestActionState.set(requestId, "failed");
+    }
+
+    if (this.friendRequestActionState.get(requestId) === "failed") {
+      this.friendRequestActionState.delete(requestId);
     }
     this.render();
   }

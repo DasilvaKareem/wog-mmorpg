@@ -54,7 +54,7 @@ import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
 import { WalletPanel } from "./hud/WalletPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, fetchPartyStatus, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, acceptFriendRequest, declineFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, fetchPartyStatus, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
 import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress, xrAuth } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
@@ -1325,7 +1325,11 @@ const FARM_POLL_INTERVAL = 20_000;
 // ── Wallet panel ──────────────────────────────────────────────────
 const walletPanel = new WalletPanel({
   getToken: () => ownWalletAddress ? getAuthToken(ownWalletAddress) : Promise.resolve(null),
+  // Owner wallet — used for auth-bound API calls (/nanopay/status etc).
   getWallet: () => ownWalletAddress,
+  // Deposit / copy-button address — the agent's custodial wallet is what
+  // the USDC deposit watcher actually credits.
+  getReceiveAddress: () => ownCustodialWallet ?? ownWalletAddress,
   getStats: () => {
     const ent = ownEntityId ? entities.getEntity(ownEntityId) : null;
     if (!ent) return null;
@@ -1435,6 +1439,39 @@ async function performDeclinePartyInvite(inviteId: string): Promise<{ ok: boolea
     return { ok: false, error: result.error };
   }
   agentChat.addSystemMessage("Party invite declined.", "info");
+  return { ok: true };
+}
+
+async function performAcceptFriendRequest(requestId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) {
+    agentChat.addSystemMessage("Deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await acceptFriendRequest(token, ownCustodialWallet, requestId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Friend accept failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Friend added.", "success");
+  lastFriendsPollTime = 0;
+  void pollFriends();
+  return { ok: true };
+}
+
+async function performDeclineFriendRequest(requestId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) return { ok: false, error: "Deploy your agent first." };
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await declineFriendRequest(token, ownCustodialWallet, requestId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Friend request declined.", "info");
+  lastFriendsPollTime = 0;
+  void pollFriends();
   return { ok: true };
 }
 
@@ -1618,6 +1655,28 @@ const inboxPanel = new InboxPanel({
   onDeclineDuel: performDeclineDuel,
   onAcceptPartyInvite: performAcceptPartyInvite,
   onDeclinePartyInvite: performDeclinePartyInvite,
+  onFriendRequestArrived: (req) => {
+    requestPopup?.enqueue({
+      id: req.requestId,
+      kind: "friend",
+      title: "FRIEND REQUEST",
+      subtitle: `From ${req.fromName}`,
+      rows: [],
+      acceptLabel: "Accept",
+      onAccept: async () => {
+        const r = await performAcceptFriendRequest(req.requestId);
+        inboxPanel.markFriendRequestActioned(req.requestId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclineFriendRequest(req.requestId);
+        inboxPanel.markFriendRequestActioned(req.requestId, r.ok ? "declined" : "failed");
+        return r;
+      },
+    });
+  },
+  onAcceptFriendRequest: performAcceptFriendRequest,
+  onDeclineFriendRequest: performDeclineFriendRequest,
 });
 
 requestPopup = new RequestPopup();
