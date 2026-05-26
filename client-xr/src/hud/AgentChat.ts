@@ -2,6 +2,7 @@ import type { ZoneEvent } from "../types.js";
 import { getAuthToken } from "../auth.js";
 import { CANDIDATE_BASES, toUrl } from "../api.js";
 import { playSoundEffect } from "../sfx.js";
+import { trackXRAgentTabSwitched, trackXRAgentInstructionSent } from "../analytics.js";
 
 declare global {
   interface Window {
@@ -21,6 +22,38 @@ interface ChatEntry {
   time: number;
   color: string;
 }
+
+const FOCUS_SUGGESTIONS = [
+  "combat",
+  "questing",
+  "gathering",
+  "crafting",
+  "alchemy",
+  "cooking",
+  "enchanting",
+  "shopping",
+  "trading",
+  "traveling",
+  "party",
+  "idle",
+  "user",
+];
+
+const FOCUS_COLORS: Record<string, string> = {
+  questing: "#5dadec",
+  combat: "#f25454",
+  gathering: "#54f28b",
+  traveling: "#e0af68",
+  shopping: "#ffcc00",
+  crafting: "#b48efa",
+  alchemy: "#54dbb8",
+  cooking: "#f2a854",
+  enchanting: "#c792ea",
+  trading: "#ffd479",
+  party: "#7dd3a7",
+  idle: "#8b9abc",
+  user: "#f5d063",
+};
 
 const SLASH_COMMANDS = [
   { cmd: "/help",     desc: "List all commands" },
@@ -105,7 +138,7 @@ const EVENT_COLORS: Record<string, string> = {
  * Unified chat console: zone events + agent command input + slash commands.
  * Press Enter or T to focus, type a command, Enter to send.
  */
-type ActiveTab = "chat" | "ai";
+type ActiveTab = "chat" | "agent" | "ai";
 
 interface AgentStatus {
   currentActivity: string | null;
@@ -133,9 +166,11 @@ interface AgentStatus {
     nodeType?: string | null;
   }>;
   recentActivities: string[];
+  pendingMessages?: string[];
   running: boolean;
   entity?: { name: string; level: number; hp: number | null; maxHp: number | null } | null;
   zoneId?: string | null;
+  config?: { focus?: string; strategy?: string } | null;
 }
 
 function humanizeOrder(order: NonNullable<AgentStatus["activeOrder"]>): string {
@@ -163,18 +198,23 @@ export class AgentChat {
   private aiPanel: HTMLDivElement;
   private input: HTMLInputElement;
   private micBtn: HTMLButtonElement;
+  private sendBtn: HTMLButtonElement;
   private autocompleteEl: HTMLDivElement;
+  private focusChipsEl: HTMLDivElement;
   private messages: ChatEntry[] = [];
   private seenEventIds = new Set<string>();
   private expanded = false;
   private sending = false;
   private walletAddress: string | null = null;
   private entityId: string | null = null;
+  private onAgentReply: ((entityId: string, text: string) => void) | null = null;
   private suggestions: typeof SLASH_COMMANDS = [];
   private selectedSuggestion = 0;
   private activeTab: ActiveTab = "chat";
   private aiStatus: AgentStatus | null = null;
   private aiPollTimer: ReturnType<typeof setInterval> | null = null;
+  private bgPollTimer: ReturnType<typeof setInterval> | null = null;
+  private vvListener: (() => void) | null = null;
 
   // PTT / Speech Recognition
   private recognition: any = null;
@@ -198,6 +238,9 @@ export class AgentChat {
     this.autocompleteEl.className = "agent-chat-autocomplete";
     this.autocompleteEl.hidden = true;
 
+    this.focusChipsEl = document.createElement("div");
+    this.focusChipsEl.className = "agent-chat-focus-chips";
+
     const inputWrap = document.createElement("div");
     inputWrap.className = "agent-chat-input-wrap";
 
@@ -208,6 +251,12 @@ export class AgentChat {
     this.input.spellcheck = false;
     this.input.autocomplete = "off";
 
+    this.sendBtn = document.createElement("button");
+    this.sendBtn.type = "button";
+    this.sendBtn.className = "agent-chat-send";
+    this.sendBtn.innerHTML = "&#x2191;"; // ↑
+    this.sendBtn.title = "Send message";
+
     this.micBtn = document.createElement("button");
     this.micBtn.type = "button";
     this.micBtn.className = "agent-chat-mic";
@@ -215,6 +264,7 @@ export class AgentChat {
     this.micBtn.title = "Push to Talk (Hold V)";
 
     inputWrap.appendChild(this.input);
+    inputWrap.appendChild(this.sendBtn);
     inputWrap.appendChild(this.micBtn);
 
     this.renderTabs();
@@ -223,13 +273,57 @@ export class AgentChat {
     this.root.appendChild(this.log);
     this.root.appendChild(this.aiPanel);
     this.root.appendChild(this.autocompleteEl);
+    this.root.appendChild(this.focusChipsEl);
     this.root.appendChild(inputWrap);
     document.body.appendChild(this.root);
 
     this.initSpeechRecognition();
     this.injectStyles();
     this.bindEvents();
+    this.renderFocusChips();
     this.collapse();
+  }
+
+  private renderFocusChips() {
+    const activeFocus = this.aiStatus?.config?.focus ?? "";
+    this.focusChipsEl.innerHTML = "";
+    for (const focus of FOCUS_SUGGESTIONS) {
+      const color = FOCUS_COLORS[focus] ?? "#8b9abc";
+      const active = activeFocus === focus;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "agent-chat-focus-chip" + (active ? " active" : "");
+      btn.textContent = focus;
+      btn.title = focus === "user"
+        ? "Sovereign mode — you drive, agent stays idle"
+        : `Set focus to ${focus}`;
+      btn.style.setProperty("--chip-color", color);
+      btn.addEventListener("click", () => {
+        void this.handleFocusChipClick(focus);
+      });
+      this.focusChipsEl.appendChild(btn);
+    }
+  }
+
+  private async handleFocusChipClick(focus: string) {
+    if (this.sending) return;
+    if (!this.walletAddress) {
+      this.push({ role: "system", text: "Not signed in.", time: Date.now(), color: "#ff8866" });
+      return;
+    }
+    const token = await getAuthToken(this.walletAddress);
+    if (!token) {
+      this.push({ role: "system", text: "Auth failed — try signing in again.", time: Date.now(), color: "#ff8866" });
+      return;
+    }
+    const message = `/focus ${focus}`;
+    trackXRAgentInstructionSent({ isSlashCommand: true, command: "/focus" });
+    this.push({ role: "user", text: message, time: Date.now(), color: "#efc97f" });
+    // Optimistic highlight — refreshAiStatus will reconfirm on next poll
+    if (this.aiStatus?.config) this.aiStatus.config.focus = focus;
+    this.renderFocusChips();
+    await this.sendChat(token, message);
+    void this.refreshAiStatus();
   }
 
   // ── PTT / Speech Recognition ────────────────────────────────────
@@ -297,6 +391,7 @@ export class AgentChat {
 
   setTab(tab: ActiveTab) {
     if (this.activeTab === tab) return;
+    trackXRAgentTabSwitched(tab);
     this.activeTab = tab;
     this.renderTabs();
     const isAi = tab === "ai";
@@ -309,6 +404,7 @@ export class AgentChat {
     } else {
       this.input.placeholder = "Send a command to your agent...";
       this.stopAiPolling();
+      this.renderMessages();
     }
     if (this.expanded) this.input.focus();
   }
@@ -321,7 +417,7 @@ export class AgentChat {
     drag.title = "Drag chat panel";
     drag.textContent = ":::";
     this.tabBar.appendChild(drag);
-    for (const [id, label] of [["chat", "Chat"], ["ai", "Bot"]] as const) {
+    for (const [id, label] of [["chat", "Chat"], ["agent", "Agent"], ["ai", "Bot"]] as const) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "agent-chat-tab" + (this.activeTab === id ? " active" : "");
@@ -346,6 +442,52 @@ export class AgentChat {
 
   private stopAiPolling() {
     if (this.aiPollTimer) { clearInterval(this.aiPollTimer); this.aiPollTimer = null; }
+  }
+
+  private startBgPoll() {
+    if (this.bgPollTimer) return;
+    this.bgPollTimer = setInterval(() => {
+      void this.checkPendingMessages();
+      // Keep focus-chip active state fresh even when not on the AI tab,
+      // so the chip row reflects external focus changes (slash commands
+      // typed in chat, supervisor decisions, party transitions, etc.).
+      if (this.activeTab !== "ai") void this.refreshAiStatus();
+    }, 5000);
+  }
+
+  private stopBgPoll() {
+    if (this.bgPollTimer) { clearInterval(this.bgPollTimer); this.bgPollTimer = null; }
+  }
+
+  private async checkPendingMessages() {
+    if (!this.walletAddress) return;
+    const token = await getAuthToken(this.walletAddress);
+    if (!token) return;
+    for (const base of CANDIDATE_BASES) {
+      try {
+        const res = await fetch(toUrl(base, `/agent/status/${this.walletAddress}`), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const msgs: string[] = Array.isArray(data.pendingMessages) ? data.pendingMessages : [];
+        if (msgs.length > 0) {
+          for (const text of msgs) {
+            this.push({ role: "agent", text, time: Date.now(), color: "#7fd6be" });
+          }
+          this.show();
+          if (this.expanded) this.setTab("agent");
+        }
+        // Also update AI panel data if it's visible
+        if (this.activeTab === "ai" && this.expanded) {
+          this.aiStatus = data;
+          this.renderAiPanel();
+        }
+        return;
+      } catch {
+        // try next base
+      }
+    }
   }
 
   private aiError: string | null = null;
@@ -376,6 +518,7 @@ export class AgentChat {
         this.aiStatus = await res.json();
         this.aiError = null;
         this.renderAiPanel();
+        this.renderFocusChips();
         return;
       } catch (err) {
         lastErr = err instanceof Error ? err.message : String(err);
@@ -456,10 +599,24 @@ export class AgentChat {
 
   setWallet(address: string | null) {
     this.walletAddress = address;
+    if (address) {
+      this.startBgPoll();
+    } else {
+      this.stopBgPoll();
+    }
   }
 
   setEntityId(id: string | null) {
     this.entityId = id;
+  }
+
+  /**
+   * Register a callback invoked when the agent replies via /agent/chat.
+   * main.ts wires this to EntityManager.showLocalSpeechBubble so the reply
+   * renders as a private speech bubble above the player's own character.
+   */
+  setOnAgentReply(cb: ((entityId: string, text: string) => void) | null) {
+    this.onAgentReply = cb;
   }
 
   /** Add zone events to the feed */
@@ -501,12 +658,33 @@ export class AgentChat {
     this.expanded = true;
     this.root.classList.add("expanded");
     this.clampExpandedIntoViewport();
+    this.attachViewportListener();
     this.input.focus();
     this.scrollToBottom();
     if (this.activeTab === "ai") {
       this.startAiPolling();
       void this.refreshAiStatus();
     }
+  }
+
+  private attachViewportListener() {
+    if (!window.visualViewport || this.vvListener) return;
+    this.vvListener = () => {
+      const vv = window.visualViewport!;
+      const kbHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      this.root.style.bottom = (kbHeight > 50 ? kbHeight + 8 : 12) + "px";
+    };
+    window.visualViewport.addEventListener("resize", this.vvListener);
+    window.visualViewport.addEventListener("scroll", this.vvListener);
+  }
+
+  private detachViewportListener() {
+    if (window.visualViewport && this.vvListener) {
+      window.visualViewport.removeEventListener("resize", this.vvListener);
+      window.visualViewport.removeEventListener("scroll", this.vvListener);
+      this.vvListener = null;
+    }
+    this.root.style.bottom = "";
   }
 
   private clampExpandedIntoViewport() {
@@ -555,6 +733,7 @@ export class AgentChat {
     this.expanded = false;
     this.root.classList.remove("expanded");
     this.root.classList.add("chat-hidden");
+    this.detachViewportListener();
     this.input.blur();
     this.input.value = "";
     this.hideAutocomplete();
@@ -597,21 +776,35 @@ export class AgentChat {
   }
 
   private renderMessages() {
-    const visible = this.expanded
-      ? this.messages
-      : this.messages.slice(-COLLAPSED_VISIBLE);
+    // Agent tab shows only the private user↔agent conversation so it doesn't
+    // get drowned out by streaming zone events.
+    const tabFilter = (msg: ChatEntry): boolean => {
+      if (this.activeTab === "agent") return msg.role !== "event";
+      if (this.activeTab === "chat") return msg.role !== "user" && msg.role !== "agent";
+      return true;
+    };
+    const pool = this.messages.filter(tabFilter);
+    const visible = this.expanded ? pool : pool.slice(-COLLAPSED_VISIBLE);
 
     this.log.innerHTML = "";
     for (const msg of visible) {
       const el = document.createElement("div");
       el.className = `agent-chat-msg agent-chat-${msg.role}`;
 
-      if (msg.role === "user") {
-        el.textContent = `> ${msg.text}`;
-        el.style.color = "#efc97f";
-      } else if (msg.role === "agent") {
-        el.textContent = msg.text;
-        el.style.color = "#7fd6be";
+      if (msg.role === "user" || msg.role === "agent") {
+        // Private channel — bubble UI with violet tint so the player can
+        // distinguish their own/agent's chatter from broadcast world events.
+        el.classList.add("agent-chat-bubble", `agent-chat-bubble-${msg.role}`);
+        if (msg.role === "agent") {
+          const tag = document.createElement("span");
+          tag.className = "agent-chat-private-tag";
+          tag.textContent = "\u{1F512} private \u00b7 only you see this";
+          el.appendChild(tag);
+        }
+        const bubble = document.createElement("div");
+        bubble.className = "agent-chat-bubble-inner";
+        bubble.textContent = msg.text;
+        el.appendChild(bubble);
       } else if (msg.role === "system") {
         el.textContent = msg.text;
         el.style.color = msg.color || "#ff8866";
@@ -682,6 +875,10 @@ export class AgentChat {
   private async send() {
     const text = this.input.value.trim();
     if (!text || this.sending) return;
+
+    const isSlash = text.startsWith("/");
+    const command = isSlash ? text.split(" ")[0] : undefined;
+    trackXRAgentInstructionSent({ isSlashCommand: isSlash, command });
 
     this.push({ role: "user", text, time: Date.now(), color: "#efc97f" });
     this.input.value = "";
@@ -781,6 +978,9 @@ export class AgentChat {
       const data = await res.json();
       if (data.response) {
         this.push({ role: "agent", text: data.response, time: Date.now(), color: "#7fd6be" });
+        if (this.entityId && this.onAgentReply) {
+          this.onAgentReply(this.entityId, data.response);
+        }
       }
     } catch (err) {
       this.push({ role: "system", text: `Network error: ${err}`, time: Date.now(), color: "#ff8866" });
@@ -793,6 +993,12 @@ export class AgentChat {
   // ── Events ────────────────────────────────────────────────────────
 
   private bindEvents() {
+    this.sendBtn.addEventListener("click", () => {
+      if (this.input.value.trim()) {
+        void this.send();
+      }
+    });
+
     this.micBtn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       this.startListening();
@@ -1160,12 +1366,94 @@ export class AgentChat {
         font-weight: bold;
       }
 
+      /* Private channel bubbles — violet/lilac to signal "only you + your
+         agent see this", distinct from broadcast world events. */
+      .agent-chat-bubble {
+        display: flex;
+        flex-direction: column;
+        margin: 4px 0;
+        text-shadow: none;
+      }
+      .agent-chat-bubble-user { align-items: flex-end; }
+      .agent-chat-bubble-agent { align-items: flex-start; }
+
+      .agent-chat-bubble-inner {
+        display: inline-block;
+        max-width: 82%;
+        padding: 6px 10px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.38;
+        word-wrap: break-word;
+        white-space: pre-wrap;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+      }
+      .agent-chat-bubble-user .agent-chat-bubble-inner {
+        background: linear-gradient(135deg, rgba(180, 138, 250, 0.32), rgba(140, 96, 220, 0.40));
+        color: #ecd9ff;
+        border: 1px solid rgba(180, 138, 250, 0.55);
+        border-bottom-right-radius: 4px;
+      }
+      .agent-chat-bubble-agent .agent-chat-bubble-inner {
+        background: linear-gradient(135deg, rgba(180, 138, 250, 0.18), rgba(127, 214, 190, 0.15));
+        color: #d9e9ff;
+        border: 1px solid rgba(180, 138, 250, 0.42);
+        border-bottom-left-radius: 4px;
+      }
+      .agent-chat-private-tag {
+        font: bold 9px/1 "Courier New", monospace;
+        letter-spacing: 0.08em;
+        color: #b48cff;
+        margin: 0 4px 3px;
+        opacity: 0.85;
+        text-transform: uppercase;
+      }
+
       .agent-chat-autocomplete {
         display: none;
         max-height: 160px;
         overflow-y: auto;
         border-top: 1px solid rgba(239, 201, 127, 0.12);
         background: rgba(12, 10, 8, 0.95);
+      }
+
+      .agent-chat-focus-chips {
+        display: none;
+        gap: 4px;
+        padding: 6px 8px;
+        overflow-x: auto;
+        border-top: 1px solid rgba(239, 201, 127, 0.12);
+        background: rgba(0, 0, 0, 0.3);
+        scrollbar-width: none;
+      }
+      .agent-chat-focus-chips::-webkit-scrollbar { display: none; }
+
+      #agent-chat.expanded .agent-chat-focus-chips {
+        display: flex;
+      }
+
+      .agent-chat-focus-chip {
+        flex-shrink: 0;
+        padding: 3px 8px;
+        border: 1px solid rgba(239, 201, 127, 0.18);
+        background: rgba(8, 15, 10, 0.9);
+        color: color-mix(in srgb, var(--chip-color) 80%, transparent);
+        font: 11px/1.2 'Courier New', monospace;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: border-color 0.12s, background 0.12s, color 0.12s;
+      }
+
+      .agent-chat-focus-chip:hover {
+        border-color: var(--chip-color);
+        color: var(--chip-color);
+      }
+
+      .agent-chat-focus-chip.active {
+        border-color: var(--chip-color);
+        background: color-mix(in srgb, var(--chip-color) 18%, transparent);
+        color: var(--chip-color);
+        font-weight: bold;
       }
 
       #agent-chat.expanded .agent-chat-autocomplete:not([hidden]) {
@@ -1220,6 +1508,30 @@ export class AgentChat {
         outline: none;
       }
 
+      .agent-chat-send {
+        flex-shrink: 0;
+        background: rgba(239, 201, 127, 0.15);
+        border: 1px solid rgba(239, 201, 127, 0.35);
+        border-radius: 6px;
+        color: #efc97f;
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        margin: 4px 2px 4px 0;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        transition: background 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .agent-chat-send:hover,
+      .agent-chat-send:active {
+        background: rgba(239, 201, 127, 0.32);
+      }
+
       .agent-chat-mic {
         background: transparent;
         border: none;
@@ -1271,6 +1583,14 @@ export class AgentChat {
           right: 8px;
           width: auto;
           max-width: calc(100vw - 16px);
+        }
+        .agent-chat-input {
+          font-size: 16px;
+        }
+        .agent-chat-send {
+          width: 40px;
+          height: 40px;
+          margin: 4px 4px 4px 0;
         }
       }
     `;

@@ -34,18 +34,19 @@ export interface Entity {
   zoneId?: string;
   essence?: number;
   maxEssence?: number;
+  stats?: Record<string, number>;
+  effectiveStats?: Record<string, number>;
   order?: EntityOrder;
   activeEffects?: ActiveEffect[];
-  runEnergy?: number;
-  maxRunEnergy?: number;
-  runModeEnabled?: boolean;
   isRunning?: boolean;
   // Resource nodes
   oreType?: string;
   flowerType?: string;
+  nectarType?: string;
   cropType?: string;
   charges?: number;
   maxCharges?: number;
+  depletedAtTick?: number;
   // Trainer NPCs
   teachesClass?: string;
   teachesProfession?: string;
@@ -61,11 +62,17 @@ export interface GameTime {
 
 export interface ActiveEffect {
   id: string;
+  techniqueId?: string;
   name: string;
   type: "buff" | "debuff" | "dot" | "hot" | "shield";
+  durationTicks?: number;
   remainingTicks: number;
+  statModifiers?: Partial<Record<string, number>>;
+  dotDamage?: number;
+  hotHealPerTick?: number;
   shieldHp?: number;
   maxShieldHp?: number;
+  shieldMaxHp?: number;
 }
 
 export interface ZoneEvent {
@@ -336,11 +343,60 @@ export interface NpcDialogueMessage {
   content: string;
 }
 
+export type NpcDialogueIntent =
+  | "greeting"
+  | "offer_quest"
+  | "quest_progress"
+  | "quest_turn_in"
+  | "tutorial"
+  | "lore"
+  | "redirect"
+  | "refuse";
+
+export type NpcActionKind =
+  | "accept_quest"
+  | "complete_quest"
+  | "open_shop"
+  | "open_quests_tab"
+  | "open_skills"
+  | "farewell";
+
+export interface NpcActionBinding {
+  kind: NpcActionKind;
+  questId?: string;
+}
+
+export interface SuggestedNpcAction {
+  label: string;
+  prompt: string;
+  /** When present, the client renders a primary one-click button that
+   * dispatches to POST /npc/action instead of round-tripping through the LLM. */
+  action?: NpcActionBinding;
+}
+
+export interface NpcDialogueQuestContext {
+  availableQuestIds: string[];
+  activeQuestIds: string[];
+  completableQuestIds: string[];
+}
+
 export interface NpcDialogueResponse {
   reply: string;
+  /** Back-compat alias from older server versions. */
   response?: string;
   npcName?: string;
   emotion?: string;
+  provider?: "deterministic" | "llm";
+  intent?: NpcDialogueIntent;
+  referencesQuestId?: string;
+  suggestedActions?: SuggestedNpcAction[];
+  questContext?: NpcDialogueQuestContext;
+  persona?: {
+    id?: string;
+    role?: string;
+    archetype?: string;
+    tone?: string;
+  };
 }
 
 export interface TechniqueInfo {
@@ -383,6 +439,53 @@ export interface GuildSummary {
   level: number;
   status: string;
   memberCount: number;
+}
+
+export type GuildRank = "Founder" | "Officer" | "Member";
+
+export interface GuildMember {
+  address: string;
+  rank: GuildRank;
+  joinedAt: number;
+  contributedGold: number;
+}
+
+export type GuildProposalType =
+  | "withdraw-gold"
+  | "kick-member"
+  | "promote-officer"
+  | "demote-officer"
+  | "disband-guild";
+
+export interface GuildProposal {
+  proposalId: number;
+  guildId: number;
+  proposer: string;
+  proposalType: GuildProposalType | string;
+  description: string;
+  createdAt: number;
+  votingEndsAt: number;
+  timeRemaining: number;
+  yesVotes: number;
+  noVotes: number;
+  status: "active" | "passed" | "failed" | "executed" | "cancelled" | string;
+  targetAddress: string;
+  targetAmount: number;
+}
+
+export interface GuildDetail extends GuildSummary {
+  description?: string;
+  founder?: string;
+  reputation?: number;
+  createdAt?: number;
+}
+
+export interface MyGuildResponse {
+  inGuild: boolean;
+  guild: GuildDetail | null;
+  member: GuildMember | null;
+  members: GuildMember[];
+  proposals: GuildProposal[];
 }
 
 export interface AuctionListing {
@@ -444,6 +547,39 @@ export interface ShopResponse {
   npcId: string;
   npcName: string;
   items: ShopItem[];
+}
+
+export interface SellPriceEntry {
+  tokenId: string;
+  name: string;
+  buyPrice: number;
+  currentPrice: number;
+  stock: number;
+  targetStock: number;
+}
+
+export interface SellPricesResponse {
+  merchantEntityId: string;
+  npcName: string;
+  zoneId: string;
+  merchantGold: number;
+  items: SellPriceEntry[];
+}
+
+export interface SellResult {
+  item: string;
+  quantity: number;
+  unitBuyPrice: number;
+  totalPayout: number;
+  merchantEntityId: string;
+}
+
+export interface RecycleResult {
+  item: string;
+  quantity: number;
+  unitRecycleValue: number;
+  totalPayoutCopper: number;
+  goldPayout: number;
 }
 
 // ── Inventory types (for BagPanel) ────────────────────────────────

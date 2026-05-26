@@ -59,6 +59,11 @@ export interface AuctionData {
   highBid: number;
   status: number; // 0 = Active, 1 = Ended, 2 = Cancelled
   extensionCount: number;
+  // Listing metadata for prorated cancel refunds. Optional because legacy
+  // auctions rebuilt from on-chain events do not have this info.
+  createdAt?: number | null;
+  feePaid?: number | null;
+  durationDays?: number | null;
 }
 
 // -- In-memory auction cache --
@@ -107,12 +112,14 @@ export async function createAuctionOnChain(
   quantity: number,
   startPrice: number,
   durationSeconds: number,
-  buyoutPrice: number
+  buyoutPrice: number,
+  feePaid?: number,
+  durationDays?: number
 ): Promise<{ auctionId: number; txHash: string }> {
   return executeRegisteredChainOperation(
     "auction-create",
     `${seller.toLowerCase()}:${tokenId}:${quantity}:${zoneId}`,
-    { zoneId, seller, tokenId, quantity, startPrice, durationSeconds, buyoutPrice }
+    { zoneId, seller, tokenId, quantity, startPrice, durationSeconds, buyoutPrice, feePaid, durationDays }
   );
 }
 
@@ -120,7 +127,7 @@ async function processAuctionCreate(
   record: ChainOperationRecord
 ): Promise<{ result: { auctionId: number; txHash: string }; txHash: string }> {
   const payload = JSON.parse(record.payload) as {
-    zoneId: string; seller: string; tokenId: number; quantity: number; startPrice: number; durationSeconds: number; buyoutPrice: number;
+    zoneId: string; seller: string; tokenId: number; quantity: number; startPrice: number; durationSeconds: number; buyoutPrice: number; feePaid?: number; durationDays?: number;
   };
   return traceTx("auction-create", "createAuctionOnChain", payload, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
@@ -157,6 +164,9 @@ async function processAuctionCreate(
             highBid: 0,
             status: 0,
             extensionCount: 0,
+            createdAt: Math.floor(Date.now() / 1000),
+            feePaid: payload.feePaid ?? null,
+            durationDays: payload.durationDays ?? null,
           });
           return { result: { auctionId, txHash: receipt.hash }, txHash: receipt.hash };
         }

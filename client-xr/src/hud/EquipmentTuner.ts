@@ -1,6 +1,7 @@
 /**
- * In-game equipment position/rotation tuner.
- * Press P to toggle. Adjusts values live, prints final values to console.
+ * In-game equipment position/rotation tuner. Dev-only — press P to toggle
+ * (registered only when import.meta.env.DEV). In production builds P stays
+ * bound to the skills panel.
  */
 
 interface TunableSlot {
@@ -55,18 +56,20 @@ export class EquipmentTuner {
     `;
     document.body.appendChild(this.el);
 
-    window.addEventListener("keydown", (e) => {
-      // Don't intercept hotkeys if we are in character creation or login
-      const landingActive = document.getElementById("xr-landing")?.style.display !== "none" && document.getElementById("xr-landing") !== null;
-      const charSelectActive = document.getElementById("char-select")?.style.display !== "none" && document.getElementById("char-select") !== null;
-      if (landingActive || charSelectActive) return;
+    if (import.meta.env.DEV) {
+      window.addEventListener("keydown", (e) => {
+        // Don't intercept hotkeys if we are in character creation or login
+        const landingActive = document.getElementById("xr-landing")?.style.display !== "none" && document.getElementById("xr-landing") !== null;
+        const charSelectActive = document.getElementById("char-select")?.style.display !== "none" && document.getElementById("char-select") !== null;
+        if (landingActive || charSelectActive) return;
 
-      if (e.key === "p" || e.key === "P") {
-        this.visible = !this.visible;
-        this.el.style.display = this.visible ? "block" : "none";
-        if (this.visible) this.render();
-      }
-    });
+        if (e.key === "p" || e.key === "P") {
+          this.visible = !this.visible;
+          this.el.style.display = this.visible ? "block" : "none";
+          if (this.visible) this.render();
+        }
+      });
+    }
   }
 
   /** Set callback for when values change */

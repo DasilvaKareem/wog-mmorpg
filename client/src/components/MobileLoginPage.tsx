@@ -4,23 +4,21 @@ import { preAuthenticate } from "thirdweb/wallets/in-app";
 import { useWalletContext } from "@/context/WalletContext";
 import { thirdwebClient, skaleChain, sharedInAppWallet } from "@/lib/inAppWalletClient";
 import { getAuthToken } from "@/lib/agentAuth";
-import { WalletManager } from "@/lib/walletManager";
 import { trackUserSignedUp } from "@/lib/analytics";
+import { WalletManager } from "@/lib/walletManager";
 
 type SocialStrategy = "google" | "discord" | "x" | "telegram";
-type Step = "login" | "email-input" | "email-otp" | "connecting";
+type Step = "login" | "email-input" | "email-otp" | "phone-input" | "phone-otp" | "connecting";
 
 const SOCIAL_PROVIDERS: { strategy: SocialStrategy; label: string; icon: string; color: string }[] = [
   { strategy: "google", label: "Google", icon: "G", color: "#ea4335" },
   { strategy: "discord", label: "Discord", icon: "D", color: "#5865f2" },
-  { strategy: "x", label: "X / Twitter", icon: "X", color: "#e7e7e7" },
-  { strategy: "telegram", label: "Telegram", icon: "T", color: "#26a5e4" },
 ];
 
 export function MobileLoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { connect, syncAddress } = useWalletContext();
+  const { syncAddress, connect } = useWalletContext();
 
   // If ?callback=wog:// is present, we're in native auth mode
   // After login, redirect to the callback URL with wallet + token
@@ -29,20 +27,9 @@ export function MobileLoginPage() {
   const [step, setStep] = React.useState<Step>("login");
   const [error, setError] = React.useState<string | null>(null);
   const [email, setEmail] = React.useState("");
+  const [phone, setPhone] = React.useState("");
   const [otp, setOtp] = React.useState("");
   const [sendingOtp, setSendingOtp] = React.useState(false);
-
-  async function connectSocial(strategy: SocialStrategy) {
-    setError(null);
-    setStep("connecting");
-    try {
-      const account = await sharedInAppWallet.connect({ client: thirdwebClient, chain: skaleChain, strategy });
-      await handleAuthSuccess(account.address);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Login failed. Please try again.");
-      setStep("login");
-    }
-  }
 
   async function sendEmailOtp() {
     if (!email.trim()) return;
@@ -50,6 +37,7 @@ export function MobileLoginPage() {
     setError(null);
     try {
       await preAuthenticate({ client: thirdwebClient, strategy: "email", email: email.trim() });
+      setOtp("");
       setStep("email-otp");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send code.");
@@ -76,7 +64,59 @@ export function MobileLoginPage() {
     }
   }
 
-  async function connectWallet() {
+  async function sendPhoneOtp() {
+    const normalized = normalizePhone(phone);
+    if (!normalized) {
+      setError("That doesn't look like a valid phone number.");
+      return;
+    }
+    setSendingOtp(true);
+    setError(null);
+    try {
+      await preAuthenticate({ client: thirdwebClient, strategy: "phone", phoneNumber: normalized });
+      setPhone(normalized);
+      setOtp("");
+      setStep("phone-otp");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to send code.");
+    } finally {
+      setSendingOtp(false);
+    }
+  }
+
+  async function verifyPhoneOtp() {
+    const normalized = normalizePhone(phone);
+    if (!normalized) return;
+    setError(null);
+    setStep("connecting");
+    try {
+      const account = await sharedInAppWallet.connect({
+        client: thirdwebClient,
+        chain: skaleChain,
+        strategy: "phone",
+        phoneNumber: normalized,
+        verificationCode: otp.trim(),
+      });
+      await handleAuthSuccess(account.address);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Invalid code. Please try again.");
+      setStep("phone-otp");
+    }
+  }
+
+  async function connectSocial(strategy: SocialStrategy) {
+    setError(null);
+    setStep("connecting");
+    try {
+      const account = await sharedInAppWallet.connect({ client: thirdwebClient, chain: skaleChain, strategy });
+      await handleAuthSuccess(account.address);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Login failed. Please try again.");
+      setStep("login");
+    }
+  }
+
+  async function connectExternalWallet() {
     setError(null);
     setStep("connecting");
     try {
@@ -157,12 +197,56 @@ export function MobileLoginPage() {
     );
   }
 
+  // ── Phone input screen ─────────────────────────────────────────────
+  if (step === "phone-input") {
+    const preview = normalizePhone(phone);
+    return (
+      <div className="flex h-[100dvh] flex-col items-center justify-center bg-[#070d15] px-6">
+        <p className="mb-2 font-mono text-lg font-bold text-[#d4a437]">Enter your phone</p>
+        <p className="mb-6 font-mono text-[11px] text-[#e2e8f0]/40">Any format works — we'll figure it out</p>
+        <input
+          type="tel"
+          inputMode="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="(555) 123-4567"
+          autoFocus
+          className="w-full max-w-xs border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 font-mono text-sm text-[#e2e8f0] placeholder-[#6d77a3] outline-none focus:border-[#d4a437]"
+          onKeyDown={(e) => e.key === "Enter" && sendPhoneOtp()}
+        />
+        <p className="mt-2 h-4 max-w-xs font-mono text-[11px] text-[#54f28b]/70">
+          {preview ? `Will send to ${preview}` : ""}
+        </p>
+        {error && <p className="mt-1 max-w-xs font-mono text-xs text-[#ff4d6d]">[ERR] {error}</p>}
+        <div className="mt-4 flex w-full max-w-xs gap-2">
+          <button
+            onClick={() => { setError(null); setStep("login"); }}
+            className="flex-1 border-2 border-[#2a3450] bg-[#0e1628] py-3 font-mono text-sm text-[#6d77a3] transition hover:text-[#e2e8f0]"
+          >
+            Back
+          </button>
+          <button
+            onClick={sendPhoneOtp}
+            disabled={sendingOtp || !phone.trim()}
+            className="flex-1 bg-[#d4a437] py-3 font-mono text-sm font-bold text-[#070d15] transition hover:bg-[#f5c842] disabled:opacity-50"
+          >
+            {sendingOtp ? "Sending..." : "Send Code"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── OTP verification screen ────────────────────────────────────────
-  if (step === "email-otp") {
+  if (step === "email-otp" || step === "phone-otp") {
+    const isPhone = step === "phone-otp";
+    const onVerify = isPhone ? verifyPhoneOtp : verifyEmailOtp;
+    const sentTo = isPhone ? normalizePhone(phone) || phone : email;
+    const backStep: Step = isPhone ? "phone-input" : "email-input";
     return (
       <div className="flex h-[100dvh] flex-col items-center justify-center bg-[#070d15] px-6">
         <p className="mb-2 font-mono text-lg font-bold text-[#d4a437]">Enter code</p>
-        <p className="mb-6 font-mono text-xs text-[#e2e8f0]/50">Sent to {email}</p>
+        <p className="mb-6 font-mono text-xs text-[#e2e8f0]/50">Sent to {sentTo}</p>
         <input
           type="text"
           inputMode="numeric"
@@ -172,18 +256,18 @@ export function MobileLoginPage() {
           placeholder="000000"
           autoFocus
           className="w-full max-w-[200px] border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-center font-mono text-2xl tracking-[0.5em] text-[#e2e8f0] placeholder-[#6d77a3] outline-none focus:border-[#d4a437]"
-          onKeyDown={(e) => e.key === "Enter" && otp.length === 6 && verifyEmailOtp()}
+          onKeyDown={(e) => e.key === "Enter" && otp.length === 6 && onVerify()}
         />
         {error && <p className="mt-3 max-w-xs font-mono text-xs text-[#ff4d6d]">[ERR] {error}</p>}
         <div className="mt-4 flex w-full max-w-xs gap-2">
           <button
-            onClick={() => { setError(null); setStep("email-input"); }}
+            onClick={() => { setError(null); setStep(backStep); }}
             className="flex-1 border-2 border-[#2a3450] bg-[#0e1628] py-3 font-mono text-sm text-[#6d77a3] transition hover:text-[#e2e8f0]"
           >
             Back
           </button>
           <button
-            onClick={verifyEmailOtp}
+            onClick={onVerify}
             disabled={otp.length < 6}
             className="flex-1 bg-[#d4a437] py-3 font-mono text-sm font-bold text-[#070d15] transition hover:bg-[#f5c842] disabled:opacity-50"
           >
@@ -213,7 +297,7 @@ export function MobileLoginPage() {
           <button
             key={p.strategy}
             onClick={() => void connectSocial(p.strategy)}
-            className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left font-mono text-sm text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+            className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left font-mono text-sm text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px]"
           >
             <span
               className="flex h-6 w-6 shrink-0 items-center justify-center border text-xs font-bold"
@@ -221,7 +305,7 @@ export function MobileLoginPage() {
             >
               {p.icon}
             </span>
-            <span>Login with {p.label}</span>
+            <span>Continue with {p.label}</span>
             <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
           </button>
         ))}
@@ -238,15 +322,26 @@ export function MobileLoginPage() {
         </button>
 
         <button
-          onClick={() => void connectWallet()}
+          onClick={() => { setError(null); setStep("phone-input"); }}
+          className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left font-mono text-sm text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px]"
+        >
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#54f28b] text-xs font-bold text-[#54f28b]">
+            #
+          </span>
+          <span>Continue with SMS</span>
+          <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
+        </button>
+
+        <button
+          onClick={() => void connectExternalWallet()}
           className="flex w-full items-center gap-3 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3 text-left font-mono text-sm text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
         >
           <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#54f28b] text-xs font-bold text-[#54f28b]">
             W
           </span>
           <div className="flex flex-col">
-            <span>Browse Wallets</span>
-            <span className="text-[10px] text-[#6d77a3]">MetaMask, Rabby, WalletConnect, more</span>
+            <span>Connect Wallet</span>
+            <span className="text-[10px] text-[#6d77a3]">MetaMask, Rabby, Coinbase, WalletConnect</span>
           </div>
           <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
         </button>
@@ -274,4 +369,41 @@ export function MobileLoginPage() {
       </div>
     </div>
   );
+}
+
+/**
+ * Permissive phone normalizer — accepts any human-typed format and returns
+ * an E.164 string (or null if it's truly unparseable). The user shouldn't
+ * have to know about international format; we figure it out.
+ *
+ * Examples:
+ *   "(555) 123-4567"   → "+15551234567"   (10 digits → assume US)
+ *   "555.123.4567"     → "+15551234567"
+ *   "1-555-123-4567"   → "+15551234567"   (11 digits with leading 1 → US)
+ *   "+44 20 7946 0958" → "+442079460958"
+ *   "442079460958"     → "+442079460958"  (no +, but length ≠ 10/11 → trust as international)
+ */
+function normalizePhone(input: string, defaultCountryCode = "1"): string | null {
+  // Keep digits only, plus a single leading + if present.
+  const hadPlus = input.trim().startsWith("+");
+  const digits = input.replace(/\D/g, "");
+  if (!digits) return null;
+
+  let withCountry: string;
+  if (hadPlus) {
+    withCountry = `+${digits}`;
+  } else if (digits.length === 10) {
+    // Bare 10-digit US number.
+    withCountry = `+${defaultCountryCode}${digits}`;
+  } else if (digits.length === 11 && digits.startsWith(defaultCountryCode)) {
+    // US written as "15551234567" — leading country code without +.
+    withCountry = `+${digits}`;
+  } else {
+    // Some other length without +: best-effort, treat as international.
+    withCountry = `+${digits}`;
+  }
+
+  // Final E.164 sanity check: + and 8–15 digits.
+  if (!/^\+\d{8,15}$/.test(withCountry)) return null;
+  return withCountry;
 }

@@ -1,8 +1,61 @@
 import type { Entity } from "../types.js";
+import { getNodeResourceInfo } from "../data/professionCatalogs.js";
+import { fetchItemCatalog, type CatalogItem } from "../api.js";
+
+type EquipmentItem = NonNullable<NonNullable<Entity["equipment"]>[string]>;
+
+const STAT_LABELS: Record<string, string> = {
+  str: "STR", int: "INT", agi: "AGI", def: "DEF",
+  spi: "SPI", spirit: "SPI", faith: "FAI", fai: "FAI",
+  hp: "HP", mp: "MP", essence: "ESS",
+  vit: "VIT", luck: "LCK", lck: "LCK",
+};
+const STAT_ORDER = ["str", "int", "agi", "def", "spi", "spirit", "faith", "fai", "vit", "luck", "lck"];
+
+let cachedCatalog: Map<string, CatalogItem> | null = null;
+void fetchItemCatalog().then((m) => { cachedCatalog = m; }).catch(() => {});
+
+function getItemBonuses(tokenId: number | string | undefined): Record<string, number> | null {
+  if (tokenId == null || !cachedCatalog) return null;
+  return cachedCatalog.get(String(tokenId))?.statBonuses ?? null;
+}
+
+function formatStatEntry(label: string, effective: number, base: number | undefined): string {
+  const delta = base != null ? effective - base : 0;
+  let deltaHtml = "";
+  if (delta > 0) {
+    deltaHtml = ` <span style="color:#7ee8a2;font-weight:bold;">+${delta}</span>`;
+  } else if (delta < 0) {
+    deltaHtml = ` <span style="color:#ff8080;font-weight:bold;">${delta}</span>`;
+  }
+  return `<span style="color:#aab;">${label}</span> <span style="color:#dfe8ff;font-weight:bold;">${effective}</span>${deltaHtml}`;
+}
+
+function formatStatRows(
+  effective: Record<string, number> | undefined,
+  base?: Record<string, number> | undefined,
+): string {
+  if (!effective) return "";
+  const entries: string[] = [];
+  for (const key of STAT_ORDER) {
+    if (effective[key] == null) continue;
+    const label = STAT_LABELS[key] ?? key.toUpperCase();
+    entries.push(formatStatEntry(label, effective[key], base?.[key]));
+  }
+  // Catch any remaining keys not in STAT_ORDER
+  for (const [key, val] of Object.entries(effective)) {
+    if (STAT_ORDER.includes(key)) continue;
+    if (val == null) continue;
+    const label = STAT_LABELS[key] ?? key.toUpperCase();
+    entries.push(formatStatEntry(label, val, base?.[key]));
+  }
+  return entries.join('<span style="color:#445;margin:0 6px;">·</span>');
+}
 
 interface EntityInspectorOptions {
   canActOnPlayer?: (entity: Entity) => boolean;
   onAddFriend?: (entity: Entity) => Promise<string>;
+  onParty?: (entity: Entity) => Promise<string>;
   onTrade?: (entity: Entity) => Promise<string>;
   onDuel?: (entity: Entity) => Promise<string>;
   canCommandAgent?: () => boolean;
@@ -16,17 +69,43 @@ const GATHER_TYPES: Record<string, { verb: string; noun: string }> = {
   "crop-node":   { verb: "Harvest", noun: "crop"     },
 };
 
+const SLOT_LEFT: string[] = ["helm", "chest", "gloves", "legs", "boots", "weapon"];
+const SLOT_RIGHT: string[] = ["shoulders", "cape", "belt", "ring", "amulet", "shield"];
+
+const SLOT_ICONS: Record<string, string> = {
+  weapon: "\u2694",        // crossed swords
+  shield: "\u{1F6E1}",     // shield
+  chest: "\u{1F455}",      // shirt
+  legs: "\u{1F456}",       // jeans
+  boots: "\u{1F462}",      // boot
+  helm: "\u{1FA96}",       // helmet
+  shoulders: "\u{1FAE2}",  // shrug
+  gloves: "\u{1F9E4}",     // gloves
+  belt: "\u25AC",          // black rectangle (belt)
+  cape: "\u{1F9E3}",       // scarf
+  ring: "\u{1F48D}",       // ring
+  amulet: "\u{1F4FF}",     // prayer beads
+};
+
+const SLOT_LABELS: Record<string, string> = {
+  weapon: "Weapon", shield: "Off-hand", chest: "Chest", legs: "Legs",
+  boots: "Boots", helm: "Head", shoulders: "Shoulders", gloves: "Hands",
+  belt: "Waist", cape: "Back", ring: "Ring", amulet: "Neck",
+};
+
 /**
  * HTML overlay panel showing inspected entity details.
- * Positioned near the entity in screen space.
+ * For players: WoW-style paper-doll with equipment slots + hover tooltips.
+ * For other entities: compact HP/info panel.
  */
 export class EntityInspector {
   private panel: HTMLDivElement;
+  private tooltip: HTMLDivElement;
   private currentEntity: Entity | null = null;
   private _locked = false;
   private readonly options: EntityInspectorOptions;
   private actionFeedback = "";
-  private activeAction: "friend" | "trade" | "duel" | "gather" | null = null;
+  private activeAction: "friend" | "party" | "trade" | "duel" | "gather" | null = null;
   private lastAnchor: { x: number; y: number } | null = null;
 
   constructor(options: EntityInspectorOptions = {}) {
@@ -36,25 +115,59 @@ export class EntityInspector {
     this.panel.style.cssText = `
       position: fixed;
       display: none;
-      background: rgba(0, 0, 0, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 8px;
-      padding: 12px 16px;
+      background: rgba(8, 12, 22, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
+      padding: 10px 14px 12px;
       color: #ddd;
-      font: 13px/1.5 monospace;
+      font: 13px/1.4 monospace;
       pointer-events: auto;
       z-index: 20;
-      min-width: 200px;
-      max-width: 300px;
-      backdrop-filter: blur(4px);
-      transition: opacity 0.3s, background 0.3s;
+      min-width: 220px;
+      max-width: 360px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+      transition: opacity 0.2s, background 0.2s;
     `;
     document.body.appendChild(this.panel);
-    this.panel.addEventListener("click", this.onPanelClick);
 
-    // Close on click elsewhere
-    document.addEventListener("mousedown", (e) => {
-      if (e.target !== this.panel && !this.panel.contains(e.target as Node)) {
+    this.tooltip = document.createElement("div");
+    this.tooltip.id = "entity-inspector-tooltip";
+    this.tooltip.style.cssText = `
+      position: fixed;
+      display: none;
+      z-index: 21;
+      background: rgba(8, 12, 22, 0.97);
+      border: 1px solid rgba(68, 255, 136, 0.3);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: 11px monospace;
+      color: #ccc;
+      max-width: 240px;
+      pointer-events: none;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    `;
+    document.body.appendChild(this.tooltip);
+
+    this.injectStyles();
+
+    this.panel.addEventListener("click", this.onPanelClick);
+    this.panel.addEventListener("mouseover", this.onPanelHover);
+    this.panel.addEventListener("mouseout", this.onPanelLeave);
+
+    // Close on outside click — desktop + mobile
+    const dismissIfOutside = (target: EventTarget | null) => {
+      if (target !== this.panel && !this.panel.contains(target as Node)) {
+        this.hide();
+      }
+    };
+    document.addEventListener("mousedown", (e) => dismissIfOutside(e.target));
+    document.addEventListener("touchstart", (e) => dismissIfOutside(e.target), { passive: true });
+
+    // Escape closes the panel
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.panel.style.display !== "none") {
         this.hide();
       }
     });
@@ -77,13 +190,38 @@ export class EntityInspector {
     this.positionAt(screenX, screenY);
   }
 
+  private isMobile(): boolean {
+    return window.innerWidth <= 600;
+  }
+
   private positionAt(screenX: number, screenY: number) {
-    // Position near click, clamped to viewport
+    if (this.isMobile() && !this._locked) {
+      // Bottom-sheet mode — let CSS handle positioning.
+      this.panel.style.left = "";
+      this.panel.style.top = "";
+      this.panel.style.right = "";
+      return;
+    }
+
     const w = this.panel.offsetWidth;
     const h = this.panel.offsetHeight;
-    let x = screenX + 16;
-    let y = screenY - h / 2;
-    if (x + w > window.innerWidth - 8) x = screenX - w - 16;
+
+    // For player paper-doll (taller content) center horizontally near click.
+    const isWide = (this.currentEntity?.type === "player") && !!this.currentEntity?.equipment;
+
+    let x: number;
+    let y: number;
+    if (isWide) {
+      // Try centered around click; clamp.
+      x = screenX - w / 2;
+      y = Math.max(8, screenY - h / 2);
+    } else {
+      x = screenX + 16;
+      y = screenY - h / 2;
+      if (x + w > window.innerWidth - 8) x = screenX - w - 16;
+    }
+    if (x < 8) x = 8;
+    if (x + w > window.innerWidth - 8) x = window.innerWidth - w - 8;
     if (y < 8) y = 8;
     if (y + h > window.innerHeight - 8) y = window.innerHeight - h - 8;
 
@@ -114,21 +252,21 @@ export class EntityInspector {
     this.panel.style.background = "rgba(0, 0, 0, 0.35)";
     this.panel.style.border = "1px solid rgba(255, 255, 255, 0.08)";
     this.panel.style.opacity = "0.6";
-    // Pin to top-right so it stays out of the way
     this.panel.style.left = "";
     this.panel.style.right = "12px";
     this.panel.style.top = "12px";
   }
 
   private applyDefaultStyle() {
-    this.panel.style.background = "rgba(0, 0, 0, 0.85)";
-    this.panel.style.border = "1px solid rgba(255, 255, 255, 0.15)";
+    this.panel.style.background = "rgba(8, 12, 22, 0.95)";
+    this.panel.style.border = "1px solid rgba(255, 255, 255, 0.18)";
     this.panel.style.opacity = "1";
     this.panel.style.right = "";
   }
 
   hide() {
     this.panel.style.display = "none";
+    this.tooltip.style.display = "none";
     this.currentEntity = null;
     this.actionFeedback = "";
     this.activeAction = null;
@@ -143,11 +281,20 @@ export class EntityInspector {
     const typeColor = TYPE_COLORS[e.type] ?? "#ccc";
     const hpPct = e.maxHp > 0 ? Math.round((e.hp / e.maxHp) * 100) : 100;
     const hpColor = hpPct > 50 ? "#4c4" : hpPct > 25 ? "#cc4" : "#c44";
-
     const levelStr = e.level != null ? `Lv ${e.level}` : "";
+    const closeBtn = `<button type="button" data-action="close" aria-label="Close" style="
+      position:absolute; top:6px; right:8px;
+      width:26px; height:26px;
+      border:1px solid rgba(255,255,255,0.18);
+      border-radius:6px;
+      background:rgba(255,255,255,0.05);
+      color:#bbb; font:bold 14px monospace; line-height:1;
+      cursor:pointer; padding:0;
+    ">×</button>`;
 
-    let html = `
-      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
+    let html = `${closeBtn}`;
+    html += `
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; padding-right:30px;">
         <span style="color:${typeColor}; font-weight:bold; font-size:14px;">
           ${esc(e.name)}
         </span>
@@ -182,24 +329,33 @@ export class EntityInspector {
         html += `<div style="font-size:11px; color:#cc8;">&lt;${esc(e.guildName)}&gt;</div>`;
       }
       if (e.equipment) {
-        const slots = Object.entries(e.equipment).filter(([, v]) => v);
-        if (slots.length > 0) {
-          html += `<div style="margin-top:6px; font-size:11px; color:#888;">Equipment:</div>`;
-          for (const [slot, item] of slots) {
-            if (!item) continue;
-            const qColor = QUALITY_COLORS[item.quality ?? ""] ?? "#aaa";
-            html += `<div style="font-size:11px; color:${qColor};">
-              ${esc(slot)}: ${esc(item.name ?? `#${item.tokenId}`)}
-            </div>`;
-          }
+        html += this.renderPaperDoll(e);
+      }
+      const statsToShow = e.effectiveStats ?? e.stats;
+      if (statsToShow && Object.keys(statsToShow).length > 0) {
+        const rows = formatStatRows(statsToShow, e.effectiveStats ? e.stats : undefined);
+        if (rows) {
+          const hasBonus = e.effectiveStats && e.stats && STAT_ORDER.some(
+            (k) => (e.effectiveStats?.[k] ?? 0) !== (e.stats?.[k] ?? 0),
+          );
+          const hint = hasBonus
+            ? ` <span style="color:#7ee8a2;font-weight:normal;text-transform:none;letter-spacing:0;">(green = gear bonus)</span>`
+            : "";
+          html += `
+            <div style="margin-top:8px; padding:6px 8px; border-radius:5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+              <div style="font:bold 10px monospace; color:#998; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:3px;">Stats${hint}</div>
+              <div style="font:11px monospace; line-height:1.5;">${rows}</div>
+            </div>
+          `;
         }
       }
     }
 
     if (e.type === "player" && this.options.canActOnPlayer?.(e)) {
       html += `
-        <div style="margin-top:10px; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px;">
+        <div style="margin-top:10px; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px;">
           ${this.renderActionButton("friend", "Add Friend")}
+          ${this.renderActionButton("party", "Invite to Party")}
           ${this.renderActionButton("trade", "Trade")}
           ${this.renderActionButton("duel", "Duel")}
         </div>
@@ -207,6 +363,36 @@ export class EntityInspector {
       if (this.actionFeedback) {
         html += `<div style="margin-top:8px; font-size:11px; color:#9edbff;">${esc(this.actionFeedback)}</div>`;
       }
+    }
+
+    // Resource info card — shows what a gather-node or corpse would yield,
+    // the profession + required skill level (red if the player is too low),
+    // and any tool-tier requirement. Independent of the gather button so
+    // corpses get the same UX even without the agent-gather wiring.
+    const info = getNodeResourceInfo(e);
+    if (info) {
+      const levelColor = info.meetsRequirement ? "#a0c8b0" : "#ff6a6a";
+      const playerSuffix = info.playerLevel > 0
+        ? ` <span style="color:#888;">(you: ${info.playerLevel})</span>`
+        : info.meetsRequirement ? "" : ` <span style="color:#888;">(not learned)</span>`;
+      const toolLine = info.requiredToolTier && info.requiredToolTier > 1
+        ? `<span style="color:#888;"> · ${esc(info.toolName ?? "Tool")} T${info.requiredToolTier}+</span>`
+        : "";
+      html += `
+        <div style="margin-top:10px; padding:6px 8px; border-radius:5px; background:rgba(40,70,55,0.35); border:1px solid rgba(120,220,160,0.20); font-size:11px;">
+          <div style="color:#d8f5e2; font-weight:bold;">${esc(info.label)}</div>
+          <div style="color:${levelColor}; margin-top:2px;">${esc(info.profession)} Lv ${info.requiredSkillLevel}${playerSuffix}${toolLine}</div>
+        </div>
+      `;
+    }
+
+    if (e.maxCharges && e.maxCharges > 0) {
+      const depleted = e.depletedAtTick != null || ((e.charges ?? 1) <= 0 && e.maxCharges > 0);
+      const chargeColor = depleted ? "#ff6a6a" : "#7ee8a2";
+      const chargeText = depleted
+        ? "DEPLETED — respawning"
+        : `${e.charges ?? 0} / ${e.maxCharges} charges`;
+      html += `<div style="margin-top:6px; font-size:11px; color:${chargeColor};">&#9671; ${chargeText}</div>`;
     }
 
     const gather = GATHER_TYPES[e.type];
@@ -227,15 +413,159 @@ export class EntityInspector {
       }
     }
 
-    // Position
-    html += `<div style="margin-top:6px; font-size:10px; color:#666;">
-      pos: ${Math.round(e.x)}, ${Math.round(e.y)}
-    </div>`;
+    if (e.type !== "player") {
+      html += `<div style="margin-top:6px; font-size:10px; color:#666;">
+        pos: ${Math.round(e.x)}, ${Math.round(e.y)}
+      </div>`;
+    }
 
     return html;
   }
 
-  private renderActionButton(action: "friend" | "trade" | "duel", label: string): string {
+  private renderPaperDoll(e: Entity): string {
+    const equipment = e.equipment ?? {};
+    const slotCell = (slot: string): string => {
+      const item = equipment[slot];
+      const icon = SLOT_ICONS[slot] ?? "?";
+      const label = SLOT_LABELS[slot] ?? slot;
+      if (!item) {
+        return `<div class="ei-slot ei-slot-empty" data-slot="${esc(slot)}" title="${esc(label)} (empty)">
+          <span class="ei-slot-icon ei-empty">${icon}</span>
+        </div>`;
+      }
+      const qColor = QUALITY_COLORS[(item.quality ?? "").toLowerCase()] ?? QUALITY_COLORS.common;
+      const broken = item.broken ? `<span class="ei-slot-broken" title="Broken">!</span>` : "";
+      return `<div class="ei-slot" data-slot="${esc(slot)}" style="border-color:${qColor}">
+        <span class="ei-slot-icon">${icon}</span>
+        ${broken}
+      </div>`;
+    };
+
+    const leftHtml = SLOT_LEFT.map(slotCell).join("");
+    const rightHtml = SLOT_RIGHT.map(slotCell).join("");
+
+    return `
+      <div class="ei-paperdoll">
+        <div class="ei-paperdoll-col">${leftHtml}</div>
+        <div class="ei-paperdoll-center">
+          <div class="ei-paperdoll-portrait">${esc(initials(e.name))}</div>
+          <div class="ei-paperdoll-classline">${esc(e.classId ?? "")}</div>
+        </div>
+        <div class="ei-paperdoll-col">${rightHtml}</div>
+      </div>
+    `;
+  }
+
+  private injectStyles(): void {
+    const style = document.createElement("style");
+    style.textContent = `
+      .ei-paperdoll {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+        margin-top: 8px;
+        align-items: center;
+      }
+      .ei-paperdoll-col {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .ei-paperdoll-center {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 6px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 6px;
+        min-height: 200px;
+      }
+      .ei-paperdoll-portrait {
+        width: 60px; height: 60px;
+        border-radius: 50%;
+        background: rgba(68,221,255,0.15);
+        border: 2px solid rgba(68,221,255,0.4);
+        display: flex; align-items: center; justify-content: center;
+        font: bold 22px monospace;
+        color: #44ddff;
+      }
+      .ei-paperdoll-classline {
+        font-size: 10px;
+        color: #999;
+        text-transform: capitalize;
+        text-align: center;
+      }
+      .ei-slot {
+        width: 38px; height: 38px;
+        border: 2px solid #555;
+        border-radius: 5px;
+        background: rgba(30,40,55,0.7);
+        display: flex; align-items: center; justify-content: center;
+        position: relative;
+        cursor: help;
+        transition: background 0.12s, transform 0.12s;
+      }
+      .ei-slot:hover { background: rgba(50,65,85,0.95); transform: scale(1.06); }
+      .ei-slot-empty {
+        border-color: rgba(80,90,110,0.25);
+        background: rgba(30,40,55,0.4);
+        cursor: default;
+      }
+      .ei-slot-icon { font-size: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+      .ei-slot-icon.ei-empty { opacity: 0.25; }
+      .ei-slot-broken {
+        position: absolute; top: -3px; right: -3px;
+        background: #c44; color: white;
+        font: bold 10px monospace;
+        border-radius: 50%;
+        width: 14px; height: 14px;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 4px rgba(0,0,0,0.6);
+      }
+      /* ── Mobile: bottom sheet (mirrors WalletPanel UX) ── */
+      @media (max-width: 600px) {
+        #entity-inspector {
+          left: 0 !important;
+          right: 0 !important;
+          top: auto !important;
+          bottom: 0 !important;
+          width: 100% !important;
+          min-width: 0 !important;
+          max-width: none !important;
+          max-height: 75vh !important;
+          overflow-y: auto;
+          border-radius: 20px 20px 0 0 !important;
+          border-left: none !important;
+          border-right: none !important;
+          border-bottom: none !important;
+          padding: 18px 14px 16px !important;
+          box-shadow: 0 -8px 40px rgba(0,0,0,0.7) !important;
+        }
+        /* Drag-handle cue at the top */
+        #entity-inspector::before {
+          content: "";
+          position: sticky;
+          top: 0;
+          display: block;
+          width: 36px;
+          height: 4px;
+          margin: -6px auto 8px;
+          border-radius: 99px;
+          background: rgba(255,255,255,0.18);
+          pointer-events: none;
+        }
+      }
+      @media (max-width: 480px) {
+        .ei-paperdoll-center { min-height: 140px; }
+        .ei-paperdoll-portrait { width: 44px; height: 44px; font-size: 16px; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  private renderActionButton(action: "friend" | "party" | "trade" | "duel", label: string): string {
     const busy = this.activeAction === action;
     return `
       <button
@@ -249,16 +579,87 @@ export class EntityInspector {
 
   private onPanelClick = (e: MouseEvent) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
-    if (!btn || !this.currentEntity) return;
+    if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    const action = btn.dataset.action as "friend" | "trade" | "duel" | "gather";
+    const action = btn.dataset.action as "friend" | "party" | "trade" | "duel" | "gather" | "close";
+    if (action === "close") {
+      this.hide();
+      return;
+    }
+    if (!this.currentEntity) return;
     void this.handleAction(action, this.currentEntity);
   };
 
-  private async handleAction(action: "friend" | "trade" | "duel" | "gather", entity: Entity) {
+  private onPanelHover = (e: MouseEvent) => {
+    const slot = (e.target as HTMLElement).closest<HTMLElement>(".ei-slot");
+    if (!slot || !this.currentEntity?.equipment) return;
+    const slotName = slot.dataset.slot;
+    if (!slotName) return;
+    const item = this.currentEntity.equipment[slotName];
+    this.showTooltip(slotName, item, slot);
+  };
+
+  private onPanelLeave = (e: MouseEvent) => {
+    const slot = (e.target as HTMLElement).closest<HTMLElement>(".ei-slot");
+    if (!slot) return;
+    const related = e.relatedTarget as HTMLElement | null;
+    if (related && slot.contains(related)) return;
+    this.tooltip.style.display = "none";
+  };
+
+  private showTooltip(slotName: string, item: EquipmentItem | undefined, cell: HTMLElement) {
+    const label = SLOT_LABELS[slotName] ?? slotName;
+    let html = "";
+    if (!item) {
+      html = `<div style="color:#888"><b>${esc(label)}</b><div style="margin-top:2px; font-size:10px; color:#667">Empty slot</div></div>`;
+    } else {
+      const quality = (item.quality ?? "common").toLowerCase();
+      const qColor = QUALITY_COLORS[quality] ?? QUALITY_COLORS.common;
+      const name = item.name ?? `Item #${item.tokenId}`;
+      html += `<div style="color:${qColor}; font-weight:bold; font-size:12px;">${esc(name)}</div>`;
+      html += `<div style="color:#778; font-size:10px; margin-bottom:4px; text-transform:capitalize;">${esc(quality)} · ${esc(label)}</div>`;
+      const bonuses = getItemBonuses(item.tokenId);
+      if (bonuses && Object.keys(bonuses).length > 0) {
+        const rows = formatStatRows(bonuses);
+        if (rows) {
+          html += `<div style="font-size:10px; margin-top:4px; line-height:1.5;">${rows}</div>`;
+        }
+      }
+      if (item.durability != null && item.maxDurability != null && item.maxDurability > 0) {
+        const dPct = Math.round((item.durability / item.maxDurability) * 100);
+        const dColor = dPct > 50 ? "#4c4" : dPct > 20 ? "#cc4" : "#c44";
+        html += `<div style="font-size:10px; color:${dColor}; margin-top:4px;">Durability: ${item.durability}/${item.maxDurability}</div>`;
+        html += `<div style="background:#333; border-radius:2px; height:3px; margin-top:2px; width:100%;"><div style="background:${dColor}; width:${dPct}%; height:100%; border-radius:2px;"></div></div>`;
+      }
+      if (item.broken) {
+        html += `<div style="font-size:10px; color:#c44; margin-top:3px; font-weight:bold;">BROKEN</div>`;
+      }
+    }
+    this.tooltip.innerHTML = html;
+    this.tooltip.style.display = "block";
+
+    const cellRect = cell.getBoundingClientRect();
+    const ttRect = this.tooltip.getBoundingClientRect();
+    let left = cellRect.right + 8;
+    let top = cellRect.top;
+    if (left + ttRect.width > window.innerWidth - 8) {
+      left = cellRect.left - ttRect.width - 8;
+    }
+    if (left < 8) {
+      left = cellRect.left;
+      top = cellRect.bottom + 6;
+    }
+    top = Math.min(top, window.innerHeight - ttRect.height - 4);
+    top = Math.max(4, top);
+    this.tooltip.style.left = `${left}px`;
+    this.tooltip.style.top = `${top}px`;
+  }
+
+  private async handleAction(action: "friend" | "party" | "trade" | "duel" | "gather", entity: Entity) {
     const handlers = {
       friend: this.options.onAddFriend,
+      party: this.options.onParty,
       trade: this.options.onTrade,
       duel: this.options.onDuel,
       gather: this.options.onAgentGather,
@@ -283,7 +684,14 @@ export class EntityInspector {
 }
 
 function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -302,9 +710,9 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 const QUALITY_COLORS: Record<string, string> = {
-  common: "#aaa",
-  uncommon: "#4c4",
-  rare: "#44f",
-  epic: "#a4f",
-  legendary: "#fa2",
+  common: "#aaaaaa",
+  uncommon: "#44cc44",
+  rare: "#4488ff",
+  epic: "#aa44ff",
+  legendary: "#ffaa22",
 };

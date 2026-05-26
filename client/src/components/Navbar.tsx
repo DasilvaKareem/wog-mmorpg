@@ -314,7 +314,14 @@ export function Navbar(): React.ReactElement {
   // On /world and /spectate, show logo + sign-in button when not connected
   if (isGameRoute) {
     return (
-      <nav className="pointer-events-none fixed top-0 left-0 right-0 z-[60]">
+      <nav
+        className="pointer-events-none fixed top-0 left-0 right-0 z-[60]"
+        style={{
+          paddingTop: "env(safe-area-inset-top)",
+          paddingLeft: "env(safe-area-inset-left)",
+          paddingRight: "env(safe-area-inset-right)",
+        }}
+      >
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-0">
           <Link
             to="/"
@@ -332,7 +339,7 @@ export function Navbar(): React.ReactElement {
               onClick={() => {
                 openOnboarding("sign-in");
               }}
-              className="pointer-events-auto border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218]"
+              className="pointer-events-auto border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-2 text-[9px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218] md:py-1.5 md:text-[8px]"
             >
               Summon Champion
             </button>
@@ -346,6 +353,11 @@ export function Navbar(): React.ReactElement {
     <nav
       ref={navRef}
       className="fixed top-0 left-0 right-0 z-[60] border-b-2 border-[#2a3450] bg-[#0d1526]"
+      style={{
+        paddingTop: "env(safe-area-inset-top)",
+        paddingLeft: "env(safe-area-inset-left)",
+        paddingRight: "env(safe-area-inset-right)",
+      }}
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-0">
         {/* Logo */}
@@ -353,7 +365,7 @@ export function Navbar(): React.ReactElement {
           <img
             src="/assets/logo.png"
             alt="World of Geneva"
-            className="h-20 w-auto object-contain transition-opacity hover:opacity-80"
+            className="h-12 w-auto object-contain transition-opacity hover:opacity-80 md:h-20"
             style={{ filter: "drop-shadow(0 0 6px rgba(0,0,0,0.8))" }}
           />
         </Link>
@@ -489,25 +501,25 @@ export function Navbar(): React.ReactElement {
             </div>
           )}
 
-          {/* Mobile hamburger */}
+          {/* Mobile hamburger — 44px tap target */}
           <button
-            className="flex flex-col gap-[3px] p-2 md:hidden"
+            className="-mr-2 flex h-11 w-11 flex-col items-center justify-center gap-[5px] md:hidden"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Toggle menu"
           >
             <span
-              className={`block h-[2px] w-4 bg-[#9aa7cc] transition-all duration-200 ${
-                mobileOpen ? "translate-y-[5px] rotate-45" : ""
+              className={`block h-[2px] w-6 bg-[#9aa7cc] transition-all duration-200 ${
+                mobileOpen ? "translate-y-[7px] rotate-45" : ""
               }`}
             />
             <span
-              className={`block h-[2px] w-4 bg-[#9aa7cc] transition-all duration-200 ${
+              className={`block h-[2px] w-6 bg-[#9aa7cc] transition-all duration-200 ${
                 mobileOpen ? "opacity-0" : ""
               }`}
             />
             <span
-              className={`block h-[2px] w-4 bg-[#9aa7cc] transition-all duration-200 ${
-                mobileOpen ? "-translate-y-[5px] -rotate-45" : ""
+              className={`block h-[2px] w-6 bg-[#9aa7cc] transition-all duration-200 ${
+                mobileOpen ? "-translate-y-[7px] -rotate-45" : ""
               }`}
             />
           </button>

@@ -138,6 +138,13 @@ export interface MatchmakingEntry {
   preferredTeam?: PvPTeam;
   /** Party group ID — players with the same groupId are kept on the same team. */
   groupId?: string;
+  /**
+   * Lowercase wallet of a specific opponent this player wants to be paired
+   * with (duel-reservation flow). Two entries that point at each other are
+   * matched ahead of the normal ELO loop; mismatched reservations stay
+   * invisible to ELO matching until their counterpart joins or expires.
+   */
+  reservedOpponentWallet?: string;
 }
 
 export interface MatchmakingQueue {

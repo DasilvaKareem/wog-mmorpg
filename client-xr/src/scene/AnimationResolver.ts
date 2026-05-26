@@ -164,6 +164,16 @@ const TECHNIQUE_ACTION: Record<string, Action> = {
   paladin_divine_shield: "technique-shield",
   paladin_blessing_of_might: "cast-holy",
   paladin_aura_of_resolve: "cast-holy",
+  paladin_divine_bulwark: "technique-shield",
+  paladin_hammer_of_justice: "attack-melee",
+  paladin_wings_of_valor: "cast-holy",
+  paladin_wrath_of_the_righteous: "attack-melee",
+  paladin_hand_of_god: "cast-holy",
+  paladin_blessing_of_kings: "cast-holy",
+  paladin_aura_of_devotion: "cast-holy",
+  paladin_divine_aegis: "cast-holy",
+  paladin_blessing_of_protection: "cast-holy",
+  paladin_blessing_of_sanctuary: "cast-holy",
   // Rogue
   rogue_backstab: "attack-melee",
   rogue_poison_blade: "attack-melee",
@@ -172,6 +182,18 @@ const TECHNIQUE_ACTION: Record<string, Action> = {
   rogue_blade_flurry: "technique-cleave",
   rogue_stealth: "idle",
   rogue_evasion: "idle",
+  // Higher ranks default to "attack-melee" via basicAttackFor → resolves to Dagger_Attack on rogue rig
+  rogue_shadowstep_ambush: "attack-melee",
+  rogue_death_mark: "attack-melee",
+  rogue_phantom_strike: "attack-melee",
+  rogue_deathblow: "attack-melee",
+  rogue_living_shadow: "attack-melee",
+  // Party / ally buffs — no strike, hold combat-idle stance
+  rogue_tricks_of_the_trade: "idle",
+  rogue_shadow_veil: "idle",
+  rogue_assassins_mark: "idle",
+  rogue_sharpen_blade: "idle",
+  rogue_shadow_infusion: "idle",
   // Ranger
   ranger_aimed_shot: "attack-ranged",
   ranger_hunters_mark: "attack-ranged",
@@ -180,6 +202,16 @@ const TECHNIQUE_ACTION: Record<string, Action> = {
   ranger_volley: "attack-ranged",
   ranger_entangling_roots: "cast-arcane",
   ranger_natures_blessing: "cast-holy",
+  ranger_sky_piercer: "attack-ranged",
+  ranger_storm_of_arrows: "attack-ranged",
+  ranger_falcon_dive: "attack-ranged",
+  ranger_arrow_of_judgment: "attack-ranged",
+  ranger_heavens_volley: "attack-ranged",
+  ranger_pack_tactics: "cast-holy",
+  ranger_natures_vigil: "cast-holy",
+  ranger_predators_instinct: "cast-holy",
+  ranger_eagle_eye: "cast-holy",
+  ranger_bond_of_the_wild: "cast-holy",
   // Mage
   mage_fireball: "cast-arcane",
   mage_arcane_missiles: "cast-arcane",
@@ -188,6 +220,16 @@ const TECHNIQUE_ACTION: Record<string, Action> = {
   mage_frost_nova: "cast-arcane",
   mage_frost_armor: "cast-arcane",
   mage_mana_shield: "cast-arcane",
+  mage_glacial_prison: "cast-arcane",
+  mage_meteor_strike: "cast-arcane",
+  mage_time_warp: "cast-arcane",
+  mage_arcane_cataclysm: "cast-arcane",
+  mage_absolute_zero: "cast-arcane",
+  mage_arcane_brilliance: "cast-arcane",
+  mage_temporal_shift: "cast-arcane",
+  mage_arcane_empowerment: "cast-arcane",
+  mage_arcane_infusion: "cast-arcane",
+  mage_chrono_blessing: "cast-arcane",
   // Cleric
   cleric_holy_light: "cast-holy",
   cleric_smite: "cast-holy",
@@ -196,6 +238,16 @@ const TECHNIQUE_ACTION: Record<string, Action> = {
   cleric_divine_protection: "cast-holy",
   cleric_prayer_of_fortitude: "cast-holy",
   cleric_spirit_of_redemption: "cast-holy",
+  cleric_guardian_angel: "cast-holy",
+  cleric_divine_hymn: "cast-holy",
+  cleric_wrath_of_heaven: "cast-holy",
+  cleric_divine_intervention: "cast-holy",
+  cleric_wrath_of_the_divine: "cast-holy",
+  cleric_prayer_of_healing: "cast-holy",
+  cleric_sanctuary: "cast-holy",
+  cleric_divine_chorus: "cast-holy",
+  cleric_greater_renew: "cast-holy",
+  cleric_blessing_of_light: "cast-holy",
   // Warlock
   warlock_shadow_bolt: "cast-dark",
   warlock_curse_of_weakness: "cast-dark",
@@ -204,6 +256,16 @@ const TECHNIQUE_ACTION: Record<string, Action> = {
   warlock_howl_of_terror: "cast-dark",
   warlock_soul_shield: "cast-dark",
   warlock_siphon_soul: "cast-dark",
+  warlock_demonic_grasp: "cast-dark",
+  warlock_nether_gate: "cast-dark",
+  warlock_soul_rend: "cast-dark",
+  warlock_doom: "cast-dark",
+  warlock_soul_harvest: "cast-dark",
+  warlock_dark_pact: "cast-dark",
+  warlock_soul_link: "cast-dark",
+  warlock_demonic_empowerment: "cast-dark",
+  warlock_dark_empowerment: "cast-dark",
+  warlock_soul_covenant: "cast-dark",
   // Monk
   monk_palm_strike: "technique-palm",
   monk_disable: "technique-palm",
@@ -212,6 +274,16 @@ const TECHNIQUE_ACTION: Record<string, Action> = {
   monk_whirlwind_kick: "technique-spin",
   monk_meditation: "cast-holy",
   monk_inner_focus: "cast-holy",
+  monk_hundred_fists: "technique-palm",
+  monk_dragon_strike: "technique-palm",
+  monk_inner_peace: "cast-holy",
+  monk_one_thousand_palms: "technique-palm",
+  monk_perfect_balance: "cast-holy",
+  monk_windwalkers_grace: "cast-holy",
+  monk_zen_meditation: "cast-holy",
+  monk_transcendence: "cast-holy",
+  monk_chi_attunement: "cast-holy",
+  monk_spirit_bond: "cast-holy",
 };
 
 function stripRank(techniqueId: string): string {
@@ -345,79 +417,193 @@ const STYLE_CLIP_CANDIDATES: Record<string, Partial<Record<Action, ClipCandidate
 // "2H_Spell_Attack", "Spell_Attack_01" all hit "spell").
 
 const TECHNIQUE_CLIP_NAME: Record<string, ClipCandidate[]> = {
-  // ── Mage — alternate Spell1 (thrust) / Spell2 (overhead) for visual variety
-  mage_fireball:         [{ exact: "Spell1" }, { substring: "fire" }, { substring: "spell" }],
-  mage_arcane_missiles:  [{ exact: "Spell2" }, { exact: "Spell1" }, { substring: "spell" }],
-  mage_flamestrike:      [{ exact: "Spell2" }, { exact: "Staff_Attack" }, { substring: "blast" }],
-  mage_frost_nova:       [{ exact: "Spell2" }, { substring: "nova" }, { substring: "burst" }],
-  mage_slow:             [{ exact: "Spell1" }, { substring: "curse" }, { substring: "spell" }],
-  mage_frost_armor:      [{ exact: "Defend" }, { exact: "Spell1" }, { substring: "buff" }],
-  mage_mana_shield:      [{ exact: "Defend" }, { exact: "Spell2" }, { substring: "shield" }],
-  mage_spell_reflect:    [{ exact: "Defend" }, { exact: "Spell2" }],
-  mage_temporal_rewind:  [{ exact: "Spell2" }, { substring: "channel" }, { substring: "spell" }],
-  mage_starfall_barrage: [{ exact: "Spell2" }, { substring: "channel" }, { substring: "summon" }],
-  mage_spellburst:       [{ exact: "Spell2" }, { exact: "Spell1" }, { substring: "blast" }],
+  // ── Mage — Wizard.glb exposes:
+  //   Death, Idle_Attacking, Idle, Idle_Weapon, PickUp, Punch, RecieveHit,
+  //   RecieveHit_2, Roll, Run, Run_Weapon, Spell1, Spell2, Staff_Attack, Walk
+  // Spell1 = forward thrust (single-target / bolts).
+  // Spell2 = overhead, both arms (AoE / channels / heavy spells).
+  // Idle_Weapon = staff held neutrally, used for passive self-buffs.
+  mage_fireball:             [{ exact: "Spell1" }],                          // forward thrust
+  mage_arcane_missiles:      [{ exact: "Spell2" }, { exact: "Spell1" }],     // multi-shot, two-handed
+  mage_flamestrike:          [{ exact: "Spell2" }],                          // overhead AoE
+  mage_frost_nova:           [{ exact: "Spell2" }],                          // burst around caster
+  mage_slow:                 [{ exact: "Spell1" }],                          // pointed debuff
+  mage_frost_armor:          [{ exact: "Idle_Weapon" }, { exact: "Spell1" }],// passive armor
+  mage_mana_shield:          [{ exact: "Idle_Weapon" }, { exact: "Spell2" }],// arms-up shield
+  mage_glacial_prison:       [{ exact: "Spell2" }],                          // overhead AoE freeze
+  mage_meteor_strike:        [{ exact: "Spell2" }],                          // calling down a meteor
+  mage_time_warp:            [{ exact: "Idle_Weapon" }, { exact: "Spell2" }],// self channel
+  mage_arcane_cataclysm:     [{ exact: "Spell2" }],                          // ultimate AoE
+  mage_absolute_zero:        [{ exact: "Spell2" }],                          // ultimate freeze
+  // Party / ally buffs — passive staff-held stance.
+  mage_arcane_brilliance:    [{ exact: "Idle_Weapon" }, { exact: "Spell1" }],
+  mage_temporal_shift:       [{ exact: "Idle_Weapon" }, { exact: "Spell2" }],
+  mage_arcane_empowerment:   [{ exact: "Idle_Weapon" }, { exact: "Spell2" }],
+  mage_arcane_infusion:      [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  mage_chrono_blessing:      [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
 
-  // ── Cleric — Spell1 for direct, Spell2 for area/heal
-  cleric_holy_light:          [{ exact: "Spell1" }, { substring: "heal" }, { substring: "bless" }],
-  cleric_smite:               [{ exact: "Spell1" }, { substring: "smite" }, { substring: "spell" }],
-  cleric_renew:               [{ exact: "Spell2" }, { substring: "heal" }, { substring: "bless" }],
-  cleric_holy_nova:           [{ exact: "Spell2" }, { substring: "nova" }, { substring: "burst" }],
-  cleric_divine_protection:   [{ exact: "Defend" }, { exact: "Spell1" }, { substring: "shield" }],
-  cleric_prayer_of_fortitude: [{ exact: "Spell2" }, { substring: "pray" }, { substring: "bless" }],
-  cleric_spirit_of_redemption:[{ exact: "Spell2" }, { substring: "channel" }, { substring: "spirit" }],
+  // ── Cleric — Cleric.glb exposes (note: NO Spell2, NO Idle_Attacking):
+  //   Death, Idle, Idle_Weapon, PickUp, Punch, RecieveHit, RecieveHit_Attacking,
+  //   Run, Spell1, Staff_Attack, Walk
+  // Every spell collapses to Spell1; VFX is the entire differentiator.
+  cleric_holy_light:            [{ exact: "Spell1" }],
+  cleric_smite:                 [{ exact: "Spell1" }, { exact: "Staff_Attack" }],
+  cleric_renew:                 [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_holy_nova:             [{ exact: "Spell1" }],
+  cleric_divine_protection:     [{ exact: "Idle_Weapon" }, { exact: "Spell1" }],
+  cleric_prayer_of_fortitude:   [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_spirit_of_redemption:  [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_guardian_angel:        [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_divine_hymn:           [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_wrath_of_heaven:       [{ exact: "Spell1" }],
+  cleric_divine_intervention:   [{ exact: "Idle_Weapon" }, { exact: "Spell1" }],
+  cleric_wrath_of_the_divine:   [{ exact: "Spell1" }],
+  cleric_prayer_of_healing:     [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_sanctuary:             [{ exact: "Idle_Weapon" }, { exact: "Spell1" }],
+  cleric_divine_chorus:         [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_greater_renew:         [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  cleric_blessing_of_light:     [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
 
-  // ── Warlock — Spell2 emphasized for shadow
-  warlock_shadow_bolt:        [{ exact: "Spell1" }, { substring: "shadow" }, { substring: "bolt" }],
-  warlock_curse_of_weakness:  [{ exact: "Spell1" }, { substring: "curse" }],
-  warlock_drain_life:         [{ exact: "Spell2" }, { substring: "drain" }, { substring: "channel" }],
-  warlock_corruption:         [{ exact: "Spell2" }, { substring: "curse" }, { substring: "spell" }],
-  warlock_howl_of_terror:     [{ exact: "Spell2" }, { substring: "howl" }, { substring: "yell" }],
-  warlock_soul_shield:        [{ exact: "Defend" }, { exact: "Spell2" }, { substring: "shield" }],
-  warlock_siphon_soul:        [{ exact: "Spell2" }, { substring: "siphon" }, { substring: "drain" }],
+  // ── Warlock — shares Wizard.glb with Mage (dark-tint atlas)
+  warlock_shadow_bolt:         [{ exact: "Spell1" }],                          // forward bolt
+  warlock_curse_of_weakness:   [{ exact: "Spell1" }],                          // pointed hex
+  warlock_drain_life:          [{ exact: "Spell2" }],                          // sustained channel
+  warlock_corruption:          [{ exact: "Spell2" }, { exact: "Spell1" }],     // sustained curse
+  warlock_howl_of_terror:      [{ exact: "Spell2" }],                          // overhead howl
+  warlock_soul_shield:         [{ exact: "Idle_Weapon" }, { exact: "Spell2" }],// arms-up shield
+  warlock_siphon_soul:         [{ exact: "Spell2" }],                          // channeling pull
+  warlock_demonic_grasp:       [{ exact: "Spell1" }, { exact: "Spell2" }],     // grasping reach
+  warlock_nether_gate:         [{ exact: "Spell2" }],                          // overhead portal
+  warlock_soul_rend:           [{ exact: "Spell2" }],                          // multi-target AoE
+  warlock_doom:                [{ exact: "Spell1" }, { exact: "Spell2" }],     // dooming the target
+  warlock_soul_harvest:        [{ exact: "Spell2" }],                          // overhead reap
+  // Party / ally buffs — passive staff-held stance.
+  warlock_dark_pact:           [{ exact: "Idle_Weapon" }, { exact: "Spell1" }],
+  warlock_soul_link:           [{ exact: "Idle_Weapon" }, { exact: "Spell2" }],
+  warlock_demonic_empowerment: [{ exact: "Idle_Weapon" }, { exact: "Spell2" }],
+  warlock_dark_empowerment:    [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
+  warlock_soul_covenant:       [{ exact: "Spell1" }, { exact: "Idle_Weapon" }],
 
-  // ── Ranger — bow specialization, Spell1 for nature buffs
-  ranger_aimed_shot:        [{ exact: "Bow_Shoot" }, { substring: "aim" }, { substring: "bow" }],
-  ranger_quick_shot:        [{ exact: "Bow_Shoot" }, { substring: "shoot" }],
-  ranger_multi_shot:        [{ exact: "Bow_Shoot" }, { substring: "volley" }, { substring: "multi" }],
-  ranger_volley:            [{ exact: "Bow_Shoot" }, { substring: "volley" }],
-  ranger_hunters_mark:      [{ exact: "Bow_Draw" }, { exact: "Bow_Shoot" }, { substring: "aim" }],
-  ranger_entangling_roots:  [{ exact: "Spell1" }, { substring: "roots" }, { substring: "spell" }],
-  ranger_natures_blessing:  [{ exact: "Spell2" }, { substring: "bless" }, { substring: "heal" }],
+  // ── Ranger — Ranger.glb exposes:
+  //   Bow_Draw, Bow_Shoot, Death, Idle_Attacking, Idle, Idle_Weapon, PickUp,
+  //   Punch, RecieveHit, RecieveHit_2, Roll, Run, Run_Holding, Walk
+  // No spell clips — nature/heal abilities lean on Idle_Weapon (bow held).
+  ranger_aimed_shot:           [{ exact: "Bow_Draw" }, { exact: "Bow_Shoot" }],   // hold-then-release
+  ranger_quick_shot:           [{ exact: "Bow_Shoot" }],                          // instant
+  ranger_multi_shot:           [{ exact: "Bow_Shoot" }],
+  ranger_volley:               [{ exact: "Bow_Shoot" }],
+  ranger_hunters_mark:         [{ exact: "Bow_Draw" }, { exact: "Idle_Weapon" }],
+  ranger_entangling_roots:     [{ exact: "Idle_Weapon" }, { exact: "Bow_Draw" }],
+  ranger_natures_blessing:     [{ exact: "Idle_Weapon" }],
+  ranger_sky_piercer:          [{ exact: "Bow_Draw" }, { exact: "Bow_Shoot" }],
+  ranger_storm_of_arrows:      [{ exact: "Bow_Shoot" }],
+  ranger_falcon_dive:          [{ exact: "Bow_Shoot" }, { exact: "Bow_Draw" }],
+  ranger_arrow_of_judgment:    [{ exact: "Bow_Draw" }, { exact: "Bow_Shoot" }],
+  ranger_heavens_volley:       [{ exact: "Bow_Shoot" }],
+  ranger_pack_tactics:         [{ exact: "Idle_Weapon" }],
+  ranger_natures_vigil:        [{ exact: "Idle_Weapon" }],
+  ranger_predators_instinct:   [{ exact: "Idle_Weapon" }],
+  ranger_eagle_eye:            [{ exact: "Idle_Weapon" }],
+  ranger_bond_of_the_wild:     [{ exact: "Idle_Weapon" }],
 
-  // ── Warrior — sword variants, Defend for shield, Victory for shouts
-  warrior_heroic_strike:       [{ exact: "SwordSlash" }, { exact: "Sword_Attack" }],
-  warrior_rending_strike:      [{ exact: "Sword_Attack2" }, { exact: "SwordSlash" }],
-  warrior_cleave:              [{ exact: "Attack2" }, { exact: "SwordSlash" }, { substring: "cleave" }],
-  warrior_shield_wall:         [{ exact: "Defend" }, { substring: "block" }],
-  warrior_battle_rage:         [{ exact: "Victory" }, { substring: "shout" }, { substring: "yell" }],
-  warrior_intimidating_shout:  [{ exact: "Victory" }, { substring: "shout" }, { substring: "roar" }],
-  warrior_rallying_cry:        [{ exact: "Victory" }, { substring: "cheer" }, { substring: "rally" }],
+  // ── Warrior — Warrior.glb exposes exactly these clips:
+  //   Death, Idle_Attacking, Idle, Idle_Weapon, PickUp, Punch, RecieveHit,
+  //   Roll, Run, Run_Weapon, Sword_Attack, Sword_Attack2, Walk
+  // No Defend / Victory / Cleave / Spell clips exist, so shouts and stances
+  // fall back to Idle_Attacking (combat stance, fists clenched) and VFX
+  // carries the distinctiveness.
+  warrior_heroic_strike:       [{ exact: "Sword_Attack2" }, { exact: "Sword_Attack" }],   // heavier slash
+  warrior_rending_strike:      [{ exact: "Sword_Attack2" }, { exact: "Sword_Attack" }],   // brutal cut
+  warrior_cleave:              [{ exact: "Sword_Attack" }, { exact: "Sword_Attack2" }],   // standard slash, sweep VFX
+  warrior_shield_wall:         [{ exact: "Idle_Attacking" }, { exact: "Idle_Weapon" }],   // defensive stance
+  warrior_battle_rage:         [{ exact: "Idle_Attacking" }],                              // combat roar stance
+  warrior_intimidating_shout:  [{ exact: "Idle_Attacking" }, { exact: "Punch" }],          // assertive stance
+  warrior_rallying_cry:        [{ exact: "Idle_Attacking" }],                              // weapon-raised cry
+  warrior_titans_charge:       [{ exact: "Sword_Attack2" }, { exact: "Sword_Attack" }],   // heaviest hit
+  warrior_earthquake_slam:     [{ exact: "Sword_Attack2" }, { exact: "PickUp" }],         // overhead-ish
+  warrior_undying_rage:        [{ exact: "Idle_Attacking" }],                              // berserker stance
 
-  // ── Paladin — sword for melee, Spell1/Spell2 for holy
-  paladin_holy_smite:        [{ exact: "Sword_Attack" }, { exact: "SwordSlash" }],
-  paladin_consecration:      [{ exact: "Spell2" }, { substring: "nova" }, { substring: "ground" }],
-  paladin_judgment:          [{ exact: "Spell1" }, { substring: "smite" }],
-  paladin_lay_on_hands:      [{ exact: "Spell2" }, { substring: "heal" }, { substring: "bless" }],
-  paladin_divine_shield:     [{ exact: "Defend" }, { substring: "shield" }, { substring: "bless" }],
-  paladin_blessing_of_might: [{ exact: "Spell1" }, { substring: "bless" }],
-  paladin_aura_of_resolve:   [{ exact: "Spell2" }, { substring: "aura" }, { substring: "bless" }],
+  // ── Paladin — shares Warrior.glb (gold tint). Same clip pool:
+  //   Death, Idle_Attacking, Idle, Idle_Weapon, PickUp, Punch, RecieveHit,
+  //   Roll, Run, Run_Weapon, Sword_Attack, Sword_Attack2, Walk
+  // No spell clips — holy abilities lean on Idle_Weapon stance + VFX.
+  paladin_holy_smite:              [{ exact: "Sword_Attack" }, { exact: "Sword_Attack2" }],
+  paladin_consecration:            [{ exact: "Idle_Weapon" }, { exact: "Sword_Attack" }],
+  paladin_judgment:                [{ exact: "Sword_Attack" }, { exact: "Idle_Weapon" }],
+  paladin_lay_on_hands:            [{ exact: "Idle_Weapon" }, { exact: "Idle" }],
+  paladin_divine_shield:           [{ exact: "Idle_Attacking" }, { exact: "Idle_Weapon" }],
+  paladin_blessing_of_might:       [{ exact: "Idle_Weapon" }],
+  paladin_aura_of_resolve:         [{ exact: "Idle_Weapon" }],
+  paladin_divine_bulwark:          [{ exact: "Idle_Attacking" }, { exact: "Idle_Weapon" }],
+  paladin_hammer_of_justice:       [{ exact: "Sword_Attack2" }, { exact: "Sword_Attack" }],
+  paladin_wings_of_valor:          [{ exact: "Idle_Weapon" }, { exact: "Idle_Attacking" }],
+  paladin_wrath_of_the_righteous:  [{ exact: "Sword_Attack2" }, { exact: "Sword_Attack" }],
+  paladin_hand_of_god:             [{ exact: "Idle_Weapon" }, { exact: "Idle" }],
+  paladin_blessing_of_kings:       [{ exact: "Idle_Weapon" }],
+  paladin_aura_of_devotion:        [{ exact: "Idle_Weapon" }],
+  paladin_divine_aegis:            [{ exact: "Idle_Weapon" }],
+  paladin_blessing_of_protection:  [{ exact: "Idle_Weapon" }],
+  paladin_blessing_of_sanctuary:   [{ exact: "Idle_Weapon" }],
 
-  // ── Rogue — dagger variants
-  rogue_backstab:        [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }, { substring: "backstab" }],
-  rogue_poison_blade:    [{ exact: "Dagger_Attack" }, { substring: "stab" }],
-  rogue_shadow_strike:   [{ exact: "Dagger_Attack2" }, { substring: "stab" }, { substring: "shadow" }],
-  rogue_smoke_bomb:      [{ exact: "Spell1" }, { substring: "throw" }, { exact: "Dagger_Attack" }],
-  rogue_blade_flurry:    [{ exact: "Dagger_Attack2" }, { substring: "flurry" }, { exact: "Attack2" }],
+  // ── Rogue — Rogue.glb exposes:
+  //   Attacking_Idle, Dagger_Attack, Dagger_Attack2, Death, Idle, PickUp,
+  //   Punch, RecieveHit, RecieveHit_2, Roll, Run, Walk
+  // No spell/throw/teleport clips, so blink/teleport/cloud abilities lean
+  // on a dagger strike + VFX to sell the fantasy.
+  rogue_backstab:              [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],   // brutal stab
+  rogue_poison_blade:          [{ exact: "Dagger_Attack" }, { exact: "Dagger_Attack2" }],   // standard nick
+  rogue_shadow_strike:         [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],   // sudden strike after blink
+  rogue_smoke_bomb:            [{ exact: "Punch" }, { exact: "PickUp" }],                   // throw-then-cloud read
+  rogue_blade_flurry:          [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],   // (only one clip plays; VFX = flurry)
+  rogue_shadowstep_ambush:     [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],
+  rogue_death_mark:            [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],
+  rogue_phantom_strike:        [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],
+  rogue_deathblow:             [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],   // the killing blow
+  rogue_living_shadow:         [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }],
+  // Party / ally buffs — hold combat stance, VFX projects the boon.
+  rogue_tricks_of_the_trade:   [{ exact: "Attacking_Idle" }, { exact: "Idle" }],
+  rogue_shadow_veil:           [{ exact: "Attacking_Idle" }, { exact: "Idle" }],
+  rogue_assassins_mark:        [{ exact: "Attacking_Idle" }, { exact: "Idle" }],
+  rogue_sharpen_blade:         [{ exact: "Attacking_Idle" }, { exact: "Idle" }],
+  rogue_shadow_infusion:       [{ exact: "Attacking_Idle" }, { exact: "Idle" }],
 
-  // ── Monk — punch / kick / spin specialization
-  monk_palm_strike:      [{ exact: "Punch" }, { substring: "palm" }, { exact: "Attack" }],
-  monk_disable:          [{ exact: "Punch" }, { substring: "palm" }],
-  monk_chi_burst:        [{ exact: "Spell2" }, { substring: "burst" }, { exact: "Spell1" }],
-  monk_flying_kick:      [{ substring: "kick" }, { substring: "jump" }, { exact: "Attack" }],
-  monk_whirlwind_kick:   [{ substring: "spin" }, { substring: "whirl" }, { exact: "Attack2" }],
-  monk_meditation:       [{ substring: "meditate" }, { exact: "SitDown" }, { exact: "Spell1" }],
-  monk_inner_focus:      [{ exact: "Spell1" }, { substring: "focus" }, { substring: "bless" }],
+  // ── Monk — Monk.glb exposes (NO Punch, NO Spell):
+  //   Attack, Attack2, Death, Idle_Attacking, Idle, PickUp, RecieveHit,
+  //   RecieveHit_2, Roll, Run, Walk
+  // Only TWO combat motions (Attack / Attack2) for the entire kit. Alternate
+  // them on cadence — quick strikes use Attack, heavy hits use Attack2.
+  monk_palm_strike:        [{ exact: "Attack" }],                 // quick palm
+  monk_disable:            [{ exact: "Attack" }],                 // control hit
+  monk_chi_burst:          [{ exact: "Attack2" }],                // heavier blast
+  monk_flying_kick:        [{ exact: "Attack2" }],                // gap-closer
+  monk_whirlwind_kick:     [{ exact: "Attack2" }],                // heavy spin
+  monk_meditation:         [{ exact: "Idle_Attacking" }, { exact: "Idle" }],
+  monk_inner_focus:        [{ exact: "Idle_Attacking" }],
+  monk_hundred_fists:      [{ exact: "Attack" }, { exact: "Attack2" }],     // rapid flurry
+  monk_dragon_strike:      [{ exact: "Attack2" }],                // heaviest hit
+  monk_inner_peace:        [{ exact: "Idle_Attacking" }, { exact: "Idle" }],
+  monk_one_thousand_palms: [{ exact: "Attack2" }, { exact: "Attack" }],     // ultimate
+  monk_perfect_balance:    [{ exact: "Idle_Attacking" }, { exact: "Idle" }],
+  monk_windwalkers_grace:  [{ exact: "Idle_Attacking" }],
+  monk_zen_meditation:     [{ exact: "Idle_Attacking" }, { exact: "Idle" }],
+  monk_transcendence:      [{ exact: "Idle_Attacking" }, { exact: "Idle" }],
+  monk_chi_attunement:     [{ exact: "Idle_Attacking" }],
+  monk_spirit_bond:        [{ exact: "Idle_Attacking" }],
+};
+
+// ── Tier 3: critical-hit clip preference ──────────────────────────────────────
+// When the server flags `data.critical === true`, the resolver tries these
+// candidates BEFORE the per-technique or per-style maps. The intent is purely
+// visual: a crit should look like a heavier, distinct swing. Limited to
+// melee-flavoured actions — ranged/cast crits already read clearly via the
+// damage numbers and we don't want to mis-route projectile/channel clips.
+
+const CRITICAL_GLB_CANDIDATES: Partial<Record<Action, ClipCandidate[]>> = {
+  "attack-melee":           [{ exact: "Sword_Attack2" }, { exact: "Attack2" }, { exact: "Dagger_Attack2" }, { exact: "SwordSlash" }, { substring: "heavy" }, { substring: "power" }],
+  "technique-cleave":       [{ exact: "Attack2" }, { exact: "Sword_Attack2" }, { exact: "SwordSlash" }, { substring: "spin" }],
+  "technique-palm":         [{ exact: "Attack2" }, { exact: "Punch" }, { exact: "Attack" }],
+  "technique-flying-kick":  [{ substring: "kick" }, { substring: "jump" }, { exact: "Attack2" }],
+  "technique-spin":         [{ substring: "spin" }, { substring: "whirl" }, { exact: "Attack2" }],
 };
 
 // Cross-action fallback: if a GLB has no clip for the primary action, try these
@@ -582,6 +768,27 @@ export function getClipFromMap(
     return direct;
   }
 
+  // Locomotion (idle/walk/run) must NEVER fall back to a combat clip — otherwise
+  // a rig with only an "Attack" clip (e.g. Quaternius Easy Enemy pack) plays
+  // attack on loop while standing still. Walk/run can borrow from each other;
+  // idle returns null (mob holds bind pose), which reads cleanly.
+  const isLocomotion = action === "idle" || action === "walk" || action === "run";
+  if (isLocomotion) {
+    const locomotionFallback: Action[] =
+      action === "walk" ? ["run", "idle"]
+      : action === "run"  ? ["walk", "idle"]
+      : ["walk", "run"];
+    for (const fb of locomotionFallback) {
+      const c = actionMap.get(fb);
+      if (c) {
+        animLogFor(debugName, `${action} → locomotion-fallback(${fb})=${c.name}`);
+        return c;
+      }
+    }
+    animLogFor(debugName, `${action} → no locomotion clip; holding bind pose`);
+    return null;
+  }
+
   const chain = ACTION_FALLBACKS[action] ?? [];
   for (const fb of chain) {
     const c = actionMap.get(fb);
@@ -606,7 +813,7 @@ export function getClipFromMap(
  * Procedural (non-GLB) clip resolution — uses the hand-authored
  * AnimationLibrary. Same fallback chain applies.
  */
-export function getProceduralClip(action: Action): THREE.AnimationClip | null {
+export function getProceduralClip(action: Action, _critical?: boolean): THREE.AnimationClip | null {
   const direct = PROCEDURAL_CLIP_NAME[action];
   if (direct) {
     try { return AnimationLibrary.get(direct); } catch { /* fall through */ }
@@ -641,6 +848,7 @@ export function resolveTechniqueClip(
   action: Action,
   techniqueId?: string,
   animStyle?: string,
+  critical?: boolean,
 ): THREE.AnimationClip | null {
   const findByCandidates = (candidates: ClipCandidate[]): THREE.AnimationClip | null => {
     for (const cand of candidates) {
@@ -657,6 +865,15 @@ export function resolveTechniqueClip(
     }
     return null;
   };
+
+  // Tier 3: critical-hit preference (melee-flavoured actions only)
+  if (critical) {
+    const critCandidates = CRITICAL_GLB_CANDIDATES[action];
+    if (critCandidates) {
+      const clip = findByCandidates(critCandidates);
+      if (clip) return clip;
+    }
+  }
 
   // Tier 2: per-technique override
   if (techniqueId) {

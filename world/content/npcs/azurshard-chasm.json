@@ -16,6 +16,13 @@
       "hp": 999
     },
     {
+      "type": "quest-giver",
+      "name": "Azure Herbalist Syla",
+      "x": 340,
+      "y": 450,
+      "hp": 999
+    },
+    {
       "type": "merchant",
       "name": "Chasm Depths Trader Vexis",
       "x": 160,

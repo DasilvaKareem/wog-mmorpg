@@ -105,6 +105,78 @@ export class FloatingTextLayer {
     }
   }
 
+  /**
+   * Floating gold gain popup. Splits copper into g/s/c parts and renders
+   * each in its denomination color (gold yellow / silver / copper brown)
+   * with a leading green "+" sign. Three separate Text objects share the
+   * same upward tween so they read as one line.
+   *
+   * Phaser Text holds one color per object, so multi-color requires
+   * multiple objects measured + laid out manually.
+   */
+  showGoldText(eventId: string, pos: Pos, copper: number): void {
+    if (this.seen.has(eventId)) return;
+    if (copper <= 0) return;
+    this.seen.add(eventId);
+    this.pruneSeen();
+
+    const gold = Math.floor(copper / 10000);
+    const silver = Math.floor((copper % 10000) / 100);
+    const copperRem = copper % 100;
+
+    type Chunk = { text: string; color: string };
+    const chunks: Chunk[] = [{ text: "+", color: "#54f28b" }];
+    if (gold > 0) chunks.push({ text: `${gold}g`, color: "#ffcc00" });
+    if (silver > 0) chunks.push({ text: `${silver}s`, color: "#cfd8e0" });
+    // Always show copper if it's the only nonzero part (so "5c" still renders);
+    // otherwise omit zero copper to keep the popup short.
+    if (copperRem > 0 || chunks.length === 1) {
+      chunks.push({ text: `${copperRem}c`, color: "#cd7f32" });
+    }
+
+    const fontSize = 11;
+    const offsetY = -14;
+    const duration = 1200;
+    const scatter = 4;
+
+    const scatterX = (Math.random() - 0.5) * 2 * scatter;
+    const baseY = pos.y + offsetY;
+
+    // Create all chunks first so we can measure widths, then center the row.
+    const texts = chunks.map((c) =>
+      this.scene.add
+        .text(0, baseY, c.text, {
+          fontSize: `${fontSize}px`,
+          fontFamily: "monospace",
+          color: c.color,
+          stroke: "#000000",
+          strokeThickness: 3,
+          fontStyle: "bold",
+        })
+        .setOrigin(0, 1)
+        .setDepth(130),
+    );
+
+    const SPACING = 2;
+    const totalWidth = texts.reduce((sum, t) => sum + t.width, 0) + SPACING * (texts.length - 1);
+    let cursorX = pos.x + scatterX - totalWidth / 2;
+    for (const t of texts) {
+      t.setX(cursorX);
+      cursorX += t.width + SPACING;
+    }
+
+    for (const t of texts) {
+      this.scene.tweens.add({
+        targets: t,
+        y: baseY - 26,
+        alpha: 0,
+        duration,
+        ease: "Quad.easeOut",
+        onComplete: () => t.destroy(),
+      });
+    }
+  }
+
   private spawn(pos: Pos, cfg: FloatConfig): void {
     const scatter = (Math.random() - 0.5) * 2 * cfg.scatter;
     const x = pos.x + scatter;
@@ -280,10 +352,105 @@ export class FloatingTextLayer {
     }
   }
 
+  /**
+   * Show floating craft-success text. Two lines:
+   *   "✦ Rare Sword ✦"       (rarity-colored, large)
+   *   "Crafted"               (small, white)
+   * Quality drives color and shimmer intensity.
+   */
+  showCraftText(
+    eventId: string,
+    pos: Pos,
+    itemName: string,
+    quality: string | undefined,
+    equipSlot: string | undefined,
+    category: string | undefined,
+  ): void {
+    if (this.seen.has(eventId)) return;
+    this.seen.add(eventId);
+    this.pruneSeen();
+
+    const tier = (quality ?? "common").toLowerCase();
+    const color =
+      tier === "epic" ? "#bb44ff" :
+      tier === "rare" ? "#4a9eff" :
+      tier === "uncommon" ? "#3ddc84" :
+      "#dddddd"; // common
+
+    const fontSize =
+      tier === "epic" ? 14 :
+      tier === "rare" ? 12 :
+      11;
+
+    const sub = subtypeLabel(equipSlot, category);
+    const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
+    const ornament = tier === "epic" ? "✦" : "";
+    const headline = ornament
+      ? `${ornament} ${tierLabel} ${sub} ${ornament}`
+      : `${tierLabel} ${sub}`;
+
+    this.spawn(pos, {
+      text: headline,
+      color,
+      fontSize,
+      offsetY: -22,
+      duration: 1800,
+      scatter: 0,
+    });
+
+    this.spawn(pos, {
+      text: itemName,
+      color: "#ffffff",
+      fontSize: 10,
+      offsetY: -10,
+      duration: 1600,
+      scatter: 0,
+    });
+  }
+
+  /**
+   * Show floating craft-failure text — red, slightly shaky.
+   */
+  showCraftFail(eventId: string, pos: Pos): void {
+    if (this.seen.has(eventId)) return;
+    this.seen.add(eventId);
+    this.pruneSeen();
+
+    this.spawn(pos, {
+      text: "✗ Crafting Failed!",
+      color: "#ff4444",
+      fontSize: 12,
+      offsetY: -20,
+      duration: 1600,
+      scatter: 6,
+    });
+  }
+
   private pruneSeen(): void {
     // Keep set bounded — clear periodically
     if (this.seen.size > 500) {
       this.seen.clear();
     }
   }
+}
+
+function subtypeLabel(equipSlot: string | undefined, category: string | undefined): string {
+  switch (equipSlot) {
+    case "weapon": return "Weapon";
+    case "shield": return "Shield";
+    case "helm": return "Helm";
+    case "chest": return "Chest";
+    case "legs": return "Legs";
+    case "boots": return "Boots";
+    case "shoulders": return "Shoulders";
+    case "gloves": return "Gauntlets";
+    case "belt": return "Belt";
+    case "cape": return "Cape";
+    case "ring": return "Ring";
+    case "amulet": return "Amulet";
+  }
+  if (category === "weapon") return "Weapon";
+  if (category === "armor") return "Armor";
+  if (category === "consumable") return "Brew";
+  return "Item";
 }

@@ -2,6 +2,11 @@ import { createThirdwebClient, defineChain } from "thirdweb";
 import { inAppWallet } from "thirdweb/wallets";
 import { preAuthenticate } from "thirdweb/wallets/in-app";
 import { CANDIDATE_BASES, toUrl } from "./api.js";
+import {
+  trackXRUserConnected,
+  trackXRUserAutoConnected,
+  trackXRUserDisconnected,
+} from "./analytics.js";
 const ADDRESS_KEY = "wog:xr:wallet-address";
 const LEGACY_TOKEN_KEY = "wog:agent:jwt";
 const LEGACY_EXPIRY_KEY = "wog:agent:jwt:expiry";
@@ -184,7 +189,7 @@ export async function getAuthToken(walletAddress: string): Promise<string | null
 
       let signature: string | null = null;
       const inAppAccount = sharedInAppWallet.getAccount?.() ?? null;
-      if (inAppAccount && inAppAccount.address.toLowerCase() === walletAddress.toLowerCase()) {
+      if (inAppAccount && inAppAccount.address?.toLowerCase() === walletAddress.toLowerCase()) {
         signature = await inAppAccount.signMessage({ message });
       } else {
         signature = await signWithExternalWallet(message);
@@ -225,6 +230,7 @@ class XRAuth {
       }
       this.address = account.address;
       await rememberAddress(account.address);
+      trackXRUserAutoConnected(account.address);
       return account.address;
     } catch {
       this.address = null;
@@ -241,6 +247,7 @@ class XRAuth {
     this.address = account.address;
     await rememberAddress(account.address);
     await getAuthToken(account.address);
+    trackXRUserConnected({ walletAddress: account.address, method: strategy });
     return account.address;
   }
 
@@ -255,6 +262,7 @@ class XRAuth {
     this.address = address;
     await rememberAddress(address);
     await getAuthToken(address);
+    trackXRUserConnected({ walletAddress: address, method: "injected_wallet" });
     return address;
   }
 
@@ -277,10 +285,35 @@ class XRAuth {
     this.address = account.address;
     await rememberAddress(account.address);
     await getAuthToken(account.address);
+    trackXRUserConnected({ walletAddress: account.address, method: "email" });
+    return account.address;
+  }
+
+  async sendSmsCode(phoneNumber: string): Promise<void> {
+    await preAuthenticate({
+      client: thirdwebClient,
+      strategy: "phone",
+      phoneNumber: phoneNumber.trim(),
+    });
+  }
+
+  async verifySmsCode(phoneNumber: string, verificationCode: string): Promise<string> {
+    const account = await sharedInAppWallet.connect({
+      client: thirdwebClient,
+      chain: skaleChain,
+      strategy: "phone",
+      phoneNumber: phoneNumber.trim(),
+      verificationCode: verificationCode.trim(),
+    });
+    this.address = account.address;
+    await rememberAddress(account.address);
+    await getAuthToken(account.address);
+    trackXRUserConnected({ walletAddress: account.address, method: "sms" });
     return account.address;
   }
 
   async disconnect(): Promise<void> {
+    trackXRUserDisconnected(this.address);
     clearCachedToken(this.address ?? undefined);
     this.address = null;
     try {

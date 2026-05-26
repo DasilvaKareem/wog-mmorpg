@@ -19,8 +19,10 @@ import { XRSessionManager } from "./xr/XRSessionManager.js";
 // XRControllers imported dynamically to avoid crashing non-XR browsers
 type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
+import { initProfessionCatalogs, setPlayerProfessionLevels } from "./data/professionCatalogs.js";
 import { ZoneNameBadge } from "./hud/IntentModeBadge.js";
 import { ZoneBanner } from "./hud/ZoneBanner.js";
+import { EventBanner } from "./hud/EventBanner.js";
 import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
 import { WorldMap } from "./hud/WorldMap.js";
@@ -31,24 +33,49 @@ import type { CharacterReadyDetail } from "./hud/CharacterSelect.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { QuestPanel } from "./hud/QuestPanel.js";
 import { NpcDialog } from "./hud/NpcDialog.js";
-import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SettingsPanel } from "./hud/SettingsPanel.js";
-import { SkillsPanel } from "./hud/SkillsPanel.js";
+import { SkillsPanel, type FarmTabData } from "./hud/SkillsPanel.js";
+import { RecipesPanel } from "./hud/RecipesPanel.js";
 import type { LearnedTechnique } from "./hud/LearnedTechniquesList.js";
 import type { Edict } from "./hud/EdictEditor.js";
-import { InboxPanel } from "./hud/InboxPanel.js";
+import { InboxPanel, type TradeOfferPayload } from "./hud/InboxPanel.js";
+import { TradeOfferDialog } from "./hud/TradeOfferDialog.js";
+import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
+import { RequestPopup } from "./hud/RequestPopup.js";
+import { BetsPanel } from "./hud/BetsPanel.js";
+import { TutorialOverlay } from "./hud/TutorialOverlay.js";
+import { NotificationsPanel } from "./hud/NotificationsPanel.js";
+import { installMobileResponsiveStyles } from "./hud/MobileResponsive.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
+import { BuffBar } from "./hud/BuffBar.js";
+import { ArenaHud } from "./hud/ArenaHud.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl } from "./api.js";
-import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
+import { WalletPanel } from "./hud/WalletPanel.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, acceptFriendRequest, declineFriendRequest, inviteToParty, acceptPartyInvite, declinePartyInvite, leaveParty, fetchPartyStatus, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade, challengeDuel, acceptDuel, declineDuel, fetchActivePools, placeBet, claimWinnings, fetchBettingHistory, fetchCurrentBattle, fetchBattleDetails, cancelPvpBattle, focusAgentQuest, recycleItem, craftAtStation } from "./api.js";
+import type { InventoryItem } from "./types.js";
+import { getAuthToken, getCachedToken, getSavedWalletAddress, xrAuth } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import { GauntletCursor } from "./hud/GauntletCursor.js";
+import { QuestProgressToast } from "./hud/QuestProgressToast.js";
 import type { ActivePlayer, Entity, FriendInfo, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 import { createSfxManager, playSoundEffect } from "./sfx.js";
+import { QualityManager } from "./quality/QualityManager.js";
+import { playerSession } from "./state/PlayerSession.js";
+import {
+  trackXRGameEntered,
+  trackXRPanelOpened,
+  trackXRVRSessionStarted,
+  trackXRVRSessionEnded,
+  trackXRNpcDialogOpened,
+  trackXRQuestAccepted,
+  trackXRQuestCompleted,
+  trackXRQuestAbandoned,
+  trackXRSessionDuration,
+} from "./analytics.js";
 
 let gauntletCursor: GauntletCursor | null = null;
 const urlParams = new URLSearchParams(window.location.search);
@@ -99,6 +126,7 @@ if (isDisplayMode && !queryWallet && !followEntityId) {
 }
 document.body.dataset.appMode = isDisplayMode ? "display" : "controller";
 const API_BASE = import.meta.env.VITE_API_URL || "";
+void initProfessionCatalogs(API_BASE);
 // Resolve audio URLs against the Vite base (prod serves under /xr/, dev at /).
 // Hardcoded "/audio/..." would 404 on prod because the bucket path is /xr/audio.
 const AUDIO_BASE = new URL("audio/", new URL(import.meta.env.BASE_URL, window.location.href)).href;
@@ -276,21 +304,20 @@ class BgmManager {
 const equipTuner = getEquipmentTuner();
 (window as any).__equipTuner = equipTuner;
 
-// Live-update weapon meshes from tuner every frame — only when panel is open
-function syncWeaponsToTuner() {
-  if (!equipTuner.isVisible()) return;
-  const slot = equipTuner.getSlot("sword");
-  if (!slot) return;
-  for (const weapon of EntityManager.weaponInstances) {
-    weapon.position.set(slot.pos.x, slot.pos.y, slot.pos.z);
-    weapon.rotation.set(slot.rot.x, slot.rot.y, slot.rot.z);
-  }
-}
-
 // ── Config ──────────────────────────────────────────────────────────
 
-const ZONE_POLL_INTERVAL = 250;
-const ACTIVE_PLAYERS_POLL_INTERVAL = 1000;
+// Resolve quality tier before the renderer is constructed — antialias is
+// a context-creation flag and can't be changed without a reload.
+const qualityBoot = QualityManager.init();
+const qualityCfg = qualityBoot.config;
+console.log(
+  `[quality] tier=${qualityBoot.tier} source=${qualityBoot.source} detected=${qualityBoot.detected}`,
+);
+// Expose for devtools verification: window.__quality.current() / .config()
+(window as unknown as { __quality: typeof QualityManager }).__quality = QualityManager;
+
+let ZONE_POLL_INTERVAL = qualityCfg.pollNearbyMs;
+let ACTIVE_PLAYERS_POLL_INTERVAL = qualityCfg.pollPlayersMs;
 const COORD_SCALE = 1 / 10; // server coords → 3D units
 /** Poll zones whose center is within this distance (3D units) of the camera */
 const POLL_RADIUS = 90;
@@ -299,9 +326,12 @@ const GATHER_NODE_TYPES = new Set(["ore-node", "flower-node", "nectar-node", "cr
 
 // ── Renderer ────────────────────────────────────────────────────────
 
-const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({
+  antialias: qualityCfg.antialias,
+  powerPreference: "high-performance",
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, qualityCfg.dprCap));
 renderer.shadowMap.enabled = false;
 document.body.appendChild(renderer.domElement);
 
@@ -321,8 +351,10 @@ camera.layers.enable(NO_OUTLINE_LAYER); // render text/sprites/UI but exclude fr
 
 const toonPipeline = new ToonPipeline({
   renderer, scene, camera,
-  outlineThickness: 1.2,
+  outlineThickness: qualityCfg.outlineThickness,
   outlineColor: 0x000000,
+  renderScale: qualityCfg.renderScale,
+  normalScale: qualityCfg.normalScale,
 });
 
 // ── Subsystems ──────────────────────────────────────────────────────
@@ -341,6 +373,7 @@ const effects = new EffectsManager(entities);
 effects.setElevationProvider(world);
 effects.setCamera(camera);
 scene.add(effects.group);
+entities.setEffectsManager(effects);
 
 const intentLines = new IntentLinesManager(entities);
 scene.add(intentLines.group);
@@ -349,11 +382,6 @@ const sky = new SkyRenderer(scene);
 const clickMarker = new ClickMarker();
 clickMarker.setElevationProvider(world);
 scene.add(clickMarker.mesh);
-const runPanel = new RunPanel({
-  onToggle: () => {
-    void toggleRunMode();
-  },
-});
 const bgm = new BgmManager();
 createSfxManager();
 
@@ -365,6 +393,7 @@ const settingsPanel = new SettingsPanel();
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.setInputEnabled(!isDisplayMode);
 controls.collisionCheck = (x, z) => world.isWalkable(x, z);
+controls.setTerrainGroup(world.group);
 const inspector = new EntityInspector({
   canActOnPlayer: (entity) => {
     return entity.type === "player"
@@ -381,43 +410,51 @@ const inspector = new EntityInspector({
     if (!result.ok) throw new Error(result.error ?? "Failed to send friend request");
     return `Friend request sent to ${entity.name}`;
   },
-  onTrade: async (entity) => {
-    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Trade request unavailable");
+  onParty: async (entity) => {
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Party invite unavailable");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
     const token = await getAuthToken(ownWalletAddress);
     if (!token) throw new Error("You need to sign in first");
-    const ownName = entities.getEntity(ownEntityId ?? "")?.name ?? ownWalletAddress.slice(0, 8);
-    const result = await sendInboxMessage(token, {
-      to: entity.walletAddress,
-      type: "trade-request",
-      body: `${ownName} wants to trade with you.`,
-      data: {
-        kind: "trade-request",
-        targetEntityId: entity.id,
-        targetName: entity.name,
-        fromEntityId: ownEntityId,
-      },
-    });
-    if (!result.ok) throw new Error(result.error ?? "Failed to send trade request");
-    return `Trade request sent to ${entity.name}`;
+    const fromZoneId = entities.getEntity(ownEntityId)?.zoneId;
+    if (!fromZoneId) throw new Error("Your champion is not in a zone");
+    const result = await inviteToParty(token, ownEntityId, fromZoneId, entity.walletAddress);
+    if (!result.ok) throw new Error(result.error ?? "Failed to send party invite");
+    return `Party invite sent to ${entity.name}`;
+  },
+  onTrade: async (entity) => {
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Trade unavailable for that player");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
+    if (entity.walletAddress.toLowerCase() === ownWalletAddress.toLowerCase()) {
+      throw new Error("You can't trade with yourself");
+    }
+    // Pull a fresh inventory snapshot before opening so the picker isn't stale.
+    lastInventoryPollTime = 0;
+    await pollInventory();
+    if (currentInventoryItems.length === 0) {
+      throw new Error("Your bag is empty — nothing to trade");
+    }
+    pendingTradeTarget = { wallet: entity.walletAddress, name: entity.name };
+    tradeOfferDialog.open(entity.name, currentInventoryItems);
+    return `Trade dialog opened for ${entity.name}`;
   },
   onDuel: async (entity) => {
-    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Duel request unavailable");
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Duel unavailable for that player");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
+    if (entity.walletAddress.toLowerCase() === ownWalletAddress.toLowerCase()) {
+      throw new Error("You can't duel yourself");
+    }
     const token = await getAuthToken(ownWalletAddress);
     if (!token) throw new Error("You need to sign in first");
-    const ownName = entities.getEntity(ownEntityId ?? "")?.name ?? ownWalletAddress.slice(0, 8);
-    const result = await sendInboxMessage(token, {
-      to: entity.walletAddress,
-      type: "direct",
-      body: `${ownName} challenged you to a duel. Meet at the coliseum and queue 1v1.`,
-      data: {
-        kind: "duel-request",
-        challengerEntityId: ownEntityId,
-        challengerName: ownName,
-        targetEntityId: entity.id,
-        targetName: entity.name,
-      },
-    });
-    if (!result.ok) throw new Error(result.error ?? "Failed to send duel request");
+    agentChat.addSystemMessage(`Issuing duel challenge to ${entity.name}...`, "progress");
+    const result = await challengeDuel(token, { targetWallet: entity.walletAddress, format: "1v1" });
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Duel failed: ${result.error ?? "unknown error"}`, "error");
+      throw new Error(result.error ?? "Failed to issue duel");
+    }
+    agentChat.addSystemMessage(
+      `Duel challenge sent. Reserved 1v1 slot — waiting for ${entity.name} to accept.`,
+      "success",
+    );
     return `Duel challenge sent to ${entity.name}`;
   },
   canCommandAgent: () => !!ownWalletAddress && !!ownEntityId,
@@ -425,21 +462,30 @@ const inspector = new EntityInspector({
     if (!ownWalletAddress || !ownEntityId) throw new Error("Deploy your agent first");
     const token = await getAuthToken(ownWalletAddress);
     if (!token) throw new Error("You need to sign in first");
+    // Use deterministic slash commands — bypass the LLM entirely so the agent
+    // immediately switches focus without waiting for an AI round-trip.
+    const cmd = entity.type === "ore-node" ? "/focus mine"
+      : entity.type === "flower-node" || entity.type === "nectar-node" ? "/focus herb"
+      : "/focus gather";
     const verb = entity.type === "ore-node" ? "Mine"
       : entity.type === "crop-node" ? "Harvest"
       : "Gather";
-    const message = `${verb} the ${entity.name} at ${Math.round(entity.x)}, ${Math.round(entity.y)}${entity.zoneId ? ` in ${entity.zoneId.replace(/-/g, " ")}` : ""}.`;
-    const result = await sendAgentChat(token, message);
+    const result = await sendAgentChat(token, cmd);
     if (!result.ok) throw new Error(result.error ?? "Failed to message agent");
-    return `Told your agent: "${verb} ${entity.name}"`;
+    return `${verb}ing ${entity.name} — agent focus updated`;
   },
 });
 const zoneNameBadge = new ZoneNameBadge();
 const zoneBanner = new ZoneBanner();
+const eventBanner = new EventBanner();
+const questProgressToast = new QuestProgressToast();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const worldMap = new WorldMap();
 const agentChat = new AgentChat();
+agentChat.setOnAgentReply((entityId, text) => {
+  entities.showLocalSpeechBubble(entityId, text);
+});
 const charSelect = !isAnimationLab
   && !isDisplayMode
   ? new CharacterSelect({
@@ -449,10 +495,18 @@ const charSelect = !isAnimationLab
       ownWalletAddress = detail.walletAddress.toLowerCase();
       ownCustodialWallet = detail.custodialWallet?.toLowerCase() ?? null;
       ownEntityId = detail.entityId || null;
+      playerSession.initWallet(ownWalletAddress, ownCustodialWallet);
+      entities.setOwnWallet(ownWalletAddress);
+      if (ownEntityId) {
+        playerSession.setSpawned(ownEntityId, detail.zoneId, {
+          level: 1,
+          characterTokenId: null,
+          agentId: null,
+        });
+      }
       void import("./scene/AnimationResolver.js").then(m => m.setAnimDebugSelfName(detail.characterName));
-      desiredRunMode = null;
-      runPanel.reset();
       inboxPanel.setCustodialWallet(ownCustodialWallet);
+      inboxPanel.setCharacterName(detail.characterName);
       playerPanel.setFriendIdentity(ownWalletAddress, ownCustodialWallet ?? ownWalletAddress);
       lastInboxPollTime = 0;
       lastFriendsPollTime = 0;
@@ -462,7 +516,14 @@ const charSelect = !isAnimationLab
       agentChat.setEntityId(detail.entityId || null);
       questPanel.setPlayer(ownWalletAddress, true);
       controls.setLandingMode(false);
+      autoLockEnabled = true;
       setGameplayHudVisible(true);
+      gameSessionStartMs = Date.now();
+      trackXRGameEntered({ walletAddress: detail.walletAddress, entityId: detail.entityId, zoneId: detail.zoneId, characterName: detail.characterName });
+      if (detail.zoneId === "village-square" && !localStorage.getItem("wog:tutorial-v1")) {
+        const tut = new TutorialOverlay((id) => togglePanel(id as ManagedPanelId));
+        tut.start();
+      }
       console.log("[enter] Character ready:", detail.characterName, "zone:", detail.zoneId);
 
       // Move camera to their zone and find the entity
@@ -475,9 +536,22 @@ const charSelect = !isAnimationLab
     },
     onBack: () => {
       charSelect!.hide();
-      desiredRunMode = null;
-      runPanel.reset();
       landing!.show();
+    },
+    onLogout: () => {
+      void (async () => {
+        try {
+          await xrAuth.disconnect();
+        } catch {
+          // Ignore disconnect failures — proceed with UI reset anyway.
+        }
+        ownWalletAddress = null;
+        ownCustodialWallet = null;
+        playerSession.reset();
+        entities.setOwnWallet(null);
+        charSelect!.hide();
+        landing!.show();
+      })();
     },
   })
   : null;
@@ -488,11 +562,11 @@ const landing = !isAnimationLab
     onEnterWorld: ({ walletAddress }) => {
       if (walletAddress) {
         ownWalletAddress = walletAddress.toLowerCase();
+        playerSession.initWallet(ownWalletAddress);
+        entities.setOwnWallet(ownWalletAddress);
         void charSelect!.show(ownWalletAddress);
       } else {
         // Guest mode — skip character select, enter as spectator
-        desiredRunMode = null;
-        runPanel.reset();
         controls.setLandingMode(false);
         setGameplayHudVisible(true);
         console.log("[enter] Guest spectator mode");
@@ -547,7 +621,6 @@ function setGameplayHudVisible(visible: boolean) {
     "player-panel",
     "panel-toggle",
     "agent-chat",
-    "run-panel",
     "minimap",
     "world-map",
     "intent-tooltip",
@@ -565,14 +638,71 @@ function setGameplayHudVisible(visible: boolean) {
   }
 }
 
+// ── PlayerSession-driven HUD + recovery ─────────────────────────────
+
+const PLAYER_PRESENT_STYLE = "background:rgba(30,60,40,0.9);border:1px solid #4f8;color:#4f8;text-shadow:0 0 6px rgba(68,255,136,0.4);";
+const PLAYER_REACQUIRING_STYLE = "background:rgba(80,60,20,0.9);border:1px solid #fc4;color:#fc4;text-shadow:0 0 6px rgba(255,204,68,0.4);";
+const PLAYER_LOST_STYLE = "background:rgba(80,20,20,0.9);border:1px solid #f44;color:#f88;text-shadow:0 0 6px rgba(255,68,68,0.4);";
+let lastFindOwnCharacterAt = 0;
+const FIND_OWN_BACKOFF_MS = 5000;
+function applyHudLockStyle(style: string) {
+  hudLock.style.cssText = hudLock.style.cssText.replace(/(background|border|color|text-shadow):[^;]+;?/g, "") + style;
+}
+
+let recoveryInFlight = false;
+async function triggerOwnRecovery() {
+  if (recoveryInFlight) return;
+  if (Date.now() - lastFindOwnCharacterAt < FIND_OWN_BACKOFF_MS) return;
+  if (playerSession.state !== "lost") return;
+  recoveryInFlight = true;
+  lastFindOwnCharacterAt = Date.now();
+  try {
+    await findOwnCharacter();
+  } catch (err) {
+    console.warn("[recovery] findOwnCharacter failed:", err);
+  } finally {
+    recoveryInFlight = false;
+    // If still lost, schedule another attempt.
+    if (playerSession.state === "lost") {
+      setTimeout(() => { void triggerOwnRecovery(); }, FIND_OWN_BACKOFF_MS);
+    }
+  }
+}
+
+playerSession.on((ev) => {
+  if (ev.type !== "state-changed") return;
+  switch (ev.to) {
+    case "reacquiring":
+      if (hudLock.style.display !== "none") {
+        applyHudLockStyle(PLAYER_REACQUIRING_STYLE);
+        hudLock.textContent = "REACQUIRING…";
+        hudLock.style.display = "block";
+      }
+      break;
+    case "lost":
+      applyHudLockStyle(PLAYER_LOST_STYLE);
+      hudLock.textContent = "RECONNECTING…";
+      hudLock.style.display = "block";
+      void triggerOwnRecovery();
+      break;
+    case "present":
+      applyHudLockStyle(PLAYER_PRESENT_STYLE);
+      // text is rewritten by lock-indicator block in pollNearbyZones
+      break;
+    default:
+      break;
+  }
+});
+
 // ── State ───────────────────────────────────────────────────────────
 
 let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
 let ownCustodialWallet: string | null = null;
 let ownEntityId: string | null = null;
+let lastKnownGoldCopper = 0;
+let ownCharacterInfo: { level: number; characterTokenId: string | null; agentId: string | null } | null = null;
 let latestActivePlayers: ActivePlayer[] = [];
-let desiredRunMode: boolean | null = null;
 let autoLockEnabled = isDisplayMode;
 let manualUnlockUntilMs = 0;
 let isPollingNearbyZones = false;
@@ -582,7 +712,6 @@ let questLogData: QuestLogResponse | null = null;
 let logoutInFlight = false;
 const QUEST_POLL_INTERVAL = 5_000;
 const processedRecentEventIds = new Map<string, number>();
-const DEFAULT_RUN_ENERGY = 100;
 
 async function logoutOwnCharacter(reason: string) {
   if (logoutInFlight || !ownWalletAddress || !ownEntityId) return;
@@ -627,66 +756,6 @@ function queueLogoutOnExit(reason: string) {
     console.warn(`[logout] keepalive failed during ${reason}:`, error);
     logoutInFlight = false;
   });
-}
-
-function updateRunPanelFromEntity(entity: Entity | null | undefined) {
-  if (!ownWalletAddress || !ownEntityId || !entity || entity.id !== ownEntityId) {
-    runPanel.update({
-      available: false,
-      enabled: false,
-      running: false,
-      energy: 0,
-      maxEnergy: DEFAULT_RUN_ENERGY,
-    });
-    return;
-  }
-
-  if (desiredRunMode != null && entity.runModeEnabled === desiredRunMode) {
-    desiredRunMode = null;
-  }
-
-  runPanel.update({
-    available: true,
-    enabled: desiredRunMode ?? entity.runModeEnabled ?? false,
-    running: entity.isRunning ?? false,
-    energy: entity.runEnergy ?? entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
-    maxEnergy: entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
-  });
-}
-
-async function toggleRunMode() {
-  if (!ownWalletAddress || !ownEntityId) return;
-
-  const ownEntity = entities.getEntity(ownEntityId);
-  const zoneId = ownEntity?.zoneId;
-  if (!ownEntity || !zoneId) return;
-
-  const nextEnabled = !(desiredRunMode ?? ownEntity.runModeEnabled ?? false);
-  desiredRunMode = nextEnabled;
-  updateRunPanelFromEntity({
-    ...ownEntity,
-    runModeEnabled: nextEnabled,
-  });
-
-  const token = await getAuthToken(ownWalletAddress);
-  if (!token) {
-    desiredRunMode = null;
-    updateRunPanelFromEntity(ownEntity);
-    return;
-  }
-
-  const result = await postCommand(token, {
-    zoneId,
-    entityId: ownEntityId,
-    action: "set-run",
-    runEnabled: nextEnabled,
-  });
-
-  if (!result.ok) {
-    console.log("[run] Toggle failed:", result.error);
-    desiredRunMode = null;
-    updateRunPanelFromEntity(entities.getEntity(ownEntityId));
-  }
 }
 
 function filterNewZoneEvents(events: NonNullable<ZoneResponse["recentEvents"]>) {
@@ -738,6 +807,7 @@ function tryLockOwnCharacter(activePlayers: ActivePlayer[]) {
   if (!me) return;
 
   ownEntityId = me.id;
+  playerSession.setSpawned(me.id, me.zoneId, playerSession.characterInfo);
 
   // Move camera to the player's zone so zone polling picks it up
   const zoneCenter = world.getZoneCenter(me.zoneId);
@@ -764,6 +834,7 @@ function tryFollowDisplayTarget(activePlayers: ActivePlayer[]) {
   if (!target) return;
 
   ownEntityId = target.id;
+  playerSession.setSpawned(target.id, target.zoneId, playerSession.characterInfo);
 
   const zoneCenter = world.getZoneCenter(target.zoneId);
   if (zoneCenter) {
@@ -804,6 +875,12 @@ async function findOwnCharacter() {
 
     console.log("[autolock] Found entity:", liveEntity.id, "zone:", liveEntity.zoneId, "name:", liveEntity.name);
     ownEntityId = liveEntity.id;
+    ownCharacterInfo = {
+      level: liveEntity.level ?? 1,
+      characterTokenId: liveEntity.characterTokenId ?? null,
+      agentId: liveEntity.agentId ?? null,
+    };
+    playerSession.setSpawned(liveEntity.id, liveEntity.zoneId, ownCharacterInfo);
     agentChat.setEntityId(liveEntity.id);
     hudLock.textContent = `FINDING: ${liveEntity.name ?? "character"}`;
     hudLock.style.display = "block";
@@ -840,7 +917,7 @@ const playerPanel = new PlayerPanel({
     if (player.id) {
       const pos = entities.getEntityPosition(player.id);
       if (pos) {
-        lockOn(player.id);
+        // Pan to the player's location without locking — camera stays on own character
         controls.setTarget(pos.x, pos.y, pos.z);
       }
     }
@@ -869,6 +946,17 @@ const playerPanel = new PlayerPanel({
     lastFriendsPollTime = 0;
     return `Friend request sent to ${player.name}`;
   },
+  onPartyInviteFriend: async (friend) => {
+    if (!ownWalletAddress) throw new Error("Party invite unavailable");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const fromZoneId = entities.getEntity(ownEntityId)?.zoneId;
+    if (!fromZoneId) throw new Error("Your champion is not in a zone");
+    const result = await inviteToParty(token, ownEntityId, fromZoneId, friend.wallet);
+    if (!result.ok) throw new Error(result.error ?? "Failed to send party invite");
+    return `Party invite sent to ${friend.name ?? friend.wogName ?? "friend"}`;
+  },
 });
 
 function locateFriend(friend: FriendInfo) {
@@ -878,7 +966,7 @@ function locateFriend(friend: FriendInfo) {
   if (online?.id) {
     const pos = entities.getEntityPosition(online.id);
     if (pos) {
-      lockOn(online.id);
+      // Pan to friend without locking — camera stays on own character
       controls.setTarget(pos.x, pos.y, pos.z);
       return;
     }
@@ -952,6 +1040,7 @@ const questPanel = new QuestPanel({
     agentChat.addSystemMessage(`${label}: contacting ${npcLabel}...`, "info");
     const result = await acceptQuest(ctx.token, ownEntityId!, questId);
     if (result.ok) {
+      trackXRQuestAccepted(questId);
       agentChat.addSystemMessage(`Quest accepted from ${npcLabel}.`, "success");
       lastQuestPollTime = 0;
       void pollQuests();
@@ -982,7 +1071,9 @@ const questPanel = new QuestPanel({
     agentChat.addSystemMessage(`${label}: contacting ${npcLabel}...`, "info");
     const result = await completeQuest(ctx.token, ownEntityId!, questId, npcEntityId);
     if (result.ok) {
+      trackXRQuestCompleted(questId, questTitle);
       agentChat.addSystemMessage(`Quest complete: "${questTitle}". Rewards granted.`, "success");
+      eventBanner.show("quest-complete", questTitle);
       lastQuestPollTime = 0;
       void pollQuests();
       return;
@@ -1046,7 +1137,9 @@ const questPanel = new QuestPanel({
     }
     const result = await abandonQuest(token, ownEntityId, questId);
     if (result.ok) {
+      trackXRQuestAbandoned(questId, questTitle);
       agentChat.addSystemMessage(`Quest abandoned: "${questTitle}".`, "info");
+      eventBanner.show("quest-abandoned", questTitle);
       lastQuestPollTime = 0;
       void pollQuests();
     } else {
@@ -1055,6 +1148,30 @@ const questPanel = new QuestPanel({
   },
   onOpenAvailable: () => {
     void refreshAvailableQuestsNow();
+  },
+  onFocusQuest: async (questId, questTitle) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Focus failed: deploy your agent first.", "error");
+      questPanel.setFocusedQuestId(null);
+      return;
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Focus failed: auth.", "error");
+      questPanel.setFocusedQuestId(null);
+      return;
+    }
+    const result = await focusAgentQuest(token, questId);
+    if (result.ok) {
+      questPanel.setFocusedQuestId(result.focusedQuestId ?? null);
+      agentChat.addSystemMessage(
+        questId ? `Agent now focused on "${questTitle}".` : "Quest focus cleared.",
+        "success",
+      );
+    } else {
+      agentChat.addSystemMessage(`Focus failed: ${result.error ?? "unknown error"}`, "error");
+      // Roll back the optimistic toggle by re-querying the agent status the next tick.
+    }
   },
 });
 
@@ -1076,37 +1193,585 @@ const bagPanel = new BagPanel({
     lastInventoryPollTime = 0;
     void pollInventory();
   },
+  onRecycleItem: async (item, qty) => {
+    if (!ownWalletAddress) return;
+    const sellerWallet = ownCustodialWallet ?? ownWalletAddress;
+    const stack = item.quantity ?? 1;
+    const sellQty = qty > 1 ? stack : 1;
+    const ask = sellQty > 1
+      ? `Recycle all ${stack}x ${item.name}?`
+      : `Recycle 1x ${item.name}?`;
+    if (!window.confirm(ask)) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await recycleItem(token, sellerWallet, item.tokenId, sellQty);
+    if (result.ok && result.data) {
+      agentChat.addSystemMessage(
+        `Recycled ${result.data.quantity}x ${result.data.item} for ${result.data.totalPayoutCopper}c`,
+        "success",
+      );
+      lastInventoryPollTime = 0;
+      void pollInventory();
+    } else {
+      agentChat.addSystemMessage(result.error ?? "Recycle failed", "error");
+    }
+  },
+  onSellItem: (item) => {
+    agentChat.addSystemMessage(
+      `To sell ${item.displayName ?? item.name}, walk to a Merchant NPC and use their shop dialog.`,
+      "info",
+    );
+  },
+  onAuctionItem: (item) => {
+    agentChat.addSystemMessage(
+      `To auction ${item.displayName ?? item.name}, visit an Auctioneer NPC in any town.`,
+      "info",
+    );
+  },
 });
 bagPanel.setPlayer(null, true);
+
+const CRAFT_STATION: Record<string, { endpoint: string; stationType: string; stationField: string }> = {
+  blacksmithing: { endpoint: "/crafting/forge",       stationType: "forge",          stationField: "forgeId"      },
+  alchemy:       { endpoint: "/alchemy/brew",         stationType: "alchemy-lab",    stationField: "alchemyLabId" },
+  cooking:       { endpoint: "/cooking/cook",         stationType: "campfire",       stationField: "campfireId"   },
+  leatherworking:{ endpoint: "/leatherworking/craft", stationType: "tanning-rack",   stationField: "stationId"    },
+  jewelcrafting: { endpoint: "/jewelcrafting/craft",  stationType: "jewelers-bench", stationField: "stationId"    },
+};
+
+async function craftRecipe(profId: string, recipeId: string): Promise<{ ok: boolean; message: string }> {
+  const cfg = CRAFT_STATION[profId];
+  if (!cfg) return { ok: false, message: "Crafting not available for this profession" };
+  if (!ownEntityId || !ownWalletAddress) return { ok: false, message: "Deploy your agent first" };
+
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, message: "Sign in to craft" };
+
+  const zoneId = entities.getEntity(ownEntityId)?.zoneId;
+  if (!zoneId) return { ok: false, message: "Entity not in any zone" };
+
+  const batch = await fetchZonesBatch([zoneId]);
+  const zoneData = batch[zoneId];
+  if (!zoneData) return { ok: false, message: "Zone data unavailable" };
+
+  const stationEntries = Object.entries(zoneData.entities).filter(([, e]) => (e as any).type === cfg.stationType);
+  if (stationEntries.length === 0) {
+    return { ok: false, message: `No ${cfg.stationType} in this zone — move to a crafting area` };
+  }
+
+  const ownEnt = zoneData.entities[ownEntityId] as any;
+  const px = ownEnt?.x ?? 0, pz = ownEnt?.y ?? 0;
+  stationEntries.sort(([, a], [, b]) => {
+    const ea = a as any, eb = b as any;
+    return Math.hypot(ea.x - px, (ea.y ?? 0) - pz) - Math.hypot(eb.x - px, (eb.y ?? 0) - pz);
+  });
+  const [stationId] = stationEntries[0];
+
+  const wallet = ownCustodialWallet ?? ownWalletAddress;
+  const body: Record<string, string> = { walletAddress: wallet, zoneId, entityId: ownEntityId, [cfg.stationField]: stationId, recipeId };
+  const result = await craftAtStation(token, cfg.endpoint, body);
+  return result.ok
+    ? { ok: true,  message: result.data?.message ?? "Crafted successfully!" }
+    : { ok: false, message: result.error ?? "Crafting failed" };
+}
+
+const recipesPanel = new RecipesPanel();
 const skillsPanel = new SkillsPanel({
   saveEdicts: (edicts) => saveEdictsToShard(edicts),
   onTabChange: (tab) => {
     if (tab === "professions") { lastProfessionPollTime = 0; void pollProfessions(); }
     else if (tab === "skills") { lastLearnedTechPollTime = 0; void pollLearnedTechniques(); }
     else if (tab === "edicts") { lastLearnedTechPollTime = 0; lastEdictsPollTime = 0; void pollLearnedTechniques(); void pollEdicts(); }
+    else if (tab === "farm") { lastFarmPollTime = 0; void pollFarm(); }
+  },
+  onProfessionClick: (info) => {
+    void recipesPanel.show({
+      ...info,
+      onCraft: info.profId in CRAFT_STATION ? (recipeId) => craftRecipe(info.profId, recipeId) : undefined,
+    });
   },
 });
-const vitalsPanel = new VitalsPanel();
+const vitalsPanel = new VitalsPanel({
+  onLeaveParty: async () => {
+    if (!ownWalletAddress || !ownCustodialWallet) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await leaveParty(token, ownCustodialWallet);
+    if (result.ok) {
+      agentChat.addSystemMessage("Left the party.", "info");
+    } else {
+      agentChat.addSystemMessage(`Leave failed: ${result.error ?? "unknown"}`, "error");
+    }
+  },
+});
+const buffBar = new BuffBar();
 let lastInventoryPollTime = 0;
 let lastProfessionPollTime = 0;
 let lastLearnedTechPollTime = 0;
 let lastEdictsPollTime = 0;
 let lastInboxPollTime = 0;
 let lastFriendsPollTime = 0;
+let lastPartyPollTime = 0;
+let lastFarmPollTime = 0;
+const PARTY_POLL_INTERVAL = 5_000;
 const INVENTORY_POLL_INTERVAL = 10_000;
 const PROFESSION_POLL_INTERVAL = 15_000;
 const LEARNED_TECH_POLL_INTERVAL = 20_000;
 const EDICTS_POLL_INTERVAL = 30_000;
 const INBOX_POLL_INTERVAL = 15_000;
 const FRIENDS_POLL_INTERVAL = 15_000;
+const FARM_POLL_INTERVAL = 20_000;
+
+// ── Wallet panel ──────────────────────────────────────────────────
+const walletPanel = new WalletPanel({
+  getToken: () => ownWalletAddress ? getAuthToken(ownWalletAddress) : Promise.resolve(null),
+  // Owner wallet — used for auth-bound API calls (/nanopay/status etc).
+  getWallet: () => ownWalletAddress,
+  // Deposit / copy-button address — the agent's custodial wallet is what
+  // the USDC deposit watcher actually credits.
+  getReceiveAddress: () => ownCustodialWallet ?? ownWalletAddress,
+  getStats: () => {
+    const ent = ownEntityId ? entities.getEntity(ownEntityId) : null;
+    if (!ent) return null;
+    return {
+      goldCopper: lastKnownGoldCopper,
+      xp: (ent as any).xp ?? 0,
+      level: (ent as any).level ?? 1,
+      maxXp: (ent as any).maxXp ?? undefined,
+    };
+  },
+});
 
 // ── Bottom-right action bar ────────────────────────────────────────
 const actionBar = new ActionBar();
+let currentInventoryItems: InventoryItem[] = [];
+let pendingTradeTarget: { wallet: string; name: string } | null = null;
+const tradeOfferDialog = new TradeOfferDialog({
+  onSubmit: async ({ tokenId, quantity, askPrice, itemName }) => {
+    if (!pendingTradeTarget) throw new Error("No trade recipient selected");
+    if (!ownWalletAddress || !ownEntityId) throw new Error("Deploy your agent first");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("Auth failed — sign in again");
+    const sellerAddress = ownCustodialWallet ?? ownWalletAddress;
+
+    agentChat.addSystemMessage(
+      `Listing ${itemName} for ${askPrice}g (sealed via BITE) — sending to ${pendingTradeTarget.name}...`,
+      "progress",
+    );
+    const result = await listTrade(token, {
+      sellerAddress,
+      tokenId,
+      quantity,
+      askPrice,
+      targetBuyerWallet: pendingTradeTarget.wallet,
+    });
+    if (!result.ok) {
+      const err = result.error ?? "trade-list failed";
+      agentChat.addSystemMessage(`Trade offer failed: ${err}`, "error");
+      throw new Error(err);
+    }
+    agentChat.addSystemMessage(
+      `Offer #${result.tradeId} sent to ${pendingTradeTarget.name}.`,
+      "success",
+    );
+    pendingTradeTarget = null;
+  },
+});
+
+// === Shared accept/decline handlers (used by both inbox row and popup) ===
+
+async function performAcceptDuel(challengeId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) {
+    agentChat.addSystemMessage("Accept duel: deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    agentChat.addSystemMessage("Accept duel: auth failed.", "error");
+    return { ok: false, error: "Auth failed." };
+  }
+  agentChat.addSystemMessage("Accepting duel — queueing now.", "progress");
+  const result = await acceptDuel(token, challengeId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Duel accept failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Duel accepted — match starts when both are queued.", "success");
+  return { ok: true };
+}
+
+async function performDeclineDuel(challengeId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) return { ok: false, error: "Deploy your agent first." };
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await declineDuel(token, challengeId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Duel decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Duel declined.", "info");
+  return { ok: true };
+}
+
+async function performAcceptPartyInvite(inviteId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) {
+    agentChat.addSystemMessage("Deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await acceptPartyInvite(token, ownCustodialWallet, inviteId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Party join failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Joined the party!", "success");
+  return { ok: true };
+}
+
+async function performDeclinePartyInvite(inviteId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) return { ok: false, error: "Deploy your agent first." };
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await declinePartyInvite(token, ownCustodialWallet, inviteId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Party invite declined.", "info");
+  return { ok: true };
+}
+
+async function performAcceptFriendRequest(requestId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) {
+    agentChat.addSystemMessage("Deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await acceptFriendRequest(token, ownCustodialWallet, requestId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Friend accept failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Friend added.", "success");
+  lastFriendsPollTime = 0;
+  void pollFriends();
+  return { ok: true };
+}
+
+async function performDeclineFriendRequest(requestId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress || !ownCustodialWallet) return { ok: false, error: "Deploy your agent first." };
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) return { ok: false, error: "Auth failed." };
+  const result = await declineFriendRequest(token, ownCustodialWallet, requestId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage("Friend request declined.", "info");
+  lastFriendsPollTime = 0;
+  void pollFriends();
+  return { ok: true };
+}
+
+async function performAcceptTrade(offer: TradeOfferPayload): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) {
+    agentChat.addSystemMessage("Accept trade: deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    agentChat.addSystemMessage("Accept trade: auth failed — sign in again.", "error");
+    return { ok: false, error: "Auth failed." };
+  }
+  const buyerAddress = ownCustodialWallet ?? ownWalletAddress;
+  const itemDisplay = offer.itemName ?? `token #${offer.tokenId}`;
+  agentChat.addSystemMessage(
+    `Accepting offer from ${offer.sellerName} for ${itemDisplay} (${offer.askPrice}g) — BITE CTX can take ~30s.`,
+    "progress",
+  );
+  const result = await acceptTradeOffer(token, {
+    tradeId: offer.tradeId,
+    buyerAddress,
+    bidPrice: offer.askPrice,
+  });
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Trade failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  if (result.matched) {
+    agentChat.addSystemMessage(`Trade complete! Received ${itemDisplay}.`, "success");
+  } else {
+    agentChat.addSystemMessage(
+      `Trade submitted but did not match: ${result.reason ?? "see logs"}`,
+      "error",
+    );
+  }
+  lastInventoryPollTime = 0;
+  void pollInventory();
+  return { ok: true };
+}
+
+async function performDeclineTrade(offer: TradeOfferPayload): Promise<{ ok: boolean; error?: string }> {
+  if (!ownWalletAddress) {
+    agentChat.addSystemMessage("Decline trade: deploy your agent first.", "error");
+    return { ok: false, error: "Deploy your agent first." };
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    agentChat.addSystemMessage("Decline trade: auth failed.", "error");
+    return { ok: false, error: "Auth failed." };
+  }
+  const result = await rejectTradeOffer(token, offer.tradeId);
+  if (!result.ok) {
+    agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+    return { ok: false, error: result.error };
+  }
+  agentChat.addSystemMessage(`Offer from ${offer.sellerName} declined.`, "info");
+  return { ok: true };
+}
+
+// Forward-declared so InboxPanel onXxxArrived callbacks can enqueue into it.
+// Assigned right after inboxPanel is constructed.
+let requestPopup: RequestPopup | null = null;
+
 const inboxPanel = new InboxPanel({
   onUnreadChange: (count: number) => {
     actionBar.setBadge("inbox", count);
   },
+  onDuelRequest: (req) => {
+    requestPopup?.enqueue({
+      id: req.challengeId,
+      kind: "duel",
+      title: "DUEL CHALLENGE",
+      subtitle: `From ${req.challengerName}`,
+      rows: [{ label: "Format", value: req.format }],
+      expiresAtMs: req.expiresAtMs,
+      onAccept: async () => {
+        const r = await performAcceptDuel(req.challengeId);
+        inboxPanel.markDuelActioned(req.challengeId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclineDuel(req.challengeId);
+        inboxPanel.markDuelActioned(req.challengeId, r.ok ? "declined" : "failed");
+        return r;
+      },
+    });
+  },
+  onPartyInviteArrived: (req) => {
+    requestPopup?.enqueue({
+      id: req.inviteId,
+      kind: "party",
+      title: "PARTY INVITE",
+      subtitle: `From ${req.inviterName}`,
+      rows: [],
+      acceptLabel: "Join Party",
+      onAccept: async () => {
+        const r = await performAcceptPartyInvite(req.inviteId);
+        inboxPanel.markPartyInviteActioned(req.inviteId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclinePartyInvite(req.inviteId);
+        inboxPanel.markPartyInviteActioned(req.inviteId, r.ok ? "declined" : "failed");
+        return r;
+      },
+    });
+  },
+  onTradeOfferArrived: (offer) => {
+    const itemDisplay = offer.itemName ?? `Token #${offer.tokenId}`;
+    const rows: Array<{ label: string; value: string }> = [
+      { label: "Item", value: itemDisplay },
+    ];
+    if (offer.quantity > 1) rows.push({ label: "Quantity", value: `\u00d7${offer.quantity}` });
+    rows.push({ label: "Price", value: `${offer.askPrice}g` });
+    requestPopup?.enqueue({
+      id: String(offer.tradeId),
+      kind: "trade",
+      title: "TRADE OFFER",
+      subtitle: `From ${offer.sellerName}`,
+      rows,
+      expiresAtMs: offer.expiresAtMs,
+      acceptLabel: "Buy",
+      onAccept: async () => {
+        const r = await performAcceptTrade(offer);
+        inboxPanel.markTradeActioned(offer.tradeId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclineTrade(offer);
+        inboxPanel.markTradeActioned(offer.tradeId, r.ok ? "declined" : "failed");
+        return r;
+      },
+    });
+  },
+  onAcceptTrade: performAcceptTrade,
+  onDeclineTrade: performDeclineTrade,
+  onTradeResult: (data) => {
+    // A trade-result message (accepted / declined / expired) just landed — the
+    // seller's gold or inventory has likely changed. Force the next inventory
+    // poll to bypass the throttle so the UI catches the delta within ~1s.
+    lastInventoryPollTime = 0;
+    void pollInventory();
+    if (data.kind === "trade-completed") {
+      agentChat.addSystemMessage(
+        data.tradeId !== undefined ? `Trade #${data.tradeId} settled.` : "Trade settled.",
+        "success",
+      );
+    } else if (data.kind === "trade-declined") {
+      agentChat.addSystemMessage(
+        data.tradeId !== undefined ? `Trade #${data.tradeId} declined by buyer.` : "Trade declined.",
+        "info",
+      );
+    } else if (data.kind === "trade-expired") {
+      agentChat.addSystemMessage(
+        data.tradeId !== undefined ? `Trade #${data.tradeId} expired.` : "Trade expired.",
+        "info",
+      );
+    }
+  },
+  onMatchFound: (data) => {
+    const arena = data.arenaName ?? "the coliseum";
+    const team = data.team ? data.team.toUpperCase() : "";
+    agentChat.addSystemMessage(
+      `Match found in ${arena} — you're on team ${team}. Opening arena viewer…`,
+      "success",
+    );
+    playSoundEffect("ui_notification");
+    if (data.battleId) {
+      npcDialog.setCurrentBattleId(data.battleId);
+      void npcDialog.openBattleViewer(data.battleId);
+      void refreshCurrentBattle(data.battleId);
+    }
+  },
+  onOpenBattle: (battleId) => {
+    npcDialog.setCurrentBattleId(battleId);
+    void npcDialog.openBattleViewer(battleId);
+    void refreshCurrentBattle(battleId);
+  },
+  onAcceptDuel: performAcceptDuel,
+  onDeclineDuel: performDeclineDuel,
+  onAcceptPartyInvite: performAcceptPartyInvite,
+  onDeclinePartyInvite: performDeclinePartyInvite,
+  onFriendRequestArrived: (req) => {
+    requestPopup?.enqueue({
+      id: req.requestId,
+      kind: "friend",
+      title: "FRIEND REQUEST",
+      subtitle: `From ${req.fromName}`,
+      rows: [],
+      acceptLabel: "Accept",
+      onAccept: async () => {
+        const r = await performAcceptFriendRequest(req.requestId);
+        inboxPanel.markFriendRequestActioned(req.requestId, r.ok ? "accepted" : "failed");
+        return r;
+      },
+      onDecline: async () => {
+        const r = await performDeclineFriendRequest(req.requestId);
+        inboxPanel.markFriendRequestActioned(req.requestId, r.ok ? "declined" : "failed");
+        return r;
+      },
+    });
+  },
+  onAcceptFriendRequest: performAcceptFriendRequest,
+  onDeclineFriendRequest: performDeclineFriendRequest,
 });
+
+requestPopup = new RequestPopup();
+
+// Clear popup queue on wallet/identity change so requests from a previous
+// session don't linger after logout or character switch.
+playerSession.on((ev) => {
+  if (ev.type === "wallet-changed") requestPopup?.clear();
+});
+
+const outgoingTradesPanel = new OutgoingTradesPanel({
+  refresh: async () => {
+    if (!ownWalletAddress) return [];
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return [];
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    const res = await fetchOutgoingTrades(token, wallet);
+    return res?.offers ?? [];
+  },
+  onCancel: async (tradeId) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Cancel failed: deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Cancel failed: auth — sign in again.", "error");
+      return { ok: false };
+    }
+    agentChat.addSystemMessage(`Cancelling trade #${tradeId}...`, "progress");
+    const result = await cancelTrade(token, tradeId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Cancel failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage(`Trade #${tradeId} cancelled.`, "info");
+    return { ok: true };
+  },
+});
+
+const betsPanel = new BetsPanel({
+  refreshPools: () => fetchActivePools(),
+  refreshHistory: async () => {
+    if (!ownWalletAddress) return [];
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    const history = await fetchBettingHistory(wallet);
+    return history?.bets ?? [];
+  },
+  onPlaceBet: async (poolId, choice, amount) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Bet failed: deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false };
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    agentChat.addSystemMessage(`Placing ${amount}g on ${choice}...`, "progress");
+    const result = await placeBet(token, { poolId, choice, amount, walletAddress: wallet });
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Bet failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage(`Bet placed: ${amount}g on ${choice}.`, "success");
+    return { ok: true };
+  },
+  onClaim: async (poolId) => {
+    if (!ownWalletAddress) return { ok: false };
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return { ok: false };
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    agentChat.addSystemMessage(`Claiming winnings...`, "progress");
+    const result = await claimWinnings(token, poolId, wallet);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Claim failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage(`Winnings claimed.`, "success");
+    lastInventoryPollTime = 0;
+    void pollInventory();
+    return { ok: true };
+  },
+});
+
+// Unified notifications hub — inbox / trades / bets all live under one icon.
+const notificationsPanel = new NotificationsPanel({
+  inbox: inboxPanel,
+  trades: outgoingTradesPanel,
+  bets: betsPanel,
+});
+
+// Install responsive panel overrides AFTER all panels have injected their
+// own stylesheets so our `!important` overrides take precedence cleanly.
+installMobileResponsiveStyles();
+
+actionBar.addButton({ id: "wallet", icon: "\u{1F4B0}", label: "Wallet", key: "K", onClick: () => togglePanel("wallet") });
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => togglePanel("bag") });
 actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => togglePanel("skills") });
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => togglePanel("quests") });
@@ -1120,6 +1785,10 @@ actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", on
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => togglePanel("players") });
 actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => togglePanel("inbox") });
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
+  if (inspector.inspectedEntity?.id === ownEntityId) {
+    inspector.hide();
+    return;
+  }
   if (ownEntityId) {
     const ent = entities.getEntity(ownEntityId);
     if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
@@ -1127,7 +1796,7 @@ actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "
 }});
 actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => togglePanel("settings") });
 
-type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "settings";
+type ManagedPanelId = "wallet" | "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "settings";
 type ManagedPanel = {
   show: () => void;
   hide: () => void;
@@ -1136,6 +1805,11 @@ type ManagedPanel = {
 };
 
 const managedPanels: Record<ManagedPanelId, ManagedPanel> = {
+  wallet: {
+    show: () => walletPanel.show(),
+    hide: () => walletPanel.hide(),
+    isVisible: () => walletPanel.isVisible(),
+  },
   bag: {
     show: () => bagPanel.show(),
     hide: () => bagPanel.hide(),
@@ -1165,9 +1839,9 @@ const managedPanels: Record<ManagedPanelId, ManagedPanel> = {
     isVisible: () => playerPanel.isVisible(),
   },
   inbox: {
-    show: () => inboxPanel.show(),
-    hide: () => inboxPanel.hide(),
-    isVisible: () => inboxPanel.isVisible(),
+    show: () => notificationsPanel.show(),
+    hide: () => notificationsPanel.hide(),
+    isVisible: () => notificationsPanel.isVisible(),
     onOpen: () => { lastInboxPollTime = 0; void pollInbox(); },
   },
   settings: {
@@ -1199,6 +1873,7 @@ function openPanel(id: ManagedPanelId) {
   const panel = managedPanels[id];
   panel.show();
   panel.onOpen?.();
+  trackXRPanelOpened(id);
   refreshActionBarActiveStates();
 }
 
@@ -1215,54 +1890,160 @@ function togglePanel(id: ManagedPanelId) {
 function initDesktopPanelDragging() {
   const isDesktop = () => !window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
   const draggableDefs: Array<{ id: string; handleSelector?: string }> = [
+    { id: "wallet-panel", handleSelector: ".wp-header" },
     { id: "bag-panel", handleSelector: ".bag-header" },
     { id: "skills-panel", handleSelector: ".sk-drag-handle" },
+    { id: "recipes-panel", handleSelector: ".rp-drag-handle" },
     { id: "quest-panel", handleSelector: ".qp-header" },
-    { id: "player-panel", handleSelector: ".pp-tabs" },
+    { id: "player-panel", handleSelector: ".pp-drag-handle" },
     { id: "inbox-panel", handleSelector: ".ibx-header" },
+    { id: "outgoing-trades-panel", handleSelector: ".otp-header" },
+    { id: "bets-panel", handleSelector: ".bp-header" },
     { id: "settings-panel", handleSelector: ".settings-header" },
     { id: "agent-chat", handleSelector: ".agent-chat-tabs" },
   ];
+
+  // Storage version. Bump when validator rules change so stale positions get
+  // discarded automatically (no need for the user to run wogResetPanels()).
+  const PANEL_DRAG_STORAGE_VERSION = 2;
+
+  // One-time migration: wipe pre-v2 keys. The loose validator accepted
+  // positions like (5, 10) that get pinned behind AgentChat / chat log /
+  // status HUD in the upper-left corner, leaving the panel's drag handle
+  // obscured. Bumping the version forces a clean default for everyone.
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("wog:panel-pos:") && !k.startsWith(`wog:panel-pos:v${PANEL_DRAG_STORAGE_VERSION}:`)) {
+        stale.push(k);
+      }
+    }
+    for (const k of stale) localStorage.removeItem(k);
+    if (stale.length > 0) console.log(`[panel-drag] migrated ${stale.length} legacy panel-position key(s) to v${PANEL_DRAG_STORAGE_VERSION}`);
+  } catch {
+    // localStorage unavailable — ignore.
+  }
+
+  // Minimum visible area of the drag handle that must stay on-screen so the
+  // user can always grab the panel and pull it back.
+  const MIN_VISIBLE_PX = 32;
+
+  // Upper-left HUD overlap zone. AgentChat (collapsed), ChatLog, and status
+  // indicators live here and intercept pointer events — a panel restored
+  // into this rectangle has its drag handle obscured. We refuse positions
+  // here even though they pass the on-screen reachability check.
+  const HUD_ZONE_LEFT = 80;
+  const HUD_ZONE_TOP = 60;
+
+  const isPanelRendered = (el: HTMLElement): boolean => {
+    // offsetParent is null for display:none, but null also for fixed-position
+    // roots whose ancestors are visible — so fall back to a size check.
+    return el.offsetWidth > 0 && el.offsetHeight > 0;
+  };
+
+  const reachable = (left: number, top: number, panelId: string): boolean => {
+    // AgentChat's default home is the lower-left; don't reject its own corner.
+    const isAgentChat = panelId === "agent-chat";
+    if (!isAgentChat && left < HUD_ZONE_LEFT && top < HUD_ZONE_TOP) return false;
+    return (
+      left + MIN_VISIBLE_PX >= 0 &&
+      top >= 0 &&
+      left <= window.innerWidth - MIN_VISIBLE_PX &&
+      top <= window.innerHeight - MIN_VISIBLE_PX
+    );
+  };
+
+  const resetters: Array<() => void> = [];
+
   for (const def of draggableDefs) {
     const el = document.getElementById(def.id) as HTMLDivElement | null;
     if (!el) continue;
     const handle = (def.handleSelector ? el.querySelector(def.handleSelector) : null) as HTMLElement | null ?? el;
-    const key = `wog:panel-pos:${def.id}`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      try {
-        const pos = JSON.parse(saved) as { left?: number; top?: number };
-        let shouldApply = typeof pos.left === "number" && typeof pos.top === "number";
-        // Ignore obviously bad saved top-left state from the prior drag regression.
-        if (shouldApply && (pos.left as number) <= 4 && (pos.top as number) <= 4) {
-          localStorage.removeItem(key);
-          shouldApply = false;
-        }
-        if (shouldApply) {
-          const left = pos.left as number;
-          const top = pos.top as number;
-          el.style.left = `${Math.round(left)}px`;
-          el.style.top = `${Math.round(top)}px`;
-          el.style.right = "auto";
-          el.style.bottom = "auto";
-        }
-      } catch {
-        // ignore invalid localStorage payload
-      }
-    }
-
-    let dragging = false;
-    let offsetX = 0;
-    let offsetY = 0;
+    const key = `wog:panel-pos:v${PANEL_DRAG_STORAGE_VERSION}:${def.id}`;
 
     const clamp = (left: number, top: number) => {
       const maxLeft = Math.max(0, window.innerWidth - el.offsetWidth);
       const maxTop = Math.max(0, window.innerHeight - el.offsetHeight);
       return { left: Math.min(maxLeft, Math.max(0, left)), top: Math.min(maxTop, Math.max(0, top)) };
     };
-    const saveCurrent = () => {
-      localStorage.setItem(key, JSON.stringify({ left: el.offsetLeft, top: el.offsetTop }));
+    const applyPos = (left: number, top: number) => {
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+      el.style.right = "auto";
+      el.style.bottom = "auto";
     };
+    const saveCurrent = () => {
+      const left = el.offsetLeft;
+      const top = el.offsetTop;
+      // Don't persist positions that would re-trigger the upper-left HUD-trap
+      // bug on next reload. The user can still drop the panel there for the
+      // current session, but on reload CSS defaults restore a usable spot.
+      if (!reachable(left, top, def.id)) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(key, JSON.stringify({ left, top }));
+    };
+    const clearSaved = () => {
+      localStorage.removeItem(key);
+      el.style.left = "";
+      el.style.top = "";
+      el.style.right = "";
+      el.style.bottom = "";
+    };
+    resetters.push(clearSaved);
+
+    const readSaved = (): { left: number; top: number } | null => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      try {
+        const pos = JSON.parse(raw) as { left?: number; top?: number };
+        if (typeof pos.left !== "number" || typeof pos.top !== "number") return null;
+        if (!reachable(pos.left, pos.top, def.id)) {
+          // Position is unreachable in this viewport OR sits behind the HUD
+          // overlap zone in the upper-left. Discard so CSS default kicks in
+          // and the panel returns to a known-good corner.
+          console.warn(`[panel-drag] discarding bad saved position for ${def.id}:`, pos);
+          localStorage.removeItem(key);
+          return null;
+        }
+        return { left: pos.left, top: pos.top };
+      } catch {
+        localStorage.removeItem(key);
+        return null;
+      }
+    };
+
+    // Try to restore position now; if the panel isn't rendered yet, we'll
+    // retry the first time it actually becomes visible. This is the key fix:
+    // applying coords from localStorage while the panel was display:none used
+    // to silently leave a stale layout that resized to (0,0) on first show.
+    let positionApplied = false;
+    const tryApplySaved = () => {
+      if (positionApplied) return;
+      const pos = readSaved();
+      if (!pos) { positionApplied = true; return; }
+      if (!isPanelRendered(el)) return; // wait for next show
+      const next = clamp(pos.left, pos.top);
+      applyPos(next.left, next.top);
+      positionApplied = true;
+    };
+    tryApplySaved();
+
+    if (!positionApplied) {
+      // Observe display/style changes; re-apply on first visibility.
+      const obs = new MutationObserver(() => {
+        if (positionApplied) { obs.disconnect(); return; }
+        tryApplySaved();
+        if (positionApplied) obs.disconnect();
+      });
+      obs.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+    }
+
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
 
     handle.style.cursor = "move";
     handle.addEventListener("pointerdown", (ev: PointerEvent) => {
@@ -1275,26 +2056,21 @@ function initDesktopPanelDragging() {
       dragging = true;
       offsetX = ev.clientX - el.offsetLeft;
       offsetY = ev.clientY - el.offsetTop;
-      el.style.left = `${el.offsetLeft}px`;
-      el.style.top = `${el.offsetTop}px`;
-      el.style.right = "auto";
-      el.style.bottom = "auto";
+      applyPos(el.offsetLeft, el.offsetTop);
       handle.setPointerCapture(ev.pointerId);
       ev.preventDefault();
     });
     handle.addEventListener("pointermove", (ev: PointerEvent) => {
       if (!dragging) return;
       const next = clamp(ev.clientX - offsetX, ev.clientY - offsetY);
-      el.style.left = `${next.left}px`;
-      el.style.top = `${next.top}px`;
+      applyPos(next.left, next.top);
     });
     const stopDrag = (ev: PointerEvent) => {
       if (!dragging) return;
       dragging = false;
       if (handle.hasPointerCapture(ev.pointerId)) handle.releasePointerCapture(ev.pointerId);
       const next = clamp(el.offsetLeft, el.offsetTop);
-      el.style.left = `${next.left}px`;
-      el.style.top = `${next.top}px`;
+      applyPos(next.left, next.top);
       saveCurrent();
     };
     handle.addEventListener("pointerup", stopDrag);
@@ -1302,12 +2078,21 @@ function initDesktopPanelDragging() {
 
     window.addEventListener("resize", () => {
       if (!isDesktop()) return;
+      // Don't touch hidden panels — their offsetLeft/Top are 0 and would
+      // overwrite the user's saved position with (0, 0).
+      if (!isPanelRendered(el)) return;
       const next = clamp(el.offsetLeft, el.offsetTop);
-      el.style.left = `${next.left}px`;
-      el.style.top = `${next.top}px`;
+      applyPos(next.left, next.top);
       saveCurrent();
     });
   }
+
+  // Emergency reset: from devtools, run `wogResetPanels()` to clear every
+  // saved panel position and fall back to CSS defaults.
+  (window as unknown as { wogResetPanels?: () => void }).wogResetPanels = () => {
+    for (const r of resetters) r();
+    console.log("[panel-drag] all panel positions reset to defaults");
+  };
 }
 
 function initPanelVisibilitySync() {
@@ -1315,12 +2100,13 @@ function initPanelVisibilitySync() {
     refreshActionBarActiveStates();
   });
   const panelIds: Record<ManagedPanelId, string> = {
+    wallet: "wallet-panel",
     bag: "bag-panel",
     skills: "skills-panel",
     quests: "quest-panel",
     chat: "agent-chat",
     players: "player-panel",
-    inbox: "inbox-panel",
+    inbox: "notifications-panel",
     settings: "settings-panel",
   };
   for (const panelId of Object.values(panelIds)) {
@@ -1334,16 +2120,132 @@ refreshActionBarActiveStates();
 initDesktopPanelDragging();
 initPanelVisibilitySync();
 
+/**
+ * Snapshot of the most recent zone-entity merge. Kept in sync with the
+ * VitalsPanel feed so PvP code paths (party detection, ArenaHud) can read
+ * fresh state without re-fetching.
+ */
+let latestEntities: Record<string, Entity> = {};
+
 const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
   getOwnEntityId: () => ownEntityId,
   getOwnWalletAddress: () => ownWalletAddress,
+  getOwnInventoryWallet: () => ownCustodialWallet ?? ownWalletAddress,
+  getOwnParty: () => {
+    if (!ownEntityId) return null;
+    const own = latestEntities[ownEntityId];
+    if (!own?.partyId) return null;
+    let size = 1;
+    for (const ent of Object.values(latestEntities)) {
+      if (ent.id !== own.id && ent.partyId === own.partyId && ent.type === "player") size++;
+    }
+    return { leaderId: ownEntityId, size };
+  },
+  getOwnCharacterInfo: () => {
+    if (!ownCharacterInfo) return null;
+    // Prefer the live in-world entity's level (it ticks up on level-up) over
+    // the cached liveEntity snapshot taken at autolock time.
+    const ent = ownEntityId ? entities.getEntity(ownEntityId) : null;
+    const currentLevel = ent?.level ?? ownCharacterInfo.level;
+    if (currentLevel > ownCharacterInfo.level) {
+      eventBanner.show("level-up", `${ent?.name ?? "You"} reached level ${currentLevel}`);
+      ownCharacterInfo.level = currentLevel;
+    }
+    return {
+      level: currentLevel,
+      characterTokenId: ownCharacterInfo.characterTokenId,
+      agentId: ownCharacterInfo.agentId,
+    };
+  },
+  notify: (text, kind) => agentChat.addSystemMessage(text, kind),
   onShowQuests: () => {
     openPanel("quests");
     questPanel.showAvailable();
     refreshActionBarActiveStates();
   },
 });
+
+// ── Persistent PvP HUD ──────────────────────────────────────────────
+// Hidden by default; the global current-battle poller below shows/hides it
+// based on /api/pvp/player/:agentId/current-battle responses.
+const arenaHud = new ArenaHud({
+  onForfeit: async (battleId) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Forfeit failed: deploy your agent first.", "error");
+      return;
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Forfeit failed: auth.", "error");
+      return;
+    }
+    agentChat.addSystemMessage("Forfeiting battle…", "progress");
+    const result = await cancelPvpBattle(token, battleId);
+    if (result.ok) {
+      agentChat.addSystemMessage("Battle forfeit.", "info");
+      arenaHud.clear();
+      npcDialog.setCurrentBattleId(null);
+    } else {
+      agentChat.addSystemMessage(`Forfeit failed: ${result.error ?? "unknown error"}`, "error");
+    }
+  },
+  onOpenViewer: (battleId) => {
+    void npcDialog.openBattleViewer(battleId);
+  },
+});
+
+let currentBattlePollTimer: ReturnType<typeof setInterval> | null = null;
+let currentBattleIdle = 2000;
+let currentBattleActive = 1000;
+let lastKnownBattleId: string | null = null;
+
+async function refreshCurrentBattle(forceBattleId?: string): Promise<void> {
+  if (!ownEntityId) return;
+  const targetId = forceBattleId ?? lastKnownBattleId;
+  if (targetId) {
+    const details = await fetchBattleDetails(targetId);
+    if (details) {
+      if (arenaHud.currentBattleId() === targetId) {
+        arenaHud.updateDetails(details, ownEntityId);
+      } else {
+        arenaHud.setBattle(targetId, details, ownEntityId);
+      }
+      lastKnownBattleId = targetId;
+      npcDialog.setCurrentBattleId(targetId);
+    }
+    return;
+  }
+  const status = await fetchCurrentBattle(ownEntityId);
+  if (status?.inBattle && status.battleId) {
+    const details = await fetchBattleDetails(status.battleId);
+    if (details) {
+      arenaHud.setBattle(status.battleId, details, ownEntityId);
+      lastKnownBattleId = status.battleId;
+      npcDialog.setCurrentBattleId(status.battleId);
+    }
+  } else if (lastKnownBattleId) {
+    arenaHud.clear();
+    lastKnownBattleId = null;
+    npcDialog.setCurrentBattleId(null);
+    agentChat.addSystemMessage("Match over.", "info");
+  }
+}
+
+function scheduleCurrentBattlePoll() {
+  if (currentBattlePollTimer) clearInterval(currentBattlePollTimer);
+  const ms = arenaHud.hasBattle() ? currentBattleActive : currentBattleIdle;
+  currentBattlePollTimer = setInterval(() => {
+    if (!ownEntityId) return;
+    void (async () => {
+      await refreshCurrentBattle();
+      const wantActive = arenaHud.hasBattle();
+      const currentMs = wantActive ? currentBattleActive : currentBattleIdle;
+      if (currentMs !== ms) scheduleCurrentBattlePoll();
+    })();
+  }, ms);
+}
+scheduleCurrentBattlePoll();
 
 if (landing) {
   controls.setLandingMode(true);
@@ -1409,8 +2311,14 @@ async function pollNearbyZones() {
     // into this tick's HP-delta damage numbers via preSync().
     const newEvents = filterNewZoneEvents(allEvents);
     entities.setOwnEntityId(ownEntityId);
+    entities.setOwnWallet(ownWalletAddress);
     entities.preSync(newEvents);
     entities.sync(merged, visibleIntents);
+    // sync() may have healed ownEntityId via wallet match (relogin case).
+    if (playerSession.entityId && playerSession.entityId !== ownEntityId) {
+      ownEntityId = playerSession.entityId;
+      agentChat.setEntityId(ownEntityId);
+    }
     intentLines.sync(merged, visibleIntents);
     intentTooltip.setText(intentLines.getPrimaryIntentLabel());
 
@@ -1450,17 +2358,23 @@ async function pollNearbyZones() {
       lockOn(ownEntityId);
     }
 
-    // Update lock indicator
+    // Update lock indicator. If locked to own-player, don't silently unlock when
+    // the entity drops from a snapshot — PlayerSession drives Reacquiring HUD instead.
     if (lockedEntityId) {
       if (merged[lockedEntityId]) {
         hudLock.textContent = merged[lockedEntityId].name;
       } else {
-        unlockCamera();
+        const isOwnLock = lockedEntityId === ownEntityId
+          || (playerSession.wallet && playerSession.entityId === lockedEntityId);
+        if (!isOwnLock) {
+          unlockCamera();
+        }
       }
     }
 
-    updateRunPanelFromEntity(ownEntityId ? merged[ownEntityId] : null);
+    latestEntities = merged;
     vitalsPanel.update(ownEntityId ? merged[ownEntityId] : null, merged);
+    buffBar.update(ownEntityId ? merged[ownEntityId] : null);
 
     // Minimap — pass camera in server coords
     const cameraSX = target.x / COORD_SCALE;
@@ -1481,10 +2395,16 @@ async function pollNearbyZones() {
     // Inventory poll (only when bag is open)
     if (bagPanel.isVisible()) void pollInventory();
     if (skillsPanel.isVisible()) kickSkillsPollForActiveTab(false);
+    // Always poll learned techniques in background so the "skill learned" banner
+    // fires (and the panel stays fresh) even when the Skills panel is closed.
+    // Self-throttled to LEARNED_TECH_POLL_INTERVAL.
+    void pollLearnedTechniques();
     // Inbox always polls in background so the unread badge stays fresh.
     void pollInbox();
     // Friends poll in background for request badges and online status.
     void pollFriends();
+    // Party status cross-zone so VitalsPanel shows members in other zones.
+    void pollPartyStatus();
   } finally {
     isPollingNearbyZones = false;
   }
@@ -1519,6 +2439,17 @@ async function pollQuests() {
 
   const log = await fetchQuestLog(addr);
   if (log) {
+    // Detect progress increments to show floating toast
+    if (questLogData) {
+      const prevMap = new Map(questLogData.activeQuests.map(q => [q.questId, q.progress]));
+      for (const q of log.activeQuests) {
+        const prev = prevMap.get(q.questId) ?? 0;
+        if (q.progress > prev && !q.complete) {
+          const target = q.objective.targetMobName ?? q.objective.targetItemName ?? q.objective.targetNpcName ?? "";
+          questProgressToast.show(q.objective.type, q.progress, q.required, target);
+        }
+      }
+    }
     questLogData = log;
     questPanel.updateQuestLog(log);
 
@@ -1582,11 +2513,19 @@ async function pollInventory() {
       playSoundEffect("ui_item_pickup");
     }
     prevInventoryItemCount = inv.items.length;
+    currentInventoryItems = inv.items;
     bagPanel.updateInventory(inv.items);
   }
   if (balance) {
+    lastKnownGoldCopper = balance.copper;
     bagPanel.updateGold(balance.copper);
   }
+}
+
+const prevProfessionLevels = new Map<string, number>();
+
+function professionDisplayName(id: string): string {
+  return id.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 async function pollProfessions() {
@@ -1599,9 +2538,54 @@ async function pollProfessions() {
 
   const data = await fetchProfessionStatus(addr);
   if (data) {
+    // Detect profession level-ups before updating the panel. First sample
+    // primes the map and stays silent so users don't get spammed on login.
+    const primed = prevProfessionLevels.size > 0;
+    for (const [profId, summary] of Object.entries(data.skills)) {
+      const prev = prevProfessionLevels.get(profId);
+      if (primed && prev !== undefined && summary.level > prev) {
+        eventBanner.show("profession-level-up", `${professionDisplayName(profId)} → Lv ${summary.level}`);
+      }
+      prevProfessionLevels.set(profId, summary.level);
+    }
+    setPlayerProfessionLevels(data.skills);
     skillsPanel.updateProfessions(data);
   }
 }
+
+async function pollFarm() {
+  const addr = ownCustodialWallet ?? ownWalletAddress;
+  if (!addr) return;
+  const now = Date.now();
+  if (now - lastFarmPollTime < FARM_POLL_INTERVAL) return;
+  lastFarmPollTime = now;
+
+  const zoneId = ownEntityId ? entities.getEntity(ownEntityId)?.zoneId ?? "" : "";
+
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const [plotRes, nodeRes] = await Promise.all([
+        fetch(toUrl(base, `/plots/owned/${addr}`)).then((r) => r.ok ? r.json() : null),
+        zoneId
+          ? fetch(toUrl(base, `/farming/nodes?region=${encodeURIComponent(zoneId)}`)).then((r) => r.ok ? r.json() : null)
+          : Promise.resolve(null),
+      ]);
+
+      const farmData: FarmTabData = {
+        plot: plotRes
+          ? { owned: !!plotRes.owned, ...(plotRes.plot ?? {}) }
+          : { owned: false },
+        nodes: nodeRes?.nodes ?? [],
+        currentZoneId: zoneId || undefined,
+      };
+      skillsPanel.updateFarm(farmData);
+      return;
+    } catch { /* try next base */ }
+  }
+}
+
+const prevLearnedTechniqueIds = new Set<string>();
+let prevLearnedTechniquesPrimed = false;
 
 async function pollLearnedTechniques() {
   if (!ownEntityId) return;
@@ -1613,7 +2597,23 @@ async function pollLearnedTechniques() {
       const res = await fetch(toUrl(base, `/techniques/learned/${ownEntityId}`));
       if (!res.ok) continue;
       const data = await res.json() as { techniques?: LearnedTechnique[] };
-      skillsPanel.updateTechniques(data.techniques ?? []);
+      const techniques = data.techniques ?? [];
+      if (prevLearnedTechniquesPrimed) {
+        for (const t of techniques) {
+          const id = String((t as any).techniqueId ?? (t as any).id ?? (t as any).name ?? "");
+          if (id && !prevLearnedTechniqueIds.has(id)) {
+            const name = String((t as any).name ?? id);
+            eventBanner.show("skill-learned", name);
+          }
+        }
+      }
+      prevLearnedTechniqueIds.clear();
+      for (const t of techniques) {
+        const id = String((t as any).techniqueId ?? (t as any).id ?? (t as any).name ?? "");
+        if (id) prevLearnedTechniqueIds.add(id);
+      }
+      prevLearnedTechniquesPrimed = true;
+      skillsPanel.updateTechniques(techniques);
       return;
     } catch {
       // Try the next candidate base.
@@ -1715,6 +2715,9 @@ function kickSkillsPollForActiveTab(force = true) {
   } else if (tab === "skills") {
     if (force) lastLearnedTechPollTime = 0;
     void pollLearnedTechniques();
+  } else if (tab === "farm") {
+    if (force) lastFarmPollTime = 0;
+    void pollFarm();
   } else {
     if (force) {
       lastLearnedTechPollTime = 0;
@@ -1743,6 +2746,27 @@ async function pollFriends() {
   if (now - lastFriendsPollTime < FRIENDS_POLL_INTERVAL) return;
   lastFriendsPollTime = now;
   await playerPanel.refreshFriends();
+}
+
+async function pollPartyStatus() {
+  if (!ownCustodialWallet) return;
+  const now = Date.now();
+  if (now - lastPartyPollTime < PARTY_POLL_INTERVAL) return;
+  lastPartyPollTime = now;
+  const status = await fetchPartyStatus(ownCustodialWallet);
+  if (status?.inParty && status.members.length > 0) {
+    vitalsPanel.setPartyMembers(status.members.map((m) => ({
+      id: m.entityId,
+      name: m.name,
+      hp: m.hp,
+      maxHp: m.maxHp,
+      essence: 0,
+      maxEssence: 0,
+      level: m.level,
+    })));
+  } else {
+    vitalsPanel.setPartyMembers([]);
+  }
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────
@@ -1803,12 +2827,13 @@ renderer.domElement.addEventListener("click", (e) => {
     } else {
       // Non-hostile NPC — open dialog without locking camera
       if (NpcDialog.isNpcType(entity.type) && ownEntityId) {
+        trackXRNpcDialogOpened(entity.type, entity.name);
         npcDialog.open(entity);
       } else if (GATHER_NODE_TYPES.has(entity.type)) {
         // Resource node — let the inspector's "gather" button drive the agent.
         // Do NOT auto-lock the camera; the user just wants to interact with it.
-      } else {
-        // Other non-hostile entity — lock camera to it
+      } else if (!ownEntityId) {
+        // Spectator / display mode — allow locking onto any entity
         lockOn(entity.id);
       }
     }
@@ -1883,11 +2908,15 @@ window.addEventListener("resize", () => {
   toonPipeline.setSize(window.innerWidth, window.innerHeight);
 });
 
+let gameSessionStartMs = 0;
+
 window.addEventListener("pagehide", () => {
+  if (gameSessionStartMs) trackXRSessionDuration(Date.now() - gameSessionStartMs, ownWalletAddress);
   queueLogoutOnExit("pagehide");
 });
 
 window.addEventListener("beforeunload", () => {
+  if (gameSessionStartMs) trackXRSessionDuration(Date.now() - gameSessionStartMs, ownWalletAddress);
   queueLogoutOnExit("beforeunload");
   bgm.dispose();
 });
@@ -1907,17 +2936,31 @@ if (navigator.xr) {
           return;
         }
 
+        let vrStartTime = 0;
         await xrSession.enterVR({
           onStart: async () => {
+            vrStartTime = Date.now();
+            trackXRVRSessionStarted();
             vrButton.textContent = "Exit VR";
+            // DOM overlays don't render in immersive XR — defer popups until exit.
+            requestPopup?.setSuspended(true);
             const { XRControllers } = await import("./xr/XRControllers.js");
             xrControllers = new XRControllers(
               renderer, scene,
               world.group.children as THREE.Object3D[],
-              xrSession.cameraRig
+              xrSession.cameraRig,
+              (x, z) => world.getElevationAt(x, z)
             );
+            // Lift the rig onto terrain immediately so we don't fall through
+            // the map at spawn while the headset pose initializes.
+            {
+              const rig = xrSession.cameraRig.position;
+              rig.y = world.getElevationAt(rig.x, rig.z);
+            }
             xrControllers.onTeleport = (pos) => {
-              xrSession.cameraRig.position.set(pos.x, 0, pos.z);
+              // Land on the actual terrain Y from the ray hit (not 0) so we
+              // don't end up below sloped ground.
+              xrSession.cameraRig.position.set(pos.x, pos.y, pos.z);
             };
             xrControllers.onSelect = (_ctrl, hits) => {
               const ent = entities.getEntityAt(hits);
@@ -1927,11 +2970,14 @@ if (navigator.xr) {
             };
           },
           onEnd: () => {
+            trackXRVRSessionEnded(vrStartTime ? Date.now() - vrStartTime : 0);
             vrButton.textContent = "Enter VR";
             xrControllers?.dispose();
             xrControllers = null;
             xrSession.cameraRig.position.set(0, 0, 0);
             xrSession.cameraRig.rotation.set(0, 0, 0);
+            // Resume popups — any requests that arrived during the VR session display now.
+            requestPopup?.setSuspended(false);
           },
         });
       });
@@ -1948,6 +2994,9 @@ window.addEventListener("keydown", (e) => {
   if (isDisplayMode) return;
   if (landing?.isActive()) return;
   if (charSelect?.isActive()) return;
+  // Don't intercept keys while typing in any input/textarea (e.g. Add Friends search)
+  const activeEl = document.activeElement;
+  if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
   // Don't intercept keys while typing in agent chat or NPC dialog
   if (agentChat.isFocused()) return;
   if (npcDialog.isOpen()) {
@@ -1975,11 +3024,6 @@ window.addEventListener("keydown", (e) => {
     openPanel("chat");
     return;
   }
-  if (e.key === "r" || e.key === "R") {
-    e.preventDefault();
-    void toggleRunMode();
-    return;
-  }
   if (e.key === "v" || e.key === "V") {
     intentLines.cycleVisibilityMode();
   }
@@ -1989,11 +3033,16 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "b" || e.key === "B") {
     togglePanel("bag");
   }
+  if (e.key === "k" || e.key === "K") {
+    togglePanel("wallet");
+  }
   if (e.key === "p" || e.key === "P") {
     togglePanel("skills");
   }
   if (e.key === "e" || e.key === "E") {
-    if (ownEntityId) {
+    if (inspector.inspectedEntity?.id === ownEntityId) {
+      inspector.hide();
+    } else if (ownEntityId) {
       const ent = entities.getEntity(ownEntityId);
       if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
     }
@@ -2059,14 +3108,21 @@ function animate() {
   }
 
   if (xrSession.isPresenting) {
-    xrControllers?.update();
+    xrControllers?.update(dt);
   } else {
-    // Follow own character
+    // Follow own character. Resolve by PlayerSession.entityId (auto-heals across
+    // relogin) when locked to self. During REACQUIRING, hold last target — don't
+    // silently freeze the world.
     if (lockedEntityId) {
-      const pos = entities.getEntityPosition(lockedEntityId);
+      const liveId = (lockedEntityId === ownEntityId && playerSession.entityId)
+        ? playerSession.entityId
+        : lockedEntityId;
+      const pos = entities.getEntityPosition(liveId);
       if (pos) {
         controls.setTarget(pos.x, pos.y, pos.z);
+        if (liveId !== lockedEntityId) lockedEntityId = liveId;
       }
+      // else: hold last setTarget — Reacquiring HUD tells the user what's happening.
     }
     controls.update(dt);
   }
@@ -2078,9 +3134,8 @@ function animate() {
   entities.update(dt, camera);
   effects.update(dt);
   intentLines.update(dt);
-  world.updateAnimations(dt);
-  syncWeaponsToTuner();
-
+  sky.tick(dt, camera.position);
+  world.updateAnimations(dt, scene.fog instanceof THREE.FogExp2 ? scene.fog.color : undefined);
   // Click-to-move marker
   clickMarker.update(dt);
   if (ownEntityId) {
@@ -2108,7 +3163,6 @@ async function init() {
     document.getElementById("player-panel")?.style.setProperty("display", "none");
     document.getElementById("panel-toggle")?.style.setProperty("display", "none");
     document.getElementById("agent-chat")?.style.setProperty("display", "none");
-    document.getElementById("run-panel")?.style.setProperty("display", "none");
     document.getElementById("minimap")?.style.setProperty("display", "none");
     document.getElementById("world-map")?.style.setProperty("display", "none");
     document.getElementById("intent-tooltip")?.style.setProperty("display", "none");
@@ -2151,9 +3205,21 @@ async function init() {
   await pollActivePlayers();
   landing?.setReady(true);
 
-  // Poll loop
-  setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
-  setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
+  // Poll loop — cadence comes from QualityManager and can change live
+  let zonePollTimer = window.setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
+  let playersPollTimer = window.setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
+
+  QualityManager.subscribe((_tier, cfg) => {
+    ZONE_POLL_INTERVAL = cfg.pollNearbyMs;
+    ACTIVE_PLAYERS_POLL_INTERVAL = cfg.pollPlayersMs;
+    clearInterval(zonePollTimer);
+    clearInterval(playersPollTimer);
+    zonePollTimer = window.setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
+    playersPollTimer = window.setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, cfg.dprCap));
+    toonPipeline.setRenderScale(cfg.renderScale, cfg.normalScale);
+    toonPipeline.setOutlineThickness(cfg.outlineThickness);
+  });
 
   // Display mode: resolve the followed wallet → liveEntity → camera + lock.
   // Retries every 3s until a live entity is found (character may not be
@@ -2163,6 +3229,8 @@ async function init() {
       if (!followWalletAddress) return;
       if (ownEntityId) return;
       ownWalletAddress = followWalletAddress;
+      playerSession.initWallet(ownWalletAddress);
+      entities.setOwnWallet(ownWalletAddress);
       await findOwnCharacter();
     };
     void tryResolve();

@@ -5,8 +5,10 @@ import {
   setSoundEffectMasterVolume,
   playSoundEffect,
 } from "../sfx.js";
+import { QualityManager } from "../quality/QualityManager.js";
+import { TIER_CONFIGS, TIER_LABELS, TIER_ORDER, type Tier } from "../quality/tierConfig.js";
 
-type TabId = "audio";
+type TabId = "audio" | "graphics";
 
 const MUSIC_MUTED_KEY = "wog-music-muted";
 const MUSIC_VOLUME_KEY = "wog-music-volume";
@@ -92,6 +94,7 @@ export class SettingsPanel {
   private buildTabs() {
     const tabs: Array<{ id: TabId; label: string }> = [
       { id: "audio", label: "Audio" },
+      { id: "graphics", label: "Graphics" },
     ];
     this.tabBar.innerHTML = "";
     for (const tab of tabs) {
@@ -115,6 +118,83 @@ export class SettingsPanel {
     }
     this.body.innerHTML = "";
     if (this.activeTab === "audio") this.renderAudioTab();
+    else if (this.activeTab === "graphics") this.renderGraphicsTab();
+  }
+
+  private renderGraphicsTab() {
+    const detected = QualityManager.detectedTier();
+    const current = QualityManager.current();
+    const stored = (() => {
+      try { return localStorage.getItem("wog-quality-tier") ?? ""; } catch { return ""; }
+    })();
+
+    const section = document.createElement("section");
+    section.className = "settings-section";
+    section.innerHTML = `<h3>Quality Tier</h3>`;
+
+    const detectedRow = document.createElement("div");
+    detectedRow.className = "settings-row";
+    detectedRow.innerHTML = `<span class="settings-slider-label">Detected</span><span style="color:#9ab">${TIER_LABELS[detected]}</span>`;
+    section.appendChild(detectedRow);
+
+    const selectRow = document.createElement("label");
+    selectRow.className = "settings-row settings-row-slider";
+    const selectLabel = document.createElement("span");
+    selectLabel.className = "settings-slider-label";
+    selectLabel.textContent = "Tier";
+    const select = document.createElement("select");
+    select.className = "settings-select";
+    const autoOpt = document.createElement("option");
+    autoOpt.value = "";
+    autoOpt.textContent = `Auto (${TIER_LABELS[detected]})`;
+    select.appendChild(autoOpt);
+    for (const tier of TIER_ORDER) {
+      const opt = document.createElement("option");
+      opt.value = tier;
+      opt.textContent = TIER_LABELS[tier];
+      select.appendChild(opt);
+    }
+    select.value = stored;
+    selectRow.appendChild(selectLabel);
+    selectRow.appendChild(select);
+    section.appendChild(selectRow);
+
+    const note = document.createElement("div");
+    note.className = "settings-graphics-note";
+    note.textContent =
+      "Some changes require reloading the page (antialias, asset preloads). DPR, render scale, and polling cadence update immediately.";
+    section.appendChild(note);
+
+    const reloadBtn = document.createElement("button");
+    reloadBtn.className = "settings-reload-btn";
+    reloadBtn.textContent = "Reload now";
+    reloadBtn.style.display = "none";
+    reloadBtn.addEventListener("click", () => window.location.reload());
+    section.appendChild(reloadBtn);
+
+    // Compare a target tier's config against what the renderer was built
+    // with — antialias and asset-preload decisions need a reload to apply.
+    const bootCfg = TIER_CONFIGS[current];
+    const needsReload = (next: Tier) => {
+      const target = TIER_CONFIGS[next];
+      return (
+        target.antialias !== bootCfg.antialias ||
+        target.preloadTown !== bootCfg.preloadTown ||
+        target.npcDeferMs !== bootCfg.npcDeferMs ||
+        target.preloadPlayerClassesAtBoot !== bootCfg.preloadPlayerClassesAtBoot
+      );
+    };
+
+    select.addEventListener("change", () => {
+      const value = select.value;
+      const next: Tier | null = value === "" ? null : (value as Tier);
+      QualityManager.setOverride(next);
+      const resolved = next ?? detected;
+      reloadBtn.style.display = needsReload(resolved) ? "" : "none";
+      playSoundEffect("ui_tab_switch");
+    });
+
+    this.body.appendChild(section);
   }
 
   private renderAudioTab() {
@@ -274,6 +354,41 @@ export class SettingsPanel {
         text-align: right;
         color: #888;
         font-variant-numeric: tabular-nums;
+      }
+      .settings-select {
+        flex: 1;
+        background: rgba(10, 16, 28, 0.8);
+        color: #ccc;
+        border: 1px solid rgba(255, 194, 79, 0.3);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font: 12px monospace;
+        cursor: pointer;
+      }
+      .settings-graphics-note {
+        margin-top: 8px;
+        padding: 6px 8px;
+        background: rgba(255, 194, 79, 0.08);
+        border: 1px solid rgba(255, 194, 79, 0.2);
+        border-radius: 4px;
+        color: #d4b370;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      .settings-reload-btn {
+        margin-top: 8px;
+        width: 100%;
+        background: rgba(255, 194, 79, 0.2);
+        border: 1px solid #ffc24f;
+        color: #ffc24f;
+        padding: 6px 10px;
+        font: bold 11px monospace;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .settings-reload-btn:hover {
+        background: rgba(255, 194, 79, 0.35);
       }
     `;
     document.head.appendChild(style);

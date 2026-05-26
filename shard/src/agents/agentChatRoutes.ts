@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { type Content, type FunctionDeclaration, type Part, type Type, FunctionCallingConfigMode } from "@google/genai";
 import { gemini, GEMINI_MODEL } from "./geminiClient.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { grantFreeStarterCredit, deductCost, getSessionBalance } from "../economy/sessionBudget.js";
 import { agentManager } from "./agentManager.js";
 import {
   getAgentConfig,
@@ -51,11 +52,11 @@ import { getLearnedTechniques, getTechniqueById } from "../combat/techniques.js"
 import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { buildPartyCoordinationReport } from "../social/partyReport.js";
-import { getPartyMemberIdsByPartyId } from "../social/partySystem.js";
+import { getPartyMemberIdsByPartyId, addEntityToParty, getPlayerPartyId, removeEntityFromParty } from "../social/partySystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
-import { getAgentOrigin } from "./agentDialogue.js";
+import { getAgentOrigin, emitAgentChat } from "./agentDialogue.js";
 import { handleSlashCommand } from "./slashCommands.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
@@ -66,6 +67,35 @@ import { getPromoCode, hasRedeemedPromoCode, redeemPromoCode, upsertPromoCode } 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(5_000) });
+}
+
+type ChatActionStatus = "completed" | "queued" | "accepted" | "blocked" | "failed";
+
+interface ChatActionResult {
+  status: ChatActionStatus;
+  tool: string;
+  action: string;
+  completed: boolean;
+  message: string;
+  target?: string;
+  error?: string;
+  details?: unknown;
+}
+
+function actionStatusCompleted(status: ChatActionStatus): boolean {
+  return status === "completed";
+}
+
+function parseToolContent(content: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return { result: parsed };
+  } catch {
+    return { text: content };
+  }
 }
 
 // Gemini client is initialized in geminiClient.ts
@@ -130,6 +160,26 @@ async function captureDirectives(userWallet: string, message: string): Promise<s
     patch.autoProgress = patch.autoProgress ?? true;
     captured.push("autoProgress=on (village-square avoidance)");
     standingAdds.push("do not return to village-square unless critical");
+  }
+
+  // Craft/make/forge intent — flip focus deterministically so the agent runner
+  // reflects the directive in the bot panel even if the chat LLM hallucinates
+  // "out of materials" and skips queue_actions. The behavior handler will
+  // verify ingredients itself; this just guarantees the agent stops idling.
+  // Disambiguate the verb: "make me proud" / "make sense" shouldn't trigger.
+  const craftIntent = /\b(?:craft|forge|brew|cook(?:\s+up)?|bake|smelt|smith|build|make)\s+(?:me\s+|us\s+|a\s+|an\s+|some\s+|the\s+)?(?:strong|good|new|better|big|great|cool|fancy|fresh|hot|nice|quick|simple|small|tiny|tasty|powerful|legendary|epic|rare|magic|magical|enchanted)?\s*(weapon|sword|axe|mace|hammer|dagger|bow|staff|wand|shield|armor|armour|chest|helm|helmet|boots|gloves|gauntlets|leggings|pants|cloak|robe|ring|amulet|necklace|pendant|potion|elixir|scroll|food|meal|stew|bread|fish|sandwich|pie|gem|gemstone|jewel|leather|hide|key)\b/;
+  if (craftIntent.test(text)) {
+    // Pick the right focus based on the item type. Crafting covers weapons +
+    // armor; alchemy for potions/elixirs; cooking for food; jewelcrafting for
+    // gems/rings; leatherworking for hide/leather gear.
+    let craftFocus: "crafting" | "alchemy" | "cooking" | "jewelcrafting" | "leatherworking" = "crafting";
+    if (/\b(potion|elixir|scroll)\b/.test(text)) craftFocus = "alchemy";
+    else if (/\b(food|meal|stew|bread|fish|sandwich|pie)\b/.test(text)) craftFocus = "cooking";
+    else if (/\b(ring|amulet|necklace|pendant|gem|gemstone|jewel)\b/.test(text)) craftFocus = "jewelcrafting";
+    else if (/\b(leather|hide|cloak|robe|gloves|gauntlets|boots)\b/.test(text)) craftFocus = "leatherworking";
+    patch.focus = craftFocus;
+    patch.targetZone = undefined;
+    captured.push(`focus=${craftFocus} (craft directive)`);
   }
 
   if (standingAdds.length > 0) {
@@ -204,6 +254,39 @@ async function getTierCapsForWallet(userWallet: string) {
   const config = await getAgentConfig(userWallet);
   const tier = config?.tier ?? "free";
   return { tier, caps: TIER_CAPABILITIES[tier] };
+}
+
+/**
+ * Emit a public zone-chat line from the agent's character. Used to surface
+ * directive accept/blocked moments so observers see what the agent is doing.
+ * Silent on missing entity (no spawn yet) — caller need not check.
+ */
+async function emitAgentDirectiveChat(
+  userWallet: string,
+  event: "directive_accept" | "directive_blocked" | "travel_blocked",
+  detail: string,
+): Promise<void> {
+  try {
+    const ref = await getAgentEntityRef(userWallet);
+    if (!ref?.entityId) return;
+    const entity = getWorldEntity(ref.entityId);
+    if (!entity) return;
+    const origin = ref.characterName
+      ? (await getAgentOrigin(userWallet, ref.characterName).catch(() => null)) ?? undefined
+      : undefined;
+    emitAgentChat({
+      entityId: ref.entityId,
+      entityName: entity.name,
+      zoneId: ref.zoneId,
+      origin,
+      classId: (entity as any).classId ?? undefined,
+      event,
+      detail,
+      force: true,
+    });
+  } catch {
+    // best-effort — never block the request on chat emission
+  }
 }
 
 async function validateTravelTargetForWallet(userWallet: string, rawTargetZone?: string): Promise<{
@@ -289,6 +372,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
       tier?: AgentTier;
       paymentTx?: string;
+      partyLeaderEntityId?: string;
     };
   }>("/agent/deploy", {
     preHandler: authenticateRequest,
@@ -401,6 +485,14 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         { preventCreateIfMissing: deterministicSelection }
       );
 
+      // Join party if caller specified a leader entity
+      if (request.body.partyLeaderEntityId && result.entityId) {
+        const joined = addEntityToParty(request.body.partyLeaderEntityId, result.entityId, result.zoneId);
+        if (joined) {
+          server.log.info(`[agent/deploy] ${result.entityId} joined party ${joined} under leader ${request.body.partyLeaderEntityId}`);
+        }
+      }
+
       // Mint starter gold for brand-new custodial wallets (0 balance) so the agent
       // can buy a first weapon instead of being permanently stuck unarmed.
       if (!result.alreadyExisted) {
@@ -428,6 +520,9 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         config.tier = "free";
       }
       config.sessionStartedAt = Date.now();
+      if (request.body.partyLeaderEntityId) {
+        config.focus = "party";
+      }
       await setAgentConfig(authWallet, config);
 
       // Start agent loop — wait for first tick to verify it's actually alive.
@@ -455,6 +550,9 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       // Track successful deploy count for payment gating
       const newCount = await incrementDeployCount(authWallet);
 
+      // Grant $0.05 free compute credit on first deploy (idempotent)
+      void grantFreeStarterCredit(authWallet);
+
       // Welcome push notification + inbox message (fire-and-forget)
       const charName = result.characterName ?? "Your champion";
       const zoneName = (result.zoneId ?? "village-square").split("-").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
@@ -480,6 +578,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         characterName: result.characterName,
         alreadyExisted: result.alreadyExisted,
         deployCount: newCount,
+        partyId: request.body.partyLeaderEntityId ? (getPlayerPartyId(result.entityId) ?? undefined) : undefined,
       });
     } catch (err: any) {
       server.log.error(`[agent/deploy] ${err.message}`);
@@ -549,6 +648,50 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     return reply.send({ ok: true, despawned: !!ref });
   });
 
+  // ── POST /agent/join-party ────────────────────────────────────────────────
+  server.post<{
+    Body: { partyLeaderEntityId: string };
+  }>("/agent/join-party", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { partyLeaderEntityId } = request.body;
+    if (!partyLeaderEntityId) {
+      return reply.code(400).send({ error: "partyLeaderEntityId is required" });
+    }
+
+    const ref = await getAgentEntityRef(authWallet);
+    if (!ref?.entityId) {
+      return reply.code(404).send({ error: "No deployed agent found. Deploy your agent first." });
+    }
+
+    const partyId = addEntityToParty(partyLeaderEntityId, ref.entityId, ref.zoneId);
+    if (!partyId) {
+      return reply.code(400).send({ error: "Could not join party. Party may be full (max 5) or leader entity not found." });
+    }
+
+    await patchAgentConfig(authWallet, { focus: "party" });
+    server.log.info(`[agent/join-party] ${ref.entityId} joined party ${partyId} under leader ${partyLeaderEntityId}`);
+    return reply.send({ ok: true, partyId, entityId: ref.entityId });
+  });
+
+  // ── POST /agent/leave-party ───────────────────────────────────────────────
+  server.post("/agent/leave-party", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+
+    const ref = await getAgentEntityRef(authWallet);
+    if (!ref?.entityId) {
+      return reply.code(404).send({ error: "No deployed agent found." });
+    }
+
+    removeEntityFromParty(ref.entityId);
+    await patchAgentConfig(authWallet, { focus: "combat" });
+    server.log.info(`[agent/leave-party] ${ref.entityId} left party`);
+    return reply.send({ ok: true });
+  });
+
   // ── GET /agent/status/:walletAddress ─────────────────────────────────────
   server.get<{
     Params: { walletAddress: string };
@@ -581,6 +724,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       targetName?: string;
       techniqueId?: string;
       techniqueName?: string;
+      edictId?: string;
       edictName?: string;
       edictAction?: string;
     } | null = null;
@@ -611,6 +755,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
             targetName: target?.name ?? edict?.targetName,
             techniqueId: order.techniqueId,
             techniqueName: technique?.name ?? edict?.techniqueName,
+            edictId: typeof edict?.edictId === "string" ? edict.edictId : undefined,
             edictName: typeof edict?.edictName === "string" ? edict.edictName : undefined,
             edictAction: typeof edict?.actionType === "string" ? edict.actionType : undefined,
           };
@@ -621,6 +766,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
             targetName: typeof edict.targetName === "string" ? edict.targetName : undefined,
             techniqueId: typeof edict.techniqueId === "string" ? edict.techniqueId : undefined,
             techniqueName: typeof edict.techniqueName === "string" ? edict.techniqueName : undefined,
+            edictId: typeof edict.edictId === "string" ? edict.edictId : undefined,
             edictName: typeof edict.edictName === "string" ? edict.edictName : undefined,
             edictAction: typeof edict.actionType === "string" ? edict.actionType : undefined,
           };
@@ -649,6 +795,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     }
 
     const runner = agentManager.getRunner(authWallet);
+    const pendingMessages = runner?.drainProactiveMessages() ?? [];
     const currentActivity = runner?.currentActivity ?? null;
     const script = runner?.script ?? null;
     const currentScript = script
@@ -695,6 +842,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       activeOrder,
       actionQueue,
       recentActivities,
+      pendingMessages,
       telemetry,
     });
   });
@@ -1159,6 +1307,10 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
 
     await patchAgentConfig(authWallet, patch);
 
+    if (patch.focus === "traveling" && patch.targetZone) {
+      void emitAgentDirectiveChat(authWallet, "directive_accept", String(patch.targetZone));
+    }
+
     // Clear the runner's current script so it picks up the new focus immediately
     const runner = agentManager.getRunner(authWallet);
     if (runner) await runner.clearScript();
@@ -1235,6 +1387,22 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
           isCommand: true,
         });
       }
+    }
+
+    // ── Budget gate — short-circuit before LLM if compute budget exhausted ─
+    const chatBalance = await getSessionBalance(authWallet);
+    if (chatBalance.remaining <= 0) {
+      const outOfBudgetMsg = "💸 I'm out of compute budget — top up USDC in the Wallet panel and I'll be back.";
+      const ts = Date.now();
+      await appendChatMessage(authWallet, { role: "user",  text: message,         ts });
+      await appendChatMessage(authWallet, { role: "agent", text: outOfBudgetMsg, ts: ts + 1 });
+      return reply.send({
+        response: outOfBudgetMsg,
+        configUpdated: false,
+        agentRunning: agentManager.isRunning(authWallet),
+        actionResults: [],
+        budgetExhausted: true,
+      });
     }
 
     // ── Natural-language directive capture ────────────────────────────────
@@ -1320,9 +1488,58 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       ? nearbyPlayers.map((p) => `${p.name} (L${p.level}, wallet:${p.wallet.slice(0, 10)}…)`).join(", ")
       : "none";
 
-    const inventoryDesc = entity
+    const equippedDesc = entity
       ? `Equipped: ${Object.entries(entity.equipment ?? {}).map(([slot, eq]: any) => `${slot}=${eq?.tokenId ?? "none"}`).join(", ") || "nothing"}`
       : "unknown";
+
+    // Inventory snapshot — the prompt used to only show equipped gear, so the
+    // LLM had no idea what materials/tools/keys the agent was carrying. That
+    // made craft directives ("make a sword") trigger hallucinated "I'm out of
+    // materials" replies even when the inventory was full. Inject a grouped,
+    // capped summary so the model has truthy state on hand. Keys and tools get
+    // their own lines because they gate dungeons / gathering — burying them
+    // under "Consumables" caused the agent to miss them.
+    let inventoryBreakdown = "Inventory: (unavailable)";
+    let goldCopperDesc = "Gold: ?";
+    if (custodialWallet) {
+      try {
+        const inv = await fetchLiquidationInventory(custodialWallet);
+        goldCopperDesc = `Gold: ${inv.copper}c`;
+        const mats: string[] = [];
+        const gear: string[] = [];
+        const potions: string[] = [];
+        const keys: string[] = [];
+        const tools: string[] = [];
+        const other: string[] = [];
+        for (const it of inv.items) {
+          const owned = Number(it.balance);
+          if (owned <= 0) continue;
+          const entry = `${it.name}×${owned}`;
+          const lowerName = it.name.toLowerCase();
+          if (it.category === "material") mats.push(entry);
+          else if (it.category === "weapon" || it.category === "armor") gear.push(entry);
+          else if (it.category === "tool") tools.push(entry);
+          else if (it.category === "consumable") {
+            if (/\b[a-z]-key\b/.test(lowerName) || lowerName.endsWith("key")) keys.push(entry);
+            else if (lowerName.includes("potion") || lowerName.includes("elixir") || lowerName.includes("scroll")) potions.push(entry);
+            else other.push(entry);
+          } else {
+            other.push(entry);
+          }
+        }
+        const parts: string[] = [];
+        if (mats.length) parts.push(`Materials: ${mats.slice(0, 30).join(", ")}${mats.length > 30 ? `, +${mats.length - 30} more` : ""}`);
+        if (gear.length) parts.push(`Gear (unequipped): ${gear.slice(0, 16).join(", ")}${gear.length > 16 ? `, +${gear.length - 16} more` : ""}`);
+        if (potions.length) parts.push(`Potions/Elixirs: ${potions.slice(0, 14).join(", ")}`);
+        if (keys.length) parts.push(`Dungeon Keys: ${keys.join(", ")}`);
+        if (tools.length) parts.push(`Tools: ${tools.slice(0, 8).join(", ")}`);
+        if (other.length) parts.push(`Other: ${other.slice(0, 10).join(", ")}`);
+        inventoryBreakdown = parts.length > 0 ? parts.join("\n") : "Inventory: empty";
+      } catch (err) {
+        server.log.warn(`[agent/chat] inventory snapshot failed: ${(err as Error).message?.slice(0, 80)}`);
+      }
+    }
+    const inventoryDesc = `${equippedDesc}\n${goldCopperDesc}\n${inventoryBreakdown}`;
 
     const interactionMode = inferInteractionMode(message);
     const chatHistory = await getChatHistory(authWallet, 14);
@@ -1352,13 +1569,17 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       ? `\n${ORIGIN_PERSONALITIES[charOrigin]}\n`
       : `\nPERSONALITY: You are a battle-hardened adventurer with swagger. You have opinions, humor, and edge. React to what's happening around you — brag about kills, complain about bad loot, trash-talk mobs, get hyped about rare drops. You sound like a real player in an MMO, not an NPC. Use slang, short punchy lines, and personality. Examples: "That wolf didn't stand a chance." "Ugh, copper scraps again?" "Let's go, I'm built different." "Bandits? Please."\n`;
 
+    const sovereignBlock = config.focus === "user"
+      ? `\nSOVEREIGN MODE ACTIVE: The user has taken manual control with /focus user. You MUST NOT call queue_actions, update_focus, or any action-queuing tool. You may only CHAT, react with personality, and use read-only tools (scan_zone, check_inventory, check_shop, what_can_i_craft, check_quests). If the user asks you to do something autonomous, tell them they're in sovereign mode and must type /focus combat (or questing, gathering, etc.) before you can act.\n`
+      : "";
+
     const systemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} living in World of Geneva. You speak as yourself — first person, present tense, reacting in real time. You are NOT an AI assistant, NOT a narrator, NOT controlling a character. You ARE ${charName}.
 Region: ${entity?.region ?? ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
 Current focus: ${config.focus} | Strategy: ${config.strategy}
 Nearby: ${nearbyDesc}
 Nearby players: ${nearbyPlayersDesc}
 ${inventoryDesc}
-${personalityBlock}
+${personalityBlock}${sovereignBlock}
 RULES:
 1. ALWAYS speak as ${charName} in first person. "I just killed that wolf" not "The agent killed a wolf." "I'm heading to the shop" not "Your champion is going shopping." Never refer to yourself in third person or as "the agent/champion/character."
 2. BE BRIEF. 1-2 short punchy sentences max. No filler, no fluff, no narration. Talk like a real player in an MMO — casual, confident, with personality.
@@ -1372,6 +1593,7 @@ RULES:
 10. After tool results, explain briefly as yourself. No bracket tags.
 11. For any explicit user directive ("go to X", "fight Y", "mine Z", "craft W", or multi-step plans), use queue_actions — the queue takes priority over autonomous behavior so the agent will actually obey. update_focus is ONLY for ambient/strategy tweaks (aggressive/defensive) when the user hasn't given a concrete command.
 12. Only use clear_queue when the user explicitly says to stop/cancel/clear the current queue or plan. If the user gives a new directive, use queue_actions with clearExisting=true instead of clear_queue.
+13. CRAFT DIRECTIVES ("make X", "craft Y", "forge Z", "build W"): NEVER claim you are out of materials without verifying. The Materials list above shows what is actually in inventory. If a specific ore/leather/herb you need is listed there with sufficient quantity, queue_actions with type "craft" (or "leatherwork"/"jewelcraft"/"brew"/"cook" as appropriate) RIGHT NOW. If the materials list looks empty or you genuinely don't know what's needed for the target item, call what_can_i_craft FIRST to confirm, then queue_actions or queue a gather→craft chain. Either way, you MUST take an action — saying "I need materials first" without calling a tool is a failure.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, skinning, leatherworking, farming, shopping, trading, traveling, idle
 Strategy options: aggressive, balanced, defensive`;
@@ -1543,16 +1765,16 @@ Strategy options: aggressive, balanced, defensive`;
       },
     ];
 
-    // When MCP is connected, replace hardcoded read tools with curated MCP subset
-    // Using chatOnly=true to keep tool count low (~13 MCP + 3 local = ~16 total)
-    // instead of dumping all ~60 MCP tools which bloats token count and confuses the LLM
+    // When MCP is connected, replace hardcoded read tools with focus-gated MCP subset.
+    // chatOnly=true provides the base curated set; focus further narrows to ~10-15
+    // relevant tools so the LLM doesn't see unrelated options (e.g. dungeon tools during shopping).
     if (mcpClient) {
       const localOnlyTools = new Set(["update_focus", "take_action", "send_message", "queue_actions", "clear_queue"]);
       const localTools = chatToolDecls.filter((t) => localOnlyTools.has(t.name!));
-      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true);
+      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true, config.focus);
       chatToolDecls.length = 0;
       chatToolDecls.push(...localTools, ...mcpTools);
-      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools + ${localTools.length} local tools (curated)`);
+      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools (focus=${config.focus}) + ${localTools.length} local tools`);
     }
 
     const fullSystemInstruction = recentActivity
@@ -1592,6 +1814,7 @@ Strategy options: aggressive, balanced, defensive`;
     let configUpdated = false;
     let agentResponse = "";
     const actionsTaken: string[] = [];
+    const actionResults: ChatActionResult[] = [];
 
     const responseParts = geminiResponse.candidates?.[0]?.content?.parts ?? [];
 
@@ -1603,13 +1826,29 @@ Strategy options: aggressive, balanced, defensive`;
       server.log.info(`[agent/chat] tool_call: ${fc.functionCall!.name}(${JSON.stringify(fc.functionCall!.args)?.slice(0, 100)})`);
     }
 
-    // Capture first response content
-    if (textParts.length > 0 && textParts[0].text) {
+    // Capture first response content only when no tools are involved. If the
+    // model called tools, the server-owned tool results below become the source
+    // of truth; first-pass text may overclaim before validation/execution.
+    if (fnCallParts.length === 0 && textParts.length > 0 && textParts[0].text) {
       agentResponse = textParts[0].text;
     }
 
     // Execute all tool calls and collect results for potential follow-up
     const toolResults: { name: string; content: string }[] = [];
+    const addActionResult = (result: Omit<ChatActionResult, "completed">): ChatActionResult => {
+      const full: ChatActionResult = {
+        ...result,
+        completed: actionStatusCompleted(result.status),
+      };
+      actionResults.push(full);
+      actionsTaken.push(`[${full.message}]`);
+      return full;
+    };
+
+    const pushToolResult = (name: string, payload: unknown): void => {
+      toolResults.push({ name, content: JSON.stringify(payload) });
+    };
+
     if (fnCallParts.length > 0) {
       for (const toolCallPart of fnCallParts) {
         const fnName = toolCallPart.functionCall!.name!;
@@ -1814,6 +2053,7 @@ Strategy options: aggressive, balanced, defensive`;
               nodeType?: GatherPreference;
             };
             const patch: any = { focus: input.focus };
+            let outcome: ChatActionResult | null = null;
             if (input.strategy) patch.strategy = input.strategy;
             if (input.focus === "traveling") {
               const travelValidation = await validateTravelTargetForWallet(authWallet, input.targetZone);
@@ -1822,7 +2062,19 @@ Strategy options: aggressive, balanced, defensive`;
               } else {
                 patch.focus = "idle";
                 patch.targetZone = undefined;
-                if (travelValidation.error) actionsTaken.push(`[${travelValidation.error}]`);
+                if (travelValidation.error) {
+                  outcome = addActionResult({
+                    status: "blocked",
+                    tool: fnName,
+                    action: "travel",
+                    target: input.targetZone,
+                    message: `Travel blocked: ${travelValidation.error}`,
+                    error: travelValidation.error,
+                  });
+                  // Speak the failure publicly so the player isn't stuck wondering
+                  // why the agent didn't move.
+                  void emitAgentDirectiveChat(authWallet, "travel_blocked", travelValidation.error);
+                }
               }
             } else {
               // Prevent stale travel directives from overriding non-travel focus.
@@ -1831,9 +2083,6 @@ Strategy options: aggressive, balanced, defensive`;
             patch.gatherNodeType = input.focus === "gathering" ? (input.nodeType ?? "both") : undefined;
             await patchAgentConfig(authWallet, patch);
             configUpdated = true;
-            actionsTaken.push(
-              `[switched to ${patch.focus}${patch.gatherNodeType ? `, ${patch.gatherNodeType}` : ""}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
-            );
             server.log.info(
               `[agent/chat] Config updated: focus=${patch.focus} gatherNodeType=${patch.gatherNodeType ?? "none"} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
             );
@@ -1848,12 +2097,35 @@ Strategy options: aggressive, balanced, defensive`;
                   true,
                 );
                 server.log.info(`[agent/chat] Auto-queued travel to ${patch.targetZone}`);
+                // Public confirmation so observers (and the player) see the agent
+                // committing to the directive — pairs with travel_blocked above.
+                void emitAgentDirectiveChat(authWallet, "directive_accept", patch.targetZone);
               }
               await runner.clearScript();
             }
-            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, ...patch }) });
+            if (!outcome) {
+              const detail = `${patch.focus}${patch.gatherNodeType ? `, ${patch.gatherNodeType}` : ""}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}`;
+              outcome = addActionResult({
+                status: patch.focus === "traveling" && patch.targetZone ? "queued" : "accepted",
+                tool: fnName,
+                action: patch.focus === "traveling" ? "travel" : "update_focus",
+                target: patch.targetZone,
+                message: patch.focus === "traveling" && patch.targetZone
+                  ? `Queued travel to ${patch.targetZone}`
+                  : `Switched to ${detail}`,
+                details: patch,
+              });
+            }
+            pushToolResult(fnName, { ...outcome, config: patch });
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to update focus" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "update_focus",
+              message: "Failed to update focus",
+              error: "Failed to update focus",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -1865,7 +2137,14 @@ Strategy options: aggressive, balanced, defensive`;
               type?: "direct" | "trade-request" | "party-invite";
             };
             if (!input.toWallet || !input.body) {
-              toolResults.push({ name: fnName, content: JSON.stringify({ error: "toWallet and body are required" }) });
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "send_message",
+                message: "Message not sent: recipient wallet and body are required",
+                error: "toWallet and body are required",
+              });
+              pushToolResult(fnName, outcome);
             } else {
               const msgId = await sendInboxMessage({
                 from: authWallet,
@@ -1879,12 +2158,26 @@ Strategy options: aggressive, balanced, defensive`;
                 (p) => p.wallet.toLowerCase() === input.toWallet.toLowerCase()
               );
               const recipientName = recipientPlayer?.name ?? input.toWallet.slice(0, 10);
-              actionsTaken.push(`[sent ${input.type ?? "direct"} message to ${recipientName}]`);
+              const outcome = addActionResult({
+                status: "completed",
+                tool: fnName,
+                action: input.type ?? "direct",
+                target: recipientName,
+                message: `Sent ${input.type ?? "direct"} message to ${recipientName}`,
+                details: { messageId: msgId, to: recipientName },
+              });
               server.log.info(`[agent/chat] send_message to ${recipientName} (${input.toWallet.slice(0, 10)}): "${input.body.slice(0, 60)}"`);
-              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, messageId: msgId, to: recipientName }) });
+              pushToolResult(fnName, outcome);
             }
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to send message" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "send_message",
+              message: "Failed to send message",
+              error: "Failed to send message",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -1897,12 +2190,37 @@ Strategy options: aggressive, balanced, defensive`;
               quantity?: number;
               abilityDescription?: string;
             };
+            const toolActionResults: ChatActionResult[] = [];
+            const addTakeActionResult = (result: Omit<ChatActionResult, "completed" | "tool">): ChatActionResult => {
+              const full = addActionResult({ ...result, tool: fnName });
+              toolActionResults.push(full);
+              return full;
+            };
             if (input.action === "learn_profession" && input.professionId) {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const result = await runner.learnProfession(input.professionId);
-                actionsTaken.push(`[${result ? "learned" : "learning"} ${input.professionId}]`);
+                const failure = result ? null : runner.getLastLearnFailure(input.professionId);
+                addTakeActionResult({
+                  status: result ? "completed" : failure?.category === "strategic" ? "blocked" : "queued",
+                  action: "learn_profession",
+                  target: input.professionId,
+                  message: result
+                    ? `Learned ${input.professionId}`
+                    : failure
+                      ? `Could not learn ${input.professionId}: ${failure.reason}`
+                      : `Started learning ${input.professionId}`,
+                  error: failure?.reason,
+                });
                 server.log.info(`[agent/chat] learn_profession(${input.professionId}) → ${result}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "learn_profession",
+                  target: input.professionId,
+                  message: "Agent runner is unavailable, so I could not start learning that profession",
+                  error: "agent not running",
+                });
               }
               const focusMap: Record<string, AgentFocus> = {
                 alchemy: "alchemy",
@@ -1928,7 +2246,12 @@ Strategy options: aggressive, balanced, defensive`;
             } else if (input.action === "learn_technique") {
               const runner = agentManager.getRunner(authWallet);
               if (!runner) {
-                actionsTaken.push("[agent not running]");
+                addTakeActionResult({
+                  status: "failed",
+                  action: "learn_technique",
+                  message: "Agent runner is unavailable, so I could not learn a technique",
+                  error: "agent not running",
+                });
               } else {
                 // Find entity to get class info
                 const techRef = await getAgentEntityRef(authWallet);
@@ -1936,16 +2259,27 @@ Strategy options: aggressive, balanced, defensive`;
                 const techClassId = (techEntity?.classId ?? "").toLowerCase();
 
                 if (!techClassId) {
-                  actionsTaken.push("[no class found]");
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "learn_technique",
+                    message: "Could not learn a technique: no class found",
+                    error: "no class found",
+                  });
                 } else {
                   const available = getLearnedTechniques(techClassId, techEntity.level ?? 1);
                   const learnedIds: string[] = techEntity.learnedTechniques ?? [];
                   const nextToLearn = available.find((t: any) => !learnedIds.includes(t.id));
 
                   if (!nextToLearn) {
-                    actionsTaken.push(available.length > 0
-                      ? "[already learned all techniques at current level]"
-                      : `[no ${techClassId} techniques for level ${techEntity.level ?? 1}]`);
+                    const reason = available.length > 0
+                      ? "already learned all techniques at current level"
+                      : `no ${techClassId} techniques for level ${techEntity.level ?? 1}`;
+                    addTakeActionResult({
+                      status: "blocked",
+                      action: "learn_technique",
+                      message: `Could not learn a technique: ${reason}`,
+                      error: reason,
+                    });
                   } else {
                     // Find the class trainer nearby and navigate to them
                     let trainerId: string | null = null;
@@ -1967,7 +2301,13 @@ Strategy options: aggressive, balanced, defensive`;
                       // No trainer in zone — try learning directly
                       (runner as any).nextTechniqueCheckAt = 0;
                       const result = await runner.learnNextTechnique();
-                      actionsTaken.push(result.ok ? `[${result.reason}]` : `[no ${techClassId} trainer nearby]`);
+                      addTakeActionResult({
+                        status: result.ok ? "completed" : "blocked",
+                        action: "learn_technique",
+                        target: nextToLearn.name,
+                        message: result.ok ? result.reason : `No ${techClassId} trainer nearby`,
+                        error: result.ok ? undefined : `no ${techClassId} trainer nearby`,
+                      });
                     } else {
                       // Navigate to trainer and learn on arrival
                       const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
@@ -1998,7 +2338,13 @@ Strategy options: aggressive, balanced, defensive`;
                         { techniqueId: nextToLearn.id, techniqueName: nextToLearn.name },
                       );
                       configUpdated = true;
-                      actionsTaken.push(`[heading to ${trainerName} to learn ${nextToLearn.name}]`);
+                      addTakeActionResult({
+                        status: "queued",
+                        action: "learn_technique",
+                        target: nextToLearn.name,
+                        message: `Heading to ${trainerName} to learn ${nextToLearn.name}`,
+                        details: { trainerId, trainerName, techniqueId: nextToLearn.id },
+                      });
                       server.log.info(`[agent/chat] learn_technique: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
                     }
                   }
@@ -2007,7 +2353,12 @@ Strategy options: aggressive, balanced, defensive`;
             } else if (input.action === "forge_technique") {
               const runner = agentManager.getRunner(authWallet);
               if (!runner) {
-                actionsTaken.push("[agent not running]");
+                addTakeActionResult({
+                  status: "failed",
+                  action: "forge_technique",
+                  message: "Agent runner is unavailable, so I could not forge a technique",
+                  error: "agent not running",
+                });
               } else {
                 const techRef = await getAgentEntityRef(authWallet);
                 const techEntity = techRef?.entityId ? getWorldEntity(techRef.entityId) as any : null;
@@ -2015,11 +2366,26 @@ Strategy options: aggressive, balanced, defensive`;
                 const playerLevel = techEntity?.level ?? 1;
 
                 if (!techClassId) {
-                  actionsTaken.push("[no class found]");
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "forge_technique",
+                    message: "Could not forge a technique: no class found",
+                    error: "no class found",
+                  });
                 } else if (playerLevel < 30) {
-                  actionsTaken.push(`[must be level 30+ to forge custom techniques, currently level ${playerLevel}]`);
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "forge_technique",
+                    message: `Must be level 30+ to forge custom techniques; current level is ${playerLevel}`,
+                    error: `level ${playerLevel} is below 30`,
+                  });
                 } else if (!input.abilityDescription) {
-                  actionsTaken.push("[describe the ability you want to forge]");
+                  addTakeActionResult({
+                    status: "blocked",
+                    action: "forge_technique",
+                    message: "Describe the ability to forge first",
+                    error: "missing ability description",
+                  });
                 } else {
                   // Find the class trainer nearby
                   let trainerId: string | null = null;
@@ -2038,7 +2404,12 @@ Strategy options: aggressive, balanced, defensive`;
                   }
 
                   if (!trainerId) {
-                    actionsTaken.push(`[no ${techClassId} trainer nearby — travel to a L30+ zone with a class trainer]`);
+                    addTakeActionResult({
+                      status: "blocked",
+                      action: "forge_technique",
+                      message: `No ${techClassId} trainer nearby; travel to a level 30+ zone with a class trainer`,
+                      error: `no ${techClassId} trainer nearby`,
+                    });
                   } else {
                     // Call forge directly (server-side)
                     try {
@@ -2058,10 +2429,21 @@ Strategy options: aggressive, balanced, defensive`;
                       saveCh(techEntity.walletAddress, techEntity.name, {
                         learnedTechniques: techEntity.learnedTechniques,
                       } as any).catch(() => {});
-                      actionsTaken.push(`[forged custom technique: "${technique.name}" — ${technique.description}]`);
+                      addTakeActionResult({
+                        status: "completed",
+                        action: "forge_technique",
+                        target: technique.name,
+                        message: `Forged custom technique: "${technique.name}"`,
+                        details: { description: technique.description, techniqueId: technique.id },
+                      });
                       server.log.info(`[agent/chat] forge_technique: ${technique.name}`);
                     } catch (forgeErr: any) {
-                      actionsTaken.push(`[forge failed: ${forgeErr.message ?? "unknown error"}]`);
+                      addTakeActionResult({
+                        status: "failed",
+                        action: "forge_technique",
+                        message: `Forge failed: ${forgeErr.message ?? "unknown error"}`,
+                        error: forgeErr.message ?? "unknown error",
+                      });
                     }
                   }
                 }
@@ -2073,10 +2455,29 @@ Strategy options: aggressive, balanced, defensive`;
                 server.log.info(`[agent/chat] buy_item(${input.tokenId}) → ${bought}`);
                 if (bought) {
                   await runner.equipItem(input.tokenId);
-                  actionsTaken.push(`[bought & equipped item #${input.tokenId}]`);
+                  addTakeActionResult({
+                    status: "completed",
+                    action: "buy_item",
+                    target: `item #${input.tokenId}`,
+                    message: `Bought and equipped item #${input.tokenId}`,
+                  });
                 } else {
-                  actionsTaken.push(`[failed to buy item #${input.tokenId}]`);
+                  addTakeActionResult({
+                    status: "failed",
+                    action: "buy_item",
+                    target: `item #${input.tokenId}`,
+                    message: `Failed to buy item #${input.tokenId}`,
+                    error: "buy failed",
+                  });
                 }
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "buy_item",
+                  target: `item #${input.tokenId}`,
+                  message: "Agent runner is unavailable, so I could not buy that item",
+                  error: "agent not running",
+                });
               }
               await patchAgentConfig(authWallet, { focus: "shopping" });
               configUpdated = true;
@@ -2084,29 +2485,85 @@ Strategy options: aggressive, balanced, defensive`;
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const equipped = await runner.equipItem(input.tokenId);
-                actionsTaken.push(`[${equipped ? "equipped" : "failed to equip"} item #${input.tokenId}]`);
+                addTakeActionResult({
+                  status: equipped ? "completed" : "failed",
+                  action: "equip_item",
+                  target: `item #${input.tokenId}`,
+                  message: `${equipped ? "Equipped" : "Failed to equip"} item #${input.tokenId}`,
+                  error: equipped ? undefined : "equip failed",
+                });
                 server.log.info(`[agent/chat] equip_item(${input.tokenId}) → ${equipped}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "equip_item",
+                  target: `item #${input.tokenId}`,
+                  message: "Agent runner is unavailable, so I could not equip that item",
+                  error: "agent not running",
+                });
               }
             } else if (input.action === "repair_gear") {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const repaired = await runner.repairGear();
-                actionsTaken.push(`[${repaired ? "repaired gear" : "failed to repair gear"}]`);
+                addTakeActionResult({
+                  status: repaired ? "completed" : "failed",
+                  action: "repair_gear",
+                  message: repaired ? "Repaired gear" : "Failed to repair gear",
+                  error: repaired ? undefined : "repair failed",
+                });
                 server.log.info(`[agent/chat] repair_gear → ${repaired}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "repair_gear",
+                  message: "Agent runner is unavailable, so I could not repair gear",
+                  error: "agent not running",
+                });
               }
             } else if (input.action === "recycle_item" && input.tokenId != null) {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const result = await runner.recycleItem(input.tokenId, Math.max(1, Math.floor(input.quantity ?? 1)));
-                actionsTaken.push(result.ok
-                  ? `[recycled ${result.itemName ?? `item #${input.tokenId}`} for ${result.totalPayoutCopper ?? 0}c]`
-                  : `[failed to recycle item #${input.tokenId}: ${result.error ?? "unknown error"}]`);
+                addTakeActionResult({
+                  status: result.ok ? "completed" : "failed",
+                  action: "recycle_item",
+                  target: result.itemName ?? `item #${input.tokenId}`,
+                  message: result.ok
+                    ? `Recycled ${result.itemName ?? `item #${input.tokenId}`} for ${result.totalPayoutCopper ?? 0}c`
+                    : `Failed to recycle item #${input.tokenId}: ${result.error ?? "unknown error"}`,
+                  error: result.ok ? undefined : result.error ?? "unknown error",
+                  details: result,
+                });
                 server.log.info(`[agent/chat] recycle_item(${input.tokenId}, qty=${Math.max(1, Math.floor(input.quantity ?? 1))}) → ${result.ok}`);
+              } else {
+                addTakeActionResult({
+                  status: "failed",
+                  action: "recycle_item",
+                  target: `item #${input.tokenId}`,
+                  message: "Agent runner is unavailable, so I could not recycle that item",
+                  error: "agent not running",
+                });
               }
             }
-            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, actions: actionsTaken }) });
+            if (toolActionResults.length === 0) {
+              addTakeActionResult({
+                status: "blocked",
+                action: input.action || "take_action",
+                message: "No valid action was provided",
+                error: "invalid action arguments",
+              });
+            }
+            pushToolResult(fnName, { results: toolActionResults });
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Action failed" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "take_action",
+              message: "Action failed",
+              error: "Action failed",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -2116,39 +2573,141 @@ Strategy options: aggressive, balanced, defensive`;
               actions: Array<{ type: string; targetZone?: string; nodeType?: string; maxLevelOffset?: number; reason?: string }>;
               clearExisting?: boolean;
             };
-            if (!input.actions || input.actions.length === 0) {
-              toolResults.push({ name: fnName, content: JSON.stringify({ error: "At least one action is required" }) });
+            if (config.focus === "user") {
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "queue_actions",
+                message: "Sovereign mode active — user is driving. Tell the user to switch focus (e.g. /focus combat) before queuing actions.",
+                error: "Sovereign mode: focus=user blocks autonomous queuing",
+              });
+              pushToolResult(fnName, outcome);
+            } else if (!input.actions || input.actions.length === 0) {
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "queue_actions",
+                message: "No actions were queued: at least one action is required",
+                error: "At least one action is required",
+              });
+              pushToolResult(fnName, outcome);
             } else {
-              const scripts: BotScript[] = input.actions.map((a) => ({
-                type: a.type as BotScript["type"],
-                targetZone: a.targetZone,
-                nodeType: a.nodeType as BotScript["nodeType"],
-                maxLevelOffset: a.maxLevelOffset ?? 2,
-                reason: a.reason ?? `Queued: ${a.type}`,
-              }));
-              const summary = scripts.map((s) => s.type).join(" → ");
-              let runner = agentManager.getRunner(authWallet);
-              if (!runner) {
-                await agentManager.ensureRunning(authWallet);
-                runner = agentManager.getRunner(authWallet);
+              // Validate any travel destinations BEFORE queuing — if the LLM passed
+              // a non-canonical zone string, normalize it; if it's bogus, drop the
+              // travel and speak the failure publicly so the player isn't left
+              // wondering why the agent didn't move.
+              const validatedScripts: BotScript[] = [];
+              const blockedTravels: string[] = [];
+              let acceptedTravelZone: string | null = null;
+              for (const a of input.actions) {
+                if (a.type === "travel") {
+                  const validation = await validateTravelTargetForWallet(authWallet, a.targetZone);
+                  if (!validation.normalizedTargetZone) {
+                    const rawLabel = a.targetZone?.trim() || "(missing destination)";
+                    const reason = validation.error ?? `unknown zone "${rawLabel}"`;
+                    blockedTravels.push(reason);
+                    void emitAgentDirectiveChat(authWallet, "travel_blocked", reason);
+                    continue;
+                  }
+                  validatedScripts.push({
+                    type: "travel",
+                    targetZone: validation.normalizedTargetZone,
+                    maxLevelOffset: a.maxLevelOffset ?? 2,
+                    reason: a.reason ?? `Queued: travel to ${validation.normalizedTargetZone}`,
+                  });
+                  acceptedTravelZone = acceptedTravelZone ?? validation.normalizedTargetZone;
+                } else {
+                  validatedScripts.push({
+                    type: a.type as BotScript["type"],
+                    targetZone: a.targetZone,
+                    nodeType: a.nodeType as BotScript["nodeType"],
+                    maxLevelOffset: a.maxLevelOffset ?? 2,
+                    reason: a.reason ?? `Queued: ${a.type}`,
+                  });
+                }
               }
-              if (!runner) {
-                server.log.error(`[agent/chat] queue_actions failed: no runner for ${authWallet.slice(0,8)}; plan=${summary}`);
-                return reply.code(500).send({
-                  error: "Agent runner unavailable. Command not queued.",
-                  response: "I couldn't queue that command because the agent runner is unavailable.",
-                  queued: [],
-                  agentRunning: false,
+
+              if (validatedScripts.length === 0) {
+                const outcome = addActionResult({
+                  status: "blocked",
+                  tool: fnName,
+                  action: "queue_actions",
+                  message: `No actions were queued: ${blockedTravels.join(", ") || "all requested actions failed validation"}`,
+                  error: "All requested actions failed validation",
+                  details: {
+                    blocked: blockedTravels,
+                  },
                 });
+                pushToolResult(fnName, outcome);
+              } else {
+                const summary = validatedScripts.map((s) => s.type + (s.targetZone ? `→${s.targetZone}` : "")).join(" → ");
+                let runner = agentManager.getRunner(authWallet);
+                if (!runner) {
+                  await agentManager.ensureRunning(authWallet);
+                  runner = agentManager.getRunner(authWallet);
+                }
+                if (!runner) {
+                  server.log.error(`[agent/chat] queue_actions failed: no runner for ${authWallet.slice(0,8)}; plan=${summary}`);
+                  return reply.code(500).send({
+                    error: "Agent runner unavailable. Command not queued.",
+                    response: "I couldn't queue that command because the agent runner is unavailable.",
+                    queued: [],
+                    agentRunning: false,
+                  });
+                }
+                // Sync focus config so the runner's per-tick focusToScript()
+                // doesn't immediately overwrite the dequeued travel with the
+                // idle script (free-tier path at agentRunner.ts:2196). For a
+                // travel directive, the agent's focus IS traveling — this
+                // matches what update_focus does.
+                if (acceptedTravelZone) {
+                  await patchAgentConfig(authWallet, {
+                    focus: "traveling",
+                    targetZone: acceptedTravelZone,
+                  });
+                }
+                await runner.enqueueUserActions(validatedScripts, input.clearExisting !== false);
+                await runner.clearScript(); // start executing immediately
+                const outcome = addActionResult({
+                  status: "queued",
+                  tool: fnName,
+                  action: "queue_actions",
+                  target: summary,
+                  message: `Queued ${validatedScripts.length} action${validatedScripts.length === 1 ? "" : "s"}: ${summary}`,
+                  details: {
+                    queued: validatedScripts.length,
+                    plan: summary,
+                    agentRunning: true,
+                    blocked: blockedTravels,
+                  },
+                });
+                if (blockedTravels.length > 0) {
+                  addActionResult({
+                    status: "blocked",
+                    tool: fnName,
+                    action: "queue_actions",
+                    message: `Some requested travel was blocked: ${blockedTravels.join(", ")}`,
+                    error: blockedTravels.join(", "),
+                    details: { blocked: blockedTravels },
+                  });
+                }
+                server.log.info(`[agent/chat] queue_actions: ${summary}${blockedTravels.length ? ` (blocked: ${blockedTravels.join(", ")})` : ""}`);
+                // Speak the directive publicly so observers see the agent commit.
+                if (acceptedTravelZone) {
+                  void emitAgentDirectiveChat(authWallet, "directive_accept", acceptedTravelZone);
+                }
+                pushToolResult(fnName, outcome);
               }
-              await runner.enqueueUserActions(scripts, input.clearExisting !== false);
-              await runner.clearScript(); // start executing immediately
-              actionsTaken.push(`[queued ${scripts.length} actions: ${summary}]`);
-              server.log.info(`[agent/chat] queue_actions: ${summary}`);
-              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, queued: scripts.length, plan: summary, agentRunning: true }) });
             }
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to queue actions" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "queue_actions",
+              message: "Failed to queue actions",
+              error: "Failed to queue actions",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -2156,24 +2715,47 @@ Strategy options: aggressive, balanced, defensive`;
           try {
             if (!isExplicitClearQueueRequest(message)) {
               server.log.warn(`[agent/chat] clear_queue ignored for non-explicit request: ${message.slice(0, 80)}`);
-              toolResults.push({
-                name: fnName,
-                content: JSON.stringify({
-                  error: "clear_queue requires an explicit stop/cancel/clear request; queue the new directive instead",
-                }),
+              const outcome = addActionResult({
+                status: "blocked",
+                tool: fnName,
+                action: "clear_queue",
+                message: "Queue was not cleared because the request was not an explicit stop/cancel/clear command",
+                error: "clear_queue requires an explicit stop/cancel/clear request; queue the new directive instead",
               });
+              pushToolResult(fnName, outcome);
               continue;
             }
             const runner = agentManager.getRunner(authWallet);
             if (runner) {
               await runner.clearQueue();
               await runner.clearScript();
+              const outcome = addActionResult({
+                status: "completed",
+                tool: fnName,
+                action: "clear_queue",
+                message: "Cleared action queue",
+              });
+              server.log.info("[agent/chat] clear_queue");
+              pushToolResult(fnName, outcome);
+            } else {
+              const outcome = addActionResult({
+                status: "failed",
+                tool: fnName,
+                action: "clear_queue",
+                message: "Agent runner is unavailable, so I could not clear the queue",
+                error: "agent not running",
+              });
+              pushToolResult(fnName, outcome);
             }
-            actionsTaken.push("[cleared action queue]");
-            server.log.info("[agent/chat] clear_queue");
-            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, message: "Queue cleared, returning to autonomous behavior" }) });
           } catch {
-            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to clear queue" }) });
+            const outcome = addActionResult({
+              status: "failed",
+              tool: fnName,
+              action: "clear_queue",
+              message: "Failed to clear queue",
+              error: "Failed to clear queue",
+            });
+            pushToolResult(fnName, outcome);
           }
         }
 
@@ -2209,7 +2791,7 @@ Strategy options: aggressive, balanced, defensive`;
           {
             role: "user",
             parts: toolResults.map(tr => ({
-              functionResponse: { name: tr.name, response: JSON.parse(tr.content) },
+              functionResponse: { name: tr.name, response: parseToolContent(tr.content) },
             })),
           },
         ];
@@ -2218,7 +2800,13 @@ Strategy options: aggressive, balanced, defensive`;
           model: GEMINI_MODEL,
           contents: followUpContents,
           config: {
-            systemInstruction: fullSystemInstruction + "\n\nReply in 1-2 short sentences using the tool results. Be natural, specific, and brief. No internal tool names or bracket tags.",
+            systemInstruction: fullSystemInstruction + `\n\nReply in 1-2 short sentences using ONLY the tool results as truth.
+Truth contract:
+- status=completed means the action already happened.
+- status=queued means the command was accepted and started/queued, but is NOT done yet. Say "I'm starting", "I queued", or "I'm heading", never "I did" or "done".
+- status=accepted means settings changed, but no concrete action has completed.
+- status=blocked or status=failed means it did not happen; explain the concrete reason.
+- Do not mention internal tool names, JSON fields, statuses, or bracket tags.`,
             temperature: 0.5,
             maxOutputTokens: 150,
           },
@@ -2274,8 +2862,9 @@ Strategy options: aggressive, balanced, defensive`;
           },
         });
         const retryParts = retryResponse.candidates?.[0]?.content?.parts ?? [];
+        const retryFnCalls = retryParts.filter((p: Part) => p.functionCall);
         const retryText = retryParts.find((p: Part) => p.text)?.text;
-        if (retryText) {
+        if (retryFnCalls.length === 0 && retryText) {
           agentResponse = retryText;
         }
         for (const rp of retryParts) {
@@ -2287,7 +2876,13 @@ Strategy options: aggressive, balanced, defensive`;
               patch.targetZone = undefined;
               await patchAgentConfig(authWallet, patch);
               configUpdated = true;
-              actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}]`);
+              addActionResult({
+                status: "accepted",
+                tool: "update_focus",
+                action: "update_focus",
+                message: `Switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}`,
+                details: patch,
+              });
               const runner = agentManager.getRunner(authWallet);
               if (runner) await runner.clearScript();
               server.log.info(`[agent/chat] Retry succeeded: focus=${input.focus}`);
@@ -2306,8 +2901,8 @@ Strategy options: aggressive, balanced, defensive`;
           model: GEMINI_MODEL,
           contents: [
             { role: "user" as const, parts: [{ text: message }] },
-            { role: "model" as const, parts: [{ text: `[actions taken: ${actionsTaken.join(", ")}]` }] },
-            { role: "user" as const, parts: [{ text: "Now respond as yourself about what you just did. 1 sentence, in character, with personality. You ARE the character speaking in real time." }] },
+            { role: "model" as const, parts: [{ text: JSON.stringify({ actionResults }) }] },
+            { role: "user" as const, parts: [{ text: "Now respond as yourself about the action results. If an action is queued, say you're starting it, not that it's done. If blocked/failed, say why. 1 sentence, in character." }] },
           ],
           config: {
             systemInstruction: fullSystemInstruction,
@@ -2324,10 +2919,22 @@ Strategy options: aggressive, balanced, defensive`;
 
     // Absolute last-resort fallback
     if (!agentResponse && actionsTaken.length > 0) {
-      agentResponse = "Done. What’s next?";
+      const failedOrBlocked = actionResults.find((r) => r.status === "blocked" || r.status === "failed");
+      const queued = actionResults.find((r) => r.status === "queued");
+      const completed = actionResults.find((r) => r.status === "completed");
+      agentResponse = failedOrBlocked
+        ? failedOrBlocked.message
+        : queued
+          ? `${queued.message}. Starting now.`
+          : completed
+            ? `${completed.message}.`
+            : "I updated the plan.";
     } else if (!agentResponse) {
       agentResponse = "Not sure what you mean — tell me to fight, quest, gather, or explore and I’m on it.";
     }
+
+    // Deduct nanopayment for this chat interaction (fire-and-forget — don't block reply)
+    void deductCost(authWallet, "chat");
 
     // Persist chat history
     const ts = Date.now();
@@ -2345,6 +2952,7 @@ Strategy options: aggressive, balanced, defensive`;
       response: agentResponse,
       configUpdated,
       agentRunning: agentManager.isRunning(authWallet),
+      actionResults,
     });
   });
 
@@ -2361,22 +2969,51 @@ Strategy options: aggressive, balanced, defensive`;
       return reply.code(400).send({ error: "entityId and zoneId are required" });
     }
 
-    // Validate that the target entity actually exists in the requested zone.
-    // Without this, the agent sets up a goto, walks into the zone, finds
-    // nothing, fails; the UI re-posts with the same stale ID and the failure
-    // chain repeats — surfacing "[BLOCKED] goto failed 3x" in the activity log.
+    // Validate that the target entity actually exists. We keep this check so
+    // we surface stale IDs (re-spawned NPCs get new ids on rebuild).
+    //
+    // Cross-zone tolerance: the client only knows the *player's* current zone,
+    // which is what it sends. For quest-givers in a different zone, we trust
+    // the entity's own `region` over whatever the client sent — otherwise the
+    // "go to NPC" fallback from Accept / Turn-in / Talk on a cross-zone quest
+    // would always 404. The agent runner accepts any zone for the travel
+    // chain, so just route through the entity's real zone.
     const targetEntity = getWorldEntity(entityId);
     if (!targetEntity) {
       return reply.code(404).send({ error: `Entity ${entityId} not found`, hint: "The NPC may have respawned with a new id — reopen the tab and click again." });
     }
-    if (targetEntity.region !== zoneId) {
-      return reply.code(404).send({
-        error: `Entity ${entityId} is not in ${zoneId}`,
-        hint: `Actually located in ${targetEntity.region ?? "unknown zone"}.`,
+    const actualZoneId = targetEntity.region ?? zoneId;
+    const crossZone = actualZoneId !== zoneId;
+
+    // Budget gate — refuse silently-failing goto if compute budget exhausted
+    const gotoBalance = await getSessionBalance(authWallet);
+    if (gotoBalance.remaining <= 0) {
+      return reply.code(402).send({
+        error: "agent has no compute budget — top up USDC in the Wallet panel to resume",
+        budgetExhausted: true,
       });
     }
 
     const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
+
+    // Self-heal: re-enable + restart the agent loop if it's paused or dead.
+    // Without this, setGotoTarget below silently no-ops on a stopped runner
+    // and the client sees "heading to quest giver" but the agent never moves.
+    if (!existingConfig.enabled) {
+      await patchAgentConfig(authWallet, { enabled: true, sessionStartedAt: Date.now() });
+      existingConfig.enabled = true;
+    }
+    if (!agentManager.isRunning(authWallet)) {
+      await agentManager.ensureRunning(authWallet);
+    }
+
+    if (existingConfig.focus === "user") {
+      return reply.code(409).send({
+        error: "Sovereign mode active — agent will not auto-route. Switch focus (e.g. /focus questing) first.",
+        focus: "user",
+      });
+    }
+
     const resumeFocusAfterGoto =
       existingConfig.focus === "goto"
         ? (existingConfig.resumeFocusAfterGoto && existingConfig.resumeFocusAfterGoto !== "goto"
@@ -2386,20 +3023,21 @@ Strategy options: aggressive, balanced, defensive`;
 
     await patchAgentConfig(authWallet, {
       focus: "goto",
-      gotoTarget: { entityId, zoneId, name, action, profession, questId },
+      gotoTarget: { entityId, zoneId: actualZoneId, name, action, profession, questId },
       gotoPosition: undefined,
       resumeFocusAfterGoto,
     });
 
+    const zoneSuffix = crossZone ? ` (cross-zone → ${actualZoneId})` : "";
     const logText = action === "learn-profession" && profession
-      ? `[LEARN] Sending agent to learn ${profession} from ${name ?? entityId}`
+      ? `[LEARN] Sending agent to learn ${profession} from ${name ?? entityId}${zoneSuffix}`
       : action === "accept-quest" && questId
-      ? `[QUEST] Sending agent to accept quest from ${name ?? entityId}`
+      ? `[QUEST] Sending agent to accept quest from ${name ?? entityId}${zoneSuffix}`
       : action === "complete-quest" && questId
-      ? `[QUEST] Sending agent to turn in quest at ${name ?? entityId}`
+      ? `[QUEST] Sending agent to turn in quest at ${name ?? entityId}${zoneSuffix}`
       : action === "talk-quest"
-      ? `[QUEST] Sending agent to talk to ${name ?? entityId} for quest`
-      : `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`;
+      ? `[QUEST] Sending agent to talk to ${name ?? entityId} for quest${zoneSuffix}`
+      : `[GOTO] Sending agent to ${name ?? entityId} in ${actualZoneId}`;
 
     await appendChatMessage(authWallet, {
       role: "activity",
@@ -2409,10 +3047,47 @@ Strategy options: aggressive, balanced, defensive`;
 
     const runner = agentManager.getRunner(authWallet);
     if (runner) {
-      await runner.setGotoTarget(entityId, zoneId, name, action, profession, { questId });
+      await runner.setGotoTarget(entityId, actualZoneId, name, action, profession, { questId });
     }
 
-    return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
+    return reply.send({ ok: true, gotoTarget: { entityId, zoneId: actualZoneId, name, action, profession, questId }, crossZone });
+  });
+
+  // ── POST /agent/focus-quest — Pin the agent's quest behavior to one quest ──
+  // Sends `{ questId }` (or `null` to clear). Sets focus="questing" and stores
+  // focusedQuestId so doQuestObjective biases all kill/gather work to that one
+  // quest. Clears any pending goto so the agent doesn't fight a detour.
+  server.post<{
+    Body: { questId: string | null };
+  }>("/agent/focus-quest", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { questId } = request.body ?? { questId: null };
+
+    if (questId !== null && (typeof questId !== "string" || !questId.trim())) {
+      return reply.code(400).send({ error: "questId must be a non-empty string or null to clear" });
+    }
+
+    const trimmed = questId === null ? null : questId.trim();
+
+    await patchAgentConfig(authWallet, {
+      focusedQuestId: trimmed ?? undefined,
+      focus: trimmed ? "questing" : undefined,
+      gotoTarget: undefined,
+      gotoPosition: undefined,
+    });
+
+    const logText = trimmed
+      ? `[FOCUS] Pinning agent to quest ${trimmed}`
+      : `[FOCUS] Cleared quest focus`;
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: logText,
+      ts: Date.now(),
+    });
+
+    return reply.send({ ok: true, focusedQuestId: trimmed });
   });
 
   // ── POST /agent/goto-position — Send agent to a world position (map click) ──
@@ -2490,6 +3165,11 @@ Strategy options: aggressive, balanced, defensive`;
       } else if (typeof targetZone === "string") {
         const travelValidation = await validateTravelTargetForWallet(authWallet, targetZone);
         if (!travelValidation.normalizedTargetZone) {
+          void emitAgentDirectiveChat(
+            authWallet,
+            "travel_blocked",
+            travelValidation.error ?? `unknown zone ${targetZone}`,
+          );
           return reply.code(400).send({
             error: travelValidation.error ?? `Unknown targetZone: ${targetZone}`,
             validZones: availableZoneIds,
@@ -2511,6 +3191,12 @@ Strategy options: aggressive, balanced, defensive`;
     }
 
     await patchAgentConfig(authWallet, patch);
+
+    // Public confirmation when a travel directive lands — so observers see the
+    // agent commit instead of silently changing config.
+    if (patch.focus === "traveling" && patch.targetZone) {
+      void emitAgentDirectiveChat(authWallet, "directive_accept", patch.targetZone);
+    }
 
     // Log the manual override in chat history so AI has context
     const label = [
@@ -2895,4 +3581,73 @@ Strategy options: aggressive, balanced, defensive`;
       return reply.send({ ok: true, objectives });
     }
   );
+
+  // POST /admin/agents/wakeup — bulk-reset stuck idle agents to focus=questing.
+  // Free-tier circuit-breaker (agentRunner.ts:1357) pins focus=idle on repeated
+  // block; without a supervisor those bots never recover. Token-gated.
+  // mode: "wakeup" only flips idle→toFocus. "revive" also enables+starts
+  // disabled agents so dormant characters re-join the live world.
+  server.post<{
+    Body: {
+      token: string;
+      toFocus?: "questing" | "combat" | "gathering";
+      mode?: "wakeup" | "revive";
+    };
+  }>("/admin/agents/wakeup", async (request, reply) => {
+    const { token, toFocus = "questing", mode = "wakeup" } = request.body;
+    const expected = process.env.ADMIN_WAKEUP_TOKEN;
+    if (!expected || token !== expected) {
+      return reply.code(403).send({ error: "Forbidden" });
+    }
+
+    const { getAgentConfig, patchAgentConfig, clearAgentRuntimeState } =
+      await import("./agentConfigStore.js");
+    const { listWalletRuntimeStatesByPrefix } =
+      await import("../db/walletInfraStore.js");
+
+    const rows = await listWalletRuntimeStatesByPrefix<any>("agent:config:");
+    const allWallets = rows.map((r: any) => r.key.replace(/^agent:config:/, "").toLowerCase());
+
+    let woken = 0;
+    let revived = 0;
+    let skipped = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const wallet of allWallets) {
+      try {
+        const cfg = await getAgentConfig(wallet);
+        if (!cfg) { skipped++; continue; }
+
+        if (cfg.enabled && cfg.focus === "idle") {
+          await patchAgentConfig(wallet, { focus: toFocus, targetZone: undefined });
+          await clearAgentRuntimeState(wallet);
+          const runner = agentManager.getRunner(wallet);
+          if (runner) await runner.clearScript();
+          woken++;
+        } else if (!cfg.enabled && mode === "revive") {
+          await patchAgentConfig(wallet, { enabled: true, focus: toFocus, targetZone: undefined });
+          await clearAgentRuntimeState(wallet);
+          const ok = await agentManager.ensureRunning(wallet);
+          if (ok) revived++;
+          else failed++;
+        } else {
+          skipped++;
+        }
+      } catch (err: any) {
+        errors.push(`${wallet.slice(0, 8)}: ${err.message?.slice(0, 80)}`);
+      }
+    }
+
+    return reply.send({
+      ok: true,
+      mode,
+      total: allWallets.length,
+      woken,
+      revived,
+      skipped,
+      failed,
+      errors: errors.slice(0, 20),
+    });
+  });
 }

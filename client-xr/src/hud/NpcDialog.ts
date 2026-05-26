@@ -1,18 +1,25 @@
 import type {
   Entity, NpcDialogueMessage, ShopItem, TechniqueInfo,
-  CraftingRecipe, GuildSummary, AuctionListing,
+  CraftingRecipe, GuildSummary, MyGuildResponse, GuildProposal,
+  GuildProposalType, AuctionListing,
   ProfessionEntry, EnchantmentEntry, ArenaInfo, PvpLeaderboardEntry,
+  InventoryItem, SellPriceEntry,
+  AvailableQuest, ActiveQuest, QuestObjective, QuestRewards,
 } from "../types.js";
 import {
-  fetchShopInventory, buyShopItem, sendNpcDialogue,
+  fetchShopInventory, buyShopItem, sendNpcDialogue, sendNpcAction,
   fetchAvailableTechniques, learnTechnique,
   fetchRecipes, craftAtStation,
-  fetchGuilds, createGuild,
-  fetchAuctions, bidAuction, buyoutAuction,
-  fetchColiseumInfo, joinPvpQueue, fetchPvpLeaderboard,
+  fetchGuilds, createGuild, joinGuild,
+  fetchMyGuild, leaveGuild, inviteToGuild, depositToGuild,
+  proposeGuildAction, voteOnGuildProposal,
+  fetchAuctions, bidAuction, buyoutAuction, fetchWalletBalance, cancelPvpBattle,
+  fetchColiseumInfo, joinPvpQueue, joinPvpPartyQueue, fetchPvpLeaderboard,
   fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
   fetchProfessionCatalog, learnProfession,
   fetchEnchantingCatalog, applyEnchantment,
+  fetchInventory, fetchSellPrices, sellShopItem,
+  fetchZoneQuests, fetchQuestLog, acceptQuest, completeQuest,
 } from "../api.js";
 import type { ActiveBattle, QueueStatusEntry, BattleDetails } from "../api.js";
 
@@ -22,6 +29,57 @@ const NPC_DIALOG_TYPES = new Set([
   "forge", "alchemy-lab", "enchanting-altar", "campfire",
   "tanning-rack", "jewelers-bench",
 ]);
+
+/** localStorage key for proposalIds the player has already voted on. */
+const VOTED_PROPOSALS_KEY = "wog-voted-proposals";
+
+function loadVotedProposals(): Set<number> {
+  try {
+    const raw = localStorage.getItem(VOTED_PROPOSALS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.filter((n): n is number => Number.isFinite(n)));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveVotedProposals(s: Set<number>) {
+  try {
+    localStorage.setItem(VOTED_PROPOSALS_KEY, JSON.stringify([...s]));
+  } catch { /* localStorage may be blocked */ }
+}
+
+const PROPOSAL_TYPE_LABELS: Record<string, string> = {
+  "withdraw-gold": "Withdraw gold",
+  "kick-member": "Kick member",
+  "promote-officer": "Promote to officer",
+  "demote-officer": "Demote officer",
+  "disband-guild": "Disband guild",
+};
+
+const PROPOSAL_TYPE_ORDER: GuildProposalType[] = [
+  "withdraw-gold",
+  "kick-member",
+  "promote-officer",
+  "demote-officer",
+  "disband-guild",
+];
+
+function shortAddr(addr: string): string {
+  if (!addr || addr.length < 12) return addr;
+  return `${addr.slice(0, 6)}\u2026${addr.slice(-4)}`;
+}
+
+function fmtTimeRemaining(seconds: number): string {
+  if (seconds <= 0) return "expired";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h >= 1) return `${h}h ${m}m`;
+  if (m >= 1) return `${m}m`;
+  return `${seconds}s`;
+}
 
 const TYPE_ACCENT: Record<string, string> = {
   merchant: "#ffcc00",
@@ -53,7 +111,58 @@ interface NpcDialogCallbacks {
   getAuthToken: () => Promise<string | null>;
   getOwnEntityId: () => string | null;
   getOwnWalletAddress: () => string | null;
+  /**
+   * Wallet that holds the player's items (custodial for agent-deployed characters,
+   * owner wallet otherwise). Used for sell/recycle flows where the on-chain balance
+   * check must hit the wallet items actually live on. Optional: defaults to
+   * `getOwnWalletAddress` when not provided.
+   */
+  getOwnInventoryWallet?: () => string | null;
+  /**
+   * Returns the local player's current character info — used to build PvP
+   * queue payloads that the backend requires (level, characterTokenId, agentId).
+   * Returning null means the character isn't fully registered yet.
+   */
+  getOwnCharacterInfo?: () => { level: number; characterTokenId: string | null; agentId: string | null } | null;
+  /**
+   * Returns the local player's party (including self) sized for party-queue
+   * decisions. `leaderId` is the entity id that the shard accepts as the
+   * party leader payload — typically the owner's entity. Returns null when
+   * the player is not in a party.
+   */
+  getOwnParty?: () => { leaderId: string; size: number } | null;
   onShowQuests: () => void;
+  /** Optional channel for transient user feedback (toasts in the agent chat). */
+  notify?: (text: string, kind?: "info" | "progress" | "success" | "error") => void;
+}
+
+const AUCTION_POLL_INTERVAL_MS = 5000;
+
+const QUEST_OBJECTIVE_ICONS: Record<string, string> = {
+  kill: "\u2694",
+  talk: "\u{1F4AC}",
+  gather: "\u2618",
+  craft: "\u2692",
+};
+
+function formatQuestObjective(obj: QuestObjective): string {
+  const target = obj.targetMobName ?? obj.targetNpcName ?? obj.targetItemName ?? "";
+  const n = obj.count;
+  switch (obj.type) {
+    case "kill": return `Slay ${n} ${target || "enemies"}`;
+    case "talk": return `Speak with ${target || "the target"}`;
+    case "gather": return `Gather ${n} ${target || "items"}`;
+    case "craft": return `Craft ${n} ${target || "items"}`;
+    default: return `${obj.type} ${n} ${target}`.trim();
+  }
+}
+
+function formatQuestRewards(r: QuestRewards): string {
+  const parts: string[] = [];
+  if (r.copper > 0) parts.push(`${r.copper}c`);
+  if (r.xp > 0) parts.push(`${r.xp} XP`);
+  if (r.items && r.items.length > 0) parts.push(`${r.items.length} item${r.items.length === 1 ? "" : "s"}`);
+  return parts.join(" · ") || "—";
 }
 
 export class NpcDialog {
@@ -68,11 +177,25 @@ export class NpcDialog {
   private entity: Entity | null = null;
   private activeTab = "";
   private chatHistory: NpcDialogueMessage[] = [];
+  /** Latest dialogue response from /npc/dialogue — holds quick-reply suggestions and quest context. */
+  private latestDialogueResponse: import("../types.js").NpcDialogueResponse | null = null;
   // Shop
   private shopItems: ShopItem[] = [];
   private shopLoading = false;
   private dialogSending = false;
   private playerGold: number | null = null;
+  // Quests tab (quest-giver)
+  private npcAvailableQuests: AvailableQuest[] = [];
+  private npcActiveQuests: ActiveQuest[] = [];
+  private npcQuestsLoading = false;
+  private npcQuestsLoaded = false;
+  // Sell tab
+  private sellPrices: SellPriceEntry[] = [];
+  private merchantGold = 0;
+  private merchantNpcName = "";
+  private sellInventory: InventoryItem[] = [];
+  private sellLoading = false;
+  private sellLoaded = false;
   // Skills (trainer)
   private techniques: TechniqueInfo[] = [];
   private techniquesLoading = false;
@@ -82,9 +205,24 @@ export class NpcDialog {
   // Guild
   private guilds: GuildSummary[] = [];
   private guildsLoading = false;
+  private guildsLoaded = false;
+  /** Cached "my guild" lookup. null until first load. */
+  private myGuild: MyGuildResponse | null = null;
+  private myGuildLoading = false;
+  /** Whether the "compose proposal" form is expanded in the guild detail view. */
+  private composeProposalOpen = false;
+  /** Selected proposal type for the compose form. */
+  private composeProposalType: GuildProposalType = "withdraw-gold";
+  /** ProposalIds the player has already voted on (locally tracked). */
+  private votedProposalIds: Set<number> = loadVotedProposals();
   // Auctions
   private auctions: AuctionListing[] = [];
   private auctionsLoading = false;
+  private auctionsLoaded = false;
+  private auctionsError: string | null = null;
+  private auctionPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Buttons disabled while a bid/buyout request is inflight. */
+  private auctionPendingAction = new Set<string>();
   // Arena
   private arenaInfo: ArenaInfo | null = null;
   private arenaLoading = false;
@@ -98,6 +236,8 @@ export class NpcDialog {
   private matchPollTimer: ReturnType<typeof setInterval> | null = null;
   private viewingBattle: BattleDetails | null = null;
   private viewingBattleId: string | null = null;
+  /** Set when the player's own current-battle poll reports inBattle === true. */
+  private currentBattleId: string | null = null;
   // Professions
   private professions: ProfessionEntry[] = [];
   private professionsLoading = false;
@@ -134,6 +274,8 @@ export class NpcDialog {
       this.activeTab = btn.dataset.tab;
       this.tabBar.querySelectorAll(".nd-tab").forEach((b) =>
         b.classList.toggle("active", (b as HTMLElement).dataset.tab === this.activeTab));
+      if (this.activeTab === "auctions") this.startAuctionPolling();
+      else this.stopAuctionPolling();
       this.renderContent();
     });
     this.container.appendChild(this.tabBar);
@@ -156,15 +298,36 @@ export class NpcDialog {
       if (!btn) return;
       const action = btn.dataset.action;
       if (action === "buy" && btn.dataset.tokenId) void this.handleBuy(Number(btn.dataset.tokenId));
+      if (action === "sell" && btn.dataset.tokenId && btn.dataset.qty) void this.handleSell(Number(btn.dataset.tokenId), Number(btn.dataset.qty));
+      if (action === "accept-quest" && btn.dataset.questId) void this.handleAcceptQuest(btn.dataset.questId);
+      if (action === "turn-in-quest" && btn.dataset.questId) void this.handleTurnInQuest(btn.dataset.questId);
+      if (action === "open-quest-log") { this.callbacks.onShowQuests(); }
       if (action === "learn" && btn.dataset.techniqueId) void this.handleLearn(btn.dataset.techniqueId);
       if (action === "craft" && btn.dataset.recipeId) void this.handleCraft(btn.dataset.recipeId);
       if (action === "create-guild") void this.handleCreateGuild();
+      if (action === "join-guild" && btn.dataset.guildId) void this.handleJoinGuild(Number(btn.dataset.guildId));
+      if (action === "leave-guild" && btn.dataset.guildId) void this.handleLeaveGuild(Number(btn.dataset.guildId));
+      if (action === "deposit-guild" && btn.dataset.guildId) void this.handleDepositGuild(Number(btn.dataset.guildId));
+      if (action === "invite-guild" && btn.dataset.guildId) void this.handleInviteGuild(Number(btn.dataset.guildId));
+      if (action === "open-propose") { this.composeProposalOpen = true; if (this.activeTab === "guild") this.renderGuild(); }
+      if (action === "cancel-propose") { this.composeProposalOpen = false; if (this.activeTab === "guild") this.renderGuild(); }
+      if (action === "submit-propose" && btn.dataset.guildId) void this.handleSubmitProposal(Number(btn.dataset.guildId));
+      if ((action === "vote-yes" || action === "vote-no") && btn.dataset.proposalId && btn.dataset.guildId) {
+        void this.handleVote(Number(btn.dataset.proposalId), Number(btn.dataset.guildId), action === "vote-yes");
+      }
       if (action === "bid" && btn.dataset.auctionId) void this.handleBid(btn.dataset.auctionId);
       if (action === "buyout" && btn.dataset.auctionId) void this.handleBuyout(btn.dataset.auctionId);
+      if (action === "auction-retry") {
+        this.auctionsLoaded = false;
+        this.auctionsError = null;
+        if (this.activeTab === "auctions") this.renderAuctions();
+      }
       if (action === "queue-join") void this.handleQueueJoin();
+      if (action === "queue-join-party") void this.handleQueuePartyJoin();
       if (action === "queue-leave") void this.handleQueueLeave();
       if (action === "select-format" && btn.dataset.format) { this.selectedFormat = btn.dataset.format; if (this.activeTab === "arena") this.renderArena(); }
       if (action === "view-battle" && btn.dataset.battleId) void this.handleViewBattle(btn.dataset.battleId);
+      if (action === "forfeit" && btn.dataset.battleId) void this.handleForfeit(btn.dataset.battleId);
       if (action === "arena-back") this.handleArenaBack();
       if (action === "learn-prof" && btn.dataset.profId) void this.handleLearnProfession(btn.dataset.profId);
       if (action === "enchant" && btn.dataset.elixirId) void this.handleEnchant(btn.dataset.elixirId);
@@ -185,18 +348,36 @@ export class NpcDialog {
   open(entity: Entity) {
     this.entity = entity;
     this.chatHistory = [];
+    this.latestDialogueResponse = null;
     this.shopItems = [];
     this.playerGold = null;
     this.shopLoading = false;
     this.dialogSending = false;
+    this.sellPrices = [];
+    this.merchantGold = 0;
+    this.merchantNpcName = "";
+    this.sellInventory = [];
+    this.sellLoading = false;
+    this.sellLoaded = false;
+    this.npcAvailableQuests = [];
+    this.npcActiveQuests = [];
+    this.npcQuestsLoading = false;
+    this.npcQuestsLoaded = false;
     this.techniques = [];
     this.techniquesLoading = false;
     this.recipes = [];
     this.recipesLoading = false;
     this.guilds = [];
     this.guildsLoading = false;
+    this.guildsLoaded = false;
+    this.myGuild = null;
+    this.myGuildLoading = false;
+    this.composeProposalOpen = false;
+    this.composeProposalType = "withdraw-gold";
     this.auctions = [];
     this.auctionsLoading = false;
+    this.auctionsLoaded = false;
+    this.auctionsError = null;
     this.arenaInfo = null;
     this.arenaLoading = false;
     this.leaderboard = [];
@@ -239,7 +420,9 @@ export class NpcDialog {
     this.overlay.style.display = "none";
     this.entity = null;
     this.chatHistory = [];
+    this.latestDialogueResponse = null;
     this.stopArenaPolling();
+    this.stopAuctionPolling();
   }
 
   isOpen(): boolean {
@@ -251,7 +434,11 @@ export class NpcDialog {
   private getTabs(type: string): { id: string; label: string }[] {
     switch (type) {
       case "merchant":
-        return [{ id: "shop", label: "Shop" }, { id: "dialog", label: "Talk" }];
+        return [
+          { id: "shop", label: "Shop" },
+          { id: "sell", label: "Sell" },
+          { id: "dialog", label: "Talk" },
+        ];
       case "quest-giver":
         return [{ id: "dialog", label: "Talk" }, { id: "quests", label: "Quests" }];
       case "trainer":
@@ -263,7 +450,7 @@ export class NpcDialog {
       case "arena-master":
         return [{ id: "arena", label: "Arena" }, { id: "dialog", label: "Talk" }];
       case "profession-trainer":
-        return [{ id: "professions", label: "Professions" }, { id: "dialog", label: "Talk" }];
+        return [{ id: "professions", label: "Professions" }, { id: "quests", label: "Quests" }, { id: "dialog", label: "Talk" }];
       case "enchanting-altar":
         return [{ id: "enchanting", label: "Enchanting" }, { id: "dialog", label: "Talk" }];
       default:
@@ -280,6 +467,7 @@ export class NpcDialog {
     this.footerEl.innerHTML = "";
     switch (this.activeTab) {
       case "shop": this.renderShop(); break;
+      case "sell": this.renderSell(); break;
       case "quests": this.renderQuests(); break;
       case "skills": this.renderSkills(); break;
       case "craft": this.renderCraft(); break;
@@ -322,7 +510,11 @@ export class NpcDialog {
       msgs = `<div class="nd-empty">Start a conversation...</div>`;
     }
 
-    this.contentEl.innerHTML = `<div class="nd-chat-messages" id="nd-chat-scroll">${msgs}</div>`;
+    const bannerHtml = this.renderQuestBanner(accent);
+    const actionsHtml = this.renderSuggestedActions(accent);
+
+    this.contentEl.innerHTML = `${bannerHtml}<div class="nd-chat-messages" id="nd-chat-scroll">${msgs}</div>${actionsHtml}`;
+    this.bindDialogQuickActions();
 
     const hasChar = !!this.callbacks.getOwnEntityId();
     if (hasChar) {
@@ -363,6 +555,114 @@ export class NpcDialog {
     if (scroll) scroll.scrollTop = scroll.scrollHeight;
   }
 
+  private renderQuestBanner(accent: string): string {
+    const qc = this.latestDialogueResponse?.questContext;
+    if (!qc) return "";
+    const available = qc.availableQuestIds?.length ?? 0;
+    const active = qc.activeQuestIds?.length ?? 0;
+    const ready = qc.completableQuestIds?.length ?? 0;
+    if (available + active + ready === 0) return "";
+    const chips: string[] = [];
+    if (ready > 0) chips.push(`<span class="nd-quest-chip nd-quest-ready">${ready} ready to turn in</span>`);
+    if (available > 0) chips.push(`<span class="nd-quest-chip nd-quest-available">${available} available</span>`);
+    if (active > 0) chips.push(`<span class="nd-quest-chip nd-quest-active">${active} in progress</span>`);
+    const canSwitchToQuests = this.entity?.type === "quest-giver";
+    const viewBtn = canSwitchToQuests
+      ? `<button class="nd-quest-banner-btn" data-action="open-quests" style="border-color:${accent};color:${accent}">View Quests →</button>`
+      : "";
+    return `<div class="nd-quest-banner">${chips.join("")}${viewBtn}</div>`;
+  }
+
+  private renderSuggestedActions(accent: string): string {
+    if (this.dialogSending) return "";
+    const actions = this.latestDialogueResponse?.suggestedActions ?? [];
+    if (actions.length === 0) return "";
+    const buttons = actions.map((a, i) => {
+      const label = esc(a.label || a.prompt || "Ask");
+      if (a.action) {
+        // Primary one-click button — accent-filled, hits /npc/action.
+        return `<button class="nd-action-primary" data-action="primary-action" data-idx="${i}" style="background:${accent};border-color:${accent};color:#0b0f18">${label}</button>`;
+      }
+      return `<button class="nd-quick-reply" data-action="quick-reply" data-idx="${i}" style="border-color:${accent};color:${accent}">${label}</button>`;
+    }).join("");
+    return `<div class="nd-quick-replies">${buttons}</div>`;
+  }
+
+  private bindDialogQuickActions() {
+    const banner = this.contentEl.querySelector('[data-action="open-quests"]') as HTMLButtonElement | null;
+    if (banner) {
+      banner.addEventListener("click", () => this.switchTab("quests"));
+    }
+    const quickReplies = this.contentEl.querySelectorAll<HTMLButtonElement>('[data-action="quick-reply"]');
+    quickReplies.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.idx ?? "-1");
+        const action = this.latestDialogueResponse?.suggestedActions?.[idx];
+        if (!action) return;
+        void this.handleDialogSend(action.prompt);
+      });
+    });
+    const primaryButtons = this.contentEl.querySelectorAll<HTMLButtonElement>('[data-action="primary-action"]');
+    primaryButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.dataset.idx ?? "-1");
+        const sug = this.latestDialogueResponse?.suggestedActions?.[idx];
+        if (!sug?.action) return;
+        void this.handleNpcAction(sug);
+      });
+    });
+  }
+
+  private async handleNpcAction(sug: import("../types.js").SuggestedNpcAction) {
+    if (!this.entity || !sug.action || this.dialogSending) return;
+    const { kind } = sug.action;
+
+    // Client-only tab hints — no server roundtrip.
+    if (kind === "open_quests_tab") { this.switchTab("quests"); return; }
+    if (kind === "open_skills") { this.switchTab("skills"); return; }
+    if (kind === "open_shop") { this.switchTab("shop"); return; }
+
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+
+    // Render the player's intent in chat, then show typing while the server
+    // dispatches the action and synthesizes the follow-up beat.
+    this.chatHistory.push({ role: "player", content: sug.prompt });
+    this.dialogSending = true;
+    this.latestDialogueResponse = null;
+    this.renderDialog();
+
+    const res = await sendNpcAction(token, this.entity.id, entityId, sug.action);
+    this.dialogSending = false;
+    if (res.ok && res.data) {
+      const dlg = res.data.dialogue;
+      const reply = dlg?.reply ?? dlg?.response ?? "";
+      this.chatHistory.push({ role: "npc", content: reply || "(no response)" });
+      if (dlg) this.latestDialogueResponse = dlg;
+      // If the action affected quest state, force the quest tab to re-fetch
+      // on next view by clearing its cached payload.
+      if (kind === "accept_quest" || kind === "complete_quest") {
+        this.npcQuestsLoaded = false;
+        this.npcAvailableQuests = [];
+        this.npcActiveQuests = [];
+      }
+    } else {
+      this.chatHistory.push({ role: "npc", content: res.error ?? "(no response)" });
+    }
+    this.renderDialog();
+  }
+
+  private switchTab(tabId: string) {
+    if (!this.entity) return;
+    const tabBtn = this.tabBar.querySelector<HTMLButtonElement>(`[data-tab="${tabId}"]`);
+    if (!tabBtn) return;
+    this.tabBar.querySelectorAll(".nd-tab").forEach((b) => b.classList.remove("active"));
+    tabBtn.classList.add("active");
+    this.activeTab = tabId;
+    this.renderContent();
+  }
+
   private async handleDialogSend(message: string) {
     if (!this.entity || this.dialogSending) return;
     const token = await this.callbacks.getAuthToken();
@@ -371,15 +671,21 @@ export class NpcDialog {
 
     if (message) this.chatHistory.push({ role: "player", content: message });
     this.dialogSending = true;
+    // Player is sending a new message — last NPC suggestions are stale until the
+    // next response lands. Clear them so the quick-reply row hides during the
+    // typing indicator.
+    this.latestDialogueResponse = null;
     this.renderDialog();
 
     const result = await sendNpcDialogue(token, this.entity.id, entityId, message, this.chatHistory.slice(-10));
     this.dialogSending = false;
     if (result.ok && result.data) {
-      const text = (result.data as any).reply ?? (result.data as any).response ?? "";
-      this.chatHistory.push({ role: "npc", content: text || "(no response)" });
+      const reply = result.data.reply ?? result.data.response ?? "";
+      this.chatHistory.push({ role: "npc", content: reply || "(no response)" });
+      this.latestDialogueResponse = result.data;
     } else {
       this.chatHistory.push({ role: "npc", content: result.error ?? "(no response)" });
+      this.latestDialogueResponse = null;
     }
     this.renderDialog();
   }
@@ -442,6 +748,120 @@ export class NpcDialog {
       if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Buy"; }, 2000); }
     }
     if (this.playerGold != null) this.footerEl.innerHTML = `<div class="nd-footer-text">Your gold: ${this.playerGold}</div>`;
+  }
+
+  // ── Sell view ──────────────────────────────────────────────────
+
+  private renderSell() {
+    const hasChar = !!this.callbacks.getOwnEntityId();
+    if (!hasChar) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Deploy a character to sell items</div>`;
+      this.footerEl.innerHTML = "";
+      return;
+    }
+    if (!this.sellLoaded && !this.sellLoading) {
+      this.sellLoading = true;
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading inventory...</div>`;
+      void this.loadSell();
+      return;
+    }
+    if (this.sellLoading) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading inventory...</div>`;
+      return;
+    }
+
+    const priceByToken = new Map<number, SellPriceEntry>();
+    for (const p of this.sellPrices) {
+      if (p.buyPrice <= 0) continue;
+      const id = Number(p.tokenId);
+      if (Number.isFinite(id)) priceByToken.set(id, p);
+    }
+
+    const sellable = this.sellInventory
+      .filter((item) => !item.equipped && item.quantity > 0 && priceByToken.has(item.tokenId));
+
+    const merchantName = this.merchantNpcName || this.entity?.name || "Merchant";
+    const headerHtml = `
+      <div class="nd-sell-header">
+        <span>${esc(merchantName)} has <b>${this.merchantGold}c</b></span>
+        <span class="nd-sell-sub">pays ~50% of market</span>
+      </div>
+    `;
+
+    if (sellable.length === 0) {
+      this.contentEl.innerHTML = `${headerHtml}<div class="nd-empty">No items this merchant will buy</div>`;
+      const goldText = this.playerGold != null ? `Your gold: ${this.playerGold}` : "";
+      this.footerEl.innerHTML = goldText ? `<div class="nd-footer-text">${goldText}</div>` : "";
+      return;
+    }
+
+    let html = "";
+    for (const item of sellable) {
+      const price = priceByToken.get(item.tokenId)!;
+      const total = price.buyPrice * item.quantity;
+      const affordable = price.buyPrice <= this.merchantGold;
+      const slotText = item.equipSlot ? `[${item.equipSlot}]` : item.category || "";
+      html += `<div class="nd-shop-item">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(item.name)}</span><span class="nd-shop-item-slot">${esc(slotText)}</span></div>`;
+      html += `<div class="nd-shop-item-stats">x${item.quantity} owned · ${price.buyPrice}c each${item.quantity > 1 ? ` · stack: ${total}c` : ""}</div>`;
+      html += `<div class="nd-shop-item-footer">`;
+      html += `<span class="nd-shop-item-price">${price.buyPrice}c</span>`;
+      if (!affordable) {
+        html += `<span class="nd-shop-item-stock" style="color:#c66">Merchant low on gold</span>`;
+      } else {
+        html += `<button class="nd-btn" data-action="sell" data-token-id="${item.tokenId}" data-qty="1">Sell 1</button>`;
+        if (item.quantity > 1) {
+          html += `<button class="nd-btn" data-action="sell" data-token-id="${item.tokenId}" data-qty="${item.quantity}">Sell All</button>`;
+        }
+      }
+      html += `</div></div>`;
+    }
+    this.contentEl.innerHTML = `${headerHtml}<div class="nd-shop-grid">${html}</div>`;
+    const goldText = this.playerGold != null ? `Your gold: ${this.playerGold}` : "";
+    this.footerEl.innerHTML = goldText ? `<div class="nd-footer-text">${goldText}</div>` : "";
+  }
+
+  private async loadSell() {
+    if (!this.entity) { this.sellLoading = false; return; }
+    const invWallet = this.callbacks.getOwnInventoryWallet?.() ?? this.callbacks.getOwnWalletAddress();
+    if (!invWallet) { this.sellLoading = false; this.sellLoaded = true; return; }
+    const [inv, prices, balance] = await Promise.all([
+      fetchInventory(invWallet),
+      fetchSellPrices(this.entity.id),
+      this.playerGold == null ? fetchWalletBalance(invWallet) : Promise.resolve(null),
+    ]);
+    this.sellLoading = false;
+    this.sellLoaded = true;
+    this.sellInventory = inv?.items ?? [];
+    this.sellPrices = prices?.items ?? [];
+    this.merchantGold = prices?.merchantGold ?? 0;
+    this.merchantNpcName = prices?.npcName ?? "";
+    if (balance && this.playerGold == null) this.playerGold = balance.copper;
+    if (this.activeTab === "sell") this.renderSell();
+  }
+
+  private async handleSell(tokenId: number, qty: number) {
+    if (!this.entity) return;
+    const token = await this.callbacks.getAuthToken();
+    const sellerWallet = this.callbacks.getOwnInventoryWallet?.() ?? this.callbacks.getOwnWalletAddress();
+    if (!token || !sellerWallet || qty <= 0) return;
+    const btn = this.contentEl.querySelector(`[data-action="sell"][data-token-id="${tokenId}"][data-qty="${qty}"]`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await sellShopItem(token, sellerWallet, this.entity.id, tokenId, qty);
+    if (result.ok && result.data) {
+      const sold = result.data.quantity;
+      const payout = result.data.totalPayout;
+      const invItem = this.sellInventory.find((i) => i.tokenId === tokenId);
+      if (invItem) invItem.quantity = Math.max(0, invItem.quantity - sold);
+      this.merchantGold = Math.max(0, this.merchantGold - payout);
+      if (this.playerGold != null) this.playerGold += payout;
+      else this.playerGold = payout;
+      this.callbacks.notify?.(`Sold ${sold}x ${result.data.item} for ${payout}c`, "success");
+      this.renderSell();
+    } else {
+      this.callbacks.notify?.(result.error ?? "Sell failed", "error");
+      if (btn) { btn.textContent = result.error ?? "Failed"; setTimeout(() => this.renderSell(), 1500); }
+    }
   }
 
   // ── Skills view (trainer) ─────────────────────────────────────
@@ -572,7 +992,45 @@ export class NpcDialog {
   // ── Guild view ────────────────────────────────────────────────
 
   private renderGuild() {
-    if (this.guilds.length === 0 && !this.guildsLoading) {
+    // First decide: am I in a guild? Kick off the "my guild" lookup if we
+    // haven't tried yet — that one-call response also gives us the full
+    // detail view's data (members + proposals).
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (addr && this.myGuild === null && !this.myGuildLoading) {
+      this.myGuildLoading = true;
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading guild...</div>`;
+      void this.loadMyGuild();
+      return;
+    }
+    if (this.myGuildLoading) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading guild...</div>`;
+      return;
+    }
+    if (this.myGuild?.inGuild) {
+      this.renderMyGuildDetail();
+      return;
+    }
+    // Not in a guild — fall through to the create + browse list.
+    this.renderGuildBrowse();
+  }
+
+  private async loadMyGuild() {
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!addr) { this.myGuildLoading = false; this.myGuild = null; return; }
+    try {
+      const data = await fetchMyGuild(addr);
+      this.myGuild = data ?? { inGuild: false, guild: null, member: null, members: [], proposals: [] };
+    } catch (err) {
+      console.warn("[guild] my-guild lookup failed", err);
+      this.myGuild = { inGuild: false, guild: null, member: null, members: [], proposals: [] };
+    } finally {
+      this.myGuildLoading = false;
+      if (this.activeTab === "guild") this.renderGuild();
+    }
+  }
+
+  private renderGuildBrowse() {
+    if (!this.guildsLoaded && !this.guildsLoading) {
       this.guildsLoading = true;
       this.contentEl.innerHTML = `<div class="nd-empty">Loading guilds...</div>`;
       void this.loadGuilds();
@@ -597,10 +1055,17 @@ export class NpcDialog {
       html += `<div class="nd-empty">No guilds registered yet</div>`;
     } else {
       for (const g of this.guilds) {
+        const isActive = g.status === "Active" || g.status === "active";
+        const canJoin = hasChar && isActive;
         html += `<div class="nd-shop-item">`;
         html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(g.name)}</span><span class="nd-shop-item-slot">Lvl ${g.level}</span></div>`;
         html += `<div class="nd-shop-item-stats">${g.memberCount} members · ${g.treasury}g treasury</div>`;
-        html += `<div class="nd-shop-item-footer"><span class="nd-shop-item-stock">${g.status}</span></div>`;
+        html += `<div class="nd-shop-item-footer">`;
+        html += `<span class="nd-shop-item-stock">${esc(String(g.status))}</span>`;
+        if (canJoin) {
+          html += `<button class="nd-btn" data-action="join-guild" data-guild-id="${esc(String(g.guildId))}" style="color:#44cc88;border-color:rgba(68,204,136,0.3);background:rgba(68,204,136,0.1)">Join</button>`;
+        }
+        html += `</div>`;
         html += `</div>`;
       }
     }
@@ -616,7 +1081,8 @@ export class NpcDialog {
   private async loadGuilds() {
     const data = await fetchGuilds();
     this.guildsLoading = false;
-    this.guilds = data;
+    this.guildsLoaded = true;
+    this.guilds = data ?? [];
     if (this.activeTab === "guild") this.renderGuild();
   }
 
@@ -633,40 +1099,337 @@ export class NpcDialog {
     if (result.ok) {
       if (btn) btn.textContent = "Created!";
       this.guildsLoading = false;
+      this.guildsLoaded = false;
       this.guilds = [];
+      this.myGuild = null; // force re-detect into the my-guild view
       setTimeout(() => this.renderGuild(), 1500);
     } else {
-      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Create"; }, 2000); }
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Create"; }, 2500); }
+    }
+  }
+
+  private async handleJoinGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const btn = this.contentEl.querySelector(`[data-action='join-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await joinGuild(token, guildId, addr);
+    if (result.ok) {
+      if (btn) btn.textContent = "Joined!";
+      this.guildsLoading = false;
+      this.guildsLoaded = false;
+      this.guilds = [];
+      this.myGuild = null; // route into my-guild view on next render
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Join"; }, 2500); }
+    }
+  }
+
+  // ── My Guild detail view ──────────────────────────────────────
+
+  private renderMyGuildDetail() {
+    const my = this.myGuild;
+    if (!my || !my.inGuild || !my.guild || !my.member) {
+      this.renderGuildBrowse();
+      return;
+    }
+    const g = my.guild;
+    const me = my.member;
+    const isOfficer = me.rank === "Founder" || me.rank === "Officer";
+    const gid = Number(g.guildId);
+
+    let html = "";
+
+    // 1. Header card
+    html += `<div class="nd-shop-item" style="border-left:3px solid #44cc88">`;
+    html += `<div class="nd-shop-item-header">`;
+    html += `<span class="nd-shop-item-name" style="color:#44cc88">${esc(g.name)}</span>`;
+    html += `<span class="nd-shop-item-slot">Lvl ${g.level} · ${esc(String(g.status))}</span>`;
+    html += `</div>`;
+    html += `<div class="nd-shop-item-stats">${esc(me.rank)} · ${my.members.length} member${my.members.length === 1 ? "" : "s"} · ${g.treasury}g treasury</div>`;
+    if (g.description) html += `<div class="nd-shop-item-desc">${esc(g.description)}</div>`;
+    html += `<div class="nd-shop-item-footer">`;
+    html += `<button class="nd-btn" data-action="leave-guild" data-guild-id="${gid}" style="color:#ff6677;border-color:rgba(255,102,119,0.35);background:rgba(255,102,119,0.08)">Leave</button>`;
+    html += `</div></div>`;
+
+    // 2. Deposit
+    html += `<div class="nd-shop-item">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ffc24f">Deposit to Treasury</span></div>`;
+    html += `<div class="nd-shop-item-footer">`;
+    html += `<input class="nd-chat-input" type="number" min="1" placeholder="amount" id="nd-guild-deposit" style="flex:1" />`;
+    html += `<button class="nd-btn" data-action="deposit-guild" data-guild-id="${gid}">Deposit</button>`;
+    html += `</div></div>`;
+
+    // 3. Members
+    html += `<div class="nd-shop-item">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">Members</span><span class="nd-shop-item-slot">${my.members.length}</span></div>`;
+    for (const m of my.members) {
+      const isMe = m.address.toLowerCase() === me.address.toLowerCase();
+      html += `<div class="nd-shop-item-stats" style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">`;
+      html += `<span>${shortAddr(m.address)}${isMe ? " <span style='color:#44cc88'>(you)</span>" : ""}</span>`;
+      html += `<span style="color:#9ab">${esc(m.rank)} · ${m.contributedGold}g</span>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+
+    // 4. Invite (officer+ only)
+    if (isOfficer) {
+      html += `<div class="nd-shop-item">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#88aaff">Invite Member</span><span class="nd-shop-item-slot">Officer+</span></div>`;
+      html += `<div class="nd-shop-item-footer">`;
+      html += `<input class="nd-chat-input" type="text" placeholder="0x..." id="nd-guild-invite" maxlength="42" style="flex:1" />`;
+      html += `<button class="nd-btn" data-action="invite-guild" data-guild-id="${gid}">Invite</button>`;
+      html += `</div></div>`;
+    }
+
+    // 5 + 6. Proposals
+    const active = my.proposals.filter((p) => p.status === "active");
+    const past = my.proposals.filter((p) => p.status !== "active");
+
+    html += `<div class="nd-shop-item">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#cc66ff">Active Proposals</span><span class="nd-shop-item-slot">${active.length}</span></div>`;
+    if (active.length === 0) {
+      html += `<div class="nd-shop-item-desc" style="color:#778">None right now</div>`;
+    } else {
+      for (const p of active) {
+        const voted = this.votedProposalIds.has(p.proposalId);
+        const expired = p.timeRemaining <= 0;
+        const typeLabel = PROPOSAL_TYPE_LABELS[p.proposalType] ?? p.proposalType;
+        html += `<div style="border-top:1px solid rgba(204,102,255,0.18);padding-top:6px;margin-top:6px">`;
+        html += `<div style="display:flex;justify-content:space-between"><span style="color:#cc66ff">${esc(typeLabel)}</span><span style="color:#9ab;font-size:11px">${fmtTimeRemaining(p.timeRemaining)}</span></div>`;
+        html += `<div class="nd-shop-item-desc">${esc(p.description)}</div>`;
+        if (p.targetAddress && p.targetAddress !== "0x0000000000000000000000000000000000000000") {
+          html += `<div class="nd-shop-item-desc" style="font-size:11px">→ ${shortAddr(p.targetAddress)}${p.targetAmount ? ` · ${p.targetAmount}g` : ""}</div>`;
+        }
+        html += `<div style="display:flex;gap:6px;align-items:center;margin-top:4px">`;
+        html += `<span style="color:#7fd6be;font-size:11px">yes ${p.yesVotes}</span>`;
+        html += `<span style="color:#ff6677;font-size:11px">no ${p.noVotes}</span>`;
+        html += `<span style="flex:1"></span>`;
+        const dis = (voted || expired) ? " disabled" : "";
+        html += `<button class="nd-btn" data-action="vote-yes" data-proposal-id="${p.proposalId}" data-guild-id="${gid}"${dis} style="color:#7fd6be">${voted ? "Voted" : "Vote Yes"}</button>`;
+        html += `<button class="nd-btn" data-action="vote-no" data-proposal-id="${p.proposalId}" data-guild-id="${gid}"${dis} style="color:#ff6677">${voted ? "" : "Vote No"}</button>`;
+        html += `</div></div>`;
+      }
+    }
+    html += `</div>`;
+
+    // 7. Create proposal (officer+ only)
+    if (isOfficer) {
+      if (this.composeProposalOpen) {
+        html += `<div class="nd-shop-item" style="border-left:3px solid #cc66ff">`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#cc66ff">New Proposal</span></div>`;
+        html += `<select id="nd-prop-type" class="nd-chat-input" style="width:100%;margin-bottom:6px">`;
+        for (const t of PROPOSAL_TYPE_ORDER) {
+          const sel = t === this.composeProposalType ? " selected" : "";
+          html += `<option value="${t}"${sel}>${PROPOSAL_TYPE_LABELS[t]}</option>`;
+        }
+        html += `</select>`;
+        html += `<input class="nd-chat-input" type="text" id="nd-prop-desc" placeholder="Description" maxlength="200" style="width:100%;margin-bottom:6px" />`;
+        html += `<input class="nd-chat-input" type="text" id="nd-prop-target" placeholder="Target 0x... (optional)" maxlength="42" style="width:100%;margin-bottom:6px" />`;
+        html += `<input class="nd-chat-input" type="number" id="nd-prop-amount" placeholder="Amount (optional)" style="width:100%;margin-bottom:6px" />`;
+        html += `<div class="nd-shop-item-footer">`;
+        html += `<button class="nd-btn" data-action="cancel-propose">Cancel</button>`;
+        html += `<button class="nd-btn" data-action="submit-propose" data-guild-id="${gid}" style="color:#cc66ff">Submit</button>`;
+        html += `</div></div>`;
+      } else {
+        html += `<div class="nd-shop-item-footer" style="margin-top:6px">`;
+        html += `<button class="nd-btn" data-action="open-propose" style="color:#cc66ff;border-color:rgba(204,102,255,0.35);background:rgba(204,102,255,0.08)">+ New Proposal</button>`;
+        html += `</div>`;
+      }
+    }
+
+    // Past proposals (collapsed-style — just a summary line for each)
+    if (past.length > 0) {
+      html += `<div class="nd-shop-item">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#778">Past</span><span class="nd-shop-item-slot">${past.length}</span></div>`;
+      for (const p of past) {
+        const typeLabel = PROPOSAL_TYPE_LABELS[p.proposalType] ?? p.proposalType;
+        html += `<div class="nd-shop-item-stats" style="display:flex;justify-content:space-between;padding:2px 0">`;
+        html += `<span>${esc(typeLabel)}</span>`;
+        html += `<span style="color:#9ab">${esc(p.status)} · ${p.yesVotes}/${p.noVotes}</span>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    this.contentEl.innerHTML = `<div class="nd-shop-grid">${html}</div>`;
+
+    // Stop key events from bleeding through to the world keybindings
+    for (const id of ["nd-guild-deposit", "nd-guild-invite", "nd-prop-desc", "nd-prop-target", "nd-prop-amount"]) {
+      const el = this.contentEl.querySelector(`#${id}`) as HTMLInputElement | null;
+      if (el) {
+        el.addEventListener("keydown", (e) => e.stopPropagation());
+        el.addEventListener("keyup", (e) => e.stopPropagation());
+      }
+    }
+    const sel = this.contentEl.querySelector("#nd-prop-type") as HTMLSelectElement | null;
+    if (sel) {
+      sel.addEventListener("change", () => { this.composeProposalType = sel.value as GuildProposalType; });
+    }
+  }
+
+  private async handleLeaveGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const btn = this.contentEl.querySelector(`[data-action='leave-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn && btn.dataset.confirming !== "1") {
+      // First click: arm confirmation
+      btn.dataset.confirming = "1";
+      btn.textContent = "Confirm Leave?";
+      setTimeout(() => {
+        if (btn.dataset.confirming === "1") { btn.dataset.confirming = ""; btn.textContent = "Leave"; }
+      }, 3000);
+      return;
+    }
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await leaveGuild(token, guildId, addr);
+    if (result.ok) {
+      if (btn) btn.textContent = "Left";
+      this.myGuild = null;
+      this.guilds = [];
+      this.guildsLoading = false;
+      this.guildsLoaded = false;
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; btn.dataset.confirming = ""; setTimeout(() => { btn.textContent = "Leave"; }, 2500); }
+    }
+  }
+
+  private async handleDepositGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const input = this.contentEl.querySelector("#nd-guild-deposit") as HTMLInputElement | null;
+    const amount = Math.floor(Number(input?.value ?? 0));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const btn = this.contentEl.querySelector(`[data-action='deposit-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await depositToGuild(token, guildId, addr, amount);
+    if (result.ok) {
+      if (btn) btn.textContent = "Deposited!";
+      this.myGuild = null;
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Deposit"; }, 2500); }
+    }
+  }
+
+  private async handleInviteGuild(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const input = this.contentEl.querySelector("#nd-guild-invite") as HTMLInputElement | null;
+    const target = (input?.value ?? "").trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(target)) {
+      if (input) { input.style.borderColor = "#ff6677"; setTimeout(() => { input.style.borderColor = ""; }, 1500); }
+      return;
+    }
+    const btn = this.contentEl.querySelector(`[data-action='invite-guild'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await inviteToGuild(token, guildId, target);
+    if (result.ok) {
+      if (btn) btn.textContent = "Invited!";
+      if (input) input.value = "";
+      setTimeout(() => { if (btn) { btn.textContent = "Invite"; btn.disabled = false; } }, 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Invite"; }, 2500); }
+    }
+  }
+
+  private async handleVote(proposalId: number, guildId: number, vote: boolean) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const action = vote ? "vote-yes" : "vote-no";
+    const btn = this.contentEl.querySelector(`[data-action='${action}'][data-proposal-id='${proposalId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await voteOnGuildProposal(token, guildId, { proposalId, voterAddress: addr, vote });
+    if (result.ok) {
+      this.votedProposalIds.add(proposalId);
+      saveVotedProposals(this.votedProposalIds);
+      this.myGuild = null;
+      setTimeout(() => this.renderGuild(), 1200);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = vote ? "Vote Yes" : "Vote No"; }, 2500); }
+    }
+  }
+
+  private async handleSubmitProposal(guildId: number) {
+    const token = await this.callbacks.getAuthToken();
+    const addr = this.callbacks.getOwnWalletAddress();
+    if (!token || !addr) return;
+    const descEl = this.contentEl.querySelector("#nd-prop-desc") as HTMLInputElement | null;
+    const targetEl = this.contentEl.querySelector("#nd-prop-target") as HTMLInputElement | null;
+    const amountEl = this.contentEl.querySelector("#nd-prop-amount") as HTMLInputElement | null;
+    const description = (descEl?.value ?? "").trim();
+    if (!description) {
+      if (descEl) { descEl.style.borderColor = "#ff6677"; setTimeout(() => { descEl.style.borderColor = ""; }, 1500); }
+      return;
+    }
+    const targetAddress = (targetEl?.value ?? "").trim();
+    const targetAmount = Math.floor(Number(amountEl?.value ?? 0)) || undefined;
+    const btn = this.contentEl.querySelector(`[data-action='submit-propose'][data-guild-id='${guildId}']`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await proposeGuildAction(token, guildId, {
+      proposerAddress: addr,
+      proposalType: this.composeProposalType,
+      description,
+      targetAddress: targetAddress || undefined,
+      targetAmount,
+    });
+    if (result.ok) {
+      if (btn) btn.textContent = "Submitted!";
+      this.composeProposalOpen = false;
+      this.myGuild = null;
+      setTimeout(() => this.renderGuild(), 1500);
+    } else {
+      if (btn) { btn.textContent = (result.error ?? "Failed").slice(0, 28); btn.disabled = false; setTimeout(() => { btn.textContent = "Submit"; }, 2500); }
     }
   }
 
   // ── Auctions view ─────────────────────────────────────────────
 
   private renderAuctions() {
-    if (this.auctions.length === 0 && !this.auctionsLoading) {
+    // Initial entry: never loaded → kick off load and show spinner. Subsequent
+    // empty results land in the "loaded but empty" branch below, so the load
+    // doesn't re-trigger every render (which previously caused the UI to be
+    // stuck on "Loading auctions..." forever).
+    if (!this.auctionsLoaded && !this.auctionsLoading) {
       this.auctionsLoading = true;
       this.contentEl.innerHTML = `<div class="nd-empty">Loading auctions...</div>`;
       void this.loadAuctions();
       return;
     }
-    if (this.auctionsLoading) { this.contentEl.innerHTML = `<div class="nd-empty">Loading auctions...</div>`; return; }
+    if (this.auctionsLoading && this.auctions.length === 0) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading auctions...</div>`;
+      return;
+    }
+    if (this.auctionsError && this.auctions.length === 0) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Failed to load auctions: ${esc(this.auctionsError)} <button class="nd-btn" data-action="auction-retry">Retry</button></div>`;
+      return;
+    }
     if (this.auctions.length === 0) { this.contentEl.innerHTML = `<div class="nd-empty">No active auctions</div>`; return; }
 
     let html = "";
     const hasChar = !!this.callbacks.getOwnEntityId();
     for (const a of this.auctions) {
-      const timeLeft = Math.max(0, Math.floor(a.timeRemaining / 60));
+      const timeLeft = formatAuctionTime(a.timeRemaining);
+      const pending = this.auctionPendingAction.has(a.auctionId);
+      const nextBid = (a.highBid || a.startPrice) + 1;
       html += `<div class="nd-shop-item">`;
       html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(a.itemName)}</span><span class="nd-shop-item-slot">x${a.quantity}</span></div>`;
       html += `<div class="nd-shop-item-stats">`;
       html += `Bid: ${a.highBid || a.startPrice}g`;
       if (a.buyoutPrice) html += ` · Buyout: ${a.buyoutPrice}g`;
-      html += ` · ${timeLeft}m left`;
+      html += ` · ${esc(timeLeft)} left`;
       html += `</div>`;
       if (hasChar) {
         html += `<div class="nd-shop-item-footer">`;
-        html += `<button class="nd-btn" data-action="bid" data-auction-id="${esc(a.auctionId)}">Bid</button>`;
-        if (a.buyoutPrice) html += `<button class="nd-btn" data-action="buyout" data-auction-id="${esc(a.auctionId)}">Buyout</button>`;
+        html += `<button class="nd-btn" data-action="bid" data-auction-id="${esc(a.auctionId)}"${pending ? " disabled" : ""}>${pending ? "..." : `Bid ${nextBid}g`}</button>`;
+        if (a.buyoutPrice) html += `<button class="nd-btn" data-action="buyout" data-auction-id="${esc(a.auctionId)}"${pending ? " disabled" : ""}>Buyout</button>`;
         html += `</div>`;
       }
       html += `</div>`;
@@ -676,51 +1439,131 @@ export class NpcDialog {
 
   private async loadAuctions() {
     const zoneId = this.entity?.zoneId ?? "village-square";
-    const data = await fetchAuctions(zoneId);
-    this.auctionsLoading = false;
-    this.auctions = data;
-    if (this.activeTab === "auctions") this.renderAuctions();
+    try {
+      const data = await fetchAuctions(zoneId);
+      this.auctions = data;
+      this.auctionsError = null;
+    } catch (err) {
+      console.warn("[npc-dialog] auction refresh failed", err);
+      this.auctionsError = err instanceof Error ? err.message : "network error";
+    } finally {
+      this.auctionsLoading = false;
+      this.auctionsLoaded = true;
+      if (this.activeTab === "auctions") this.renderAuctions();
+    }
+  }
+
+  private startAuctionPolling() {
+    if (this.auctionPollTimer) return;
+    this.auctionPollTimer = setInterval(() => {
+      if (this.activeTab !== "auctions" || !this.isOpen()) {
+        this.stopAuctionPolling();
+        return;
+      }
+      void this.loadAuctions();
+    }, AUCTION_POLL_INTERVAL_MS);
+  }
+
+  private stopAuctionPolling() {
+    if (!this.auctionPollTimer) return;
+    clearInterval(this.auctionPollTimer);
+    this.auctionPollTimer = null;
   }
 
   private async handleBid(auctionId: string) {
+    if (this.auctionPendingAction.has(auctionId)) return;
     const token = await this.callbacks.getAuthToken();
     const addr = this.callbacks.getOwnWalletAddress();
-    if (!token || !addr) return;
+    if (!token || !addr) {
+      this.callbacks.notify?.("Bid failed: deploy your agent first.", "error");
+      return;
+    }
     const auction = this.auctions.find(a => a.auctionId === auctionId);
     if (!auction) return;
     const bidAmount = (auction.highBid || auction.startPrice) + 1;
-    const btn = this.contentEl.querySelector(`[data-action="bid"][data-auction-id="${auctionId}"]`) as HTMLButtonElement;
-    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+
+    // Gold guard so we don't roundtrip a known-bad bid.
+    const balance = await fetchWalletBalance(addr);
+    if (balance && balance.copper < bidAmount) {
+      this.callbacks.notify?.(
+        `Bid failed: need ${bidAmount}g but have ${balance.copper}g.`,
+        "error",
+      );
+      return;
+    }
+
+    this.auctionPendingAction.add(auctionId);
+    this.renderAuctions();
+    this.callbacks.notify?.(`Bidding ${bidAmount}g on ${auction.itemName}...`, "progress");
+
     const zoneId = this.entity?.zoneId ?? "village-square";
     const result = await bidAuction(token, zoneId, { auctionId, bidderAddress: addr, bidAmount });
+    this.auctionPendingAction.delete(auctionId);
+
     if (result.ok) {
       auction.highBid = bidAmount;
-      if (btn) btn.textContent = `Bid ${bidAmount}g!`;
-      setTimeout(() => this.renderAuctions(), 1500);
+      this.callbacks.notify?.(`Bid placed: ${bidAmount}g on ${auction.itemName}.`, "success");
+      void this.loadAuctions();
     } else {
-      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Bid"; }, 2000); }
+      this.callbacks.notify?.(`Bid failed: ${result.error ?? "unknown error"}`, "error");
+      this.renderAuctions();
     }
   }
 
   private async handleBuyout(auctionId: string) {
+    if (this.auctionPendingAction.has(auctionId)) return;
     const token = await this.callbacks.getAuthToken();
     const addr = this.callbacks.getOwnWalletAddress();
-    if (!token || !addr) return;
-    const btn = this.contentEl.querySelector(`[data-action="buyout"][data-auction-id="${auctionId}"]`) as HTMLButtonElement;
-    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    if (!token || !addr) {
+      this.callbacks.notify?.("Buyout failed: deploy your agent first.", "error");
+      return;
+    }
+    const auction = this.auctions.find(a => a.auctionId === auctionId);
+    if (!auction || !auction.buyoutPrice) return;
+
+    const balance = await fetchWalletBalance(addr);
+    if (balance && balance.copper < auction.buyoutPrice) {
+      this.callbacks.notify?.(
+        `Buyout failed: need ${auction.buyoutPrice}g but have ${balance.copper}g.`,
+        "error",
+      );
+      return;
+    }
+
+    this.auctionPendingAction.add(auctionId);
+    this.renderAuctions();
+    this.callbacks.notify?.(
+      `Buying out ${auction.itemName} for ${auction.buyoutPrice}g...`,
+      "progress",
+    );
+
     const zoneId = this.entity?.zoneId ?? "village-square";
     const result = await buyoutAuction(token, zoneId, { auctionId, buyerAddress: addr });
+    this.auctionPendingAction.delete(auctionId);
+
     if (result.ok) {
       this.auctions = this.auctions.filter(a => a.auctionId !== auctionId);
-      setTimeout(() => this.renderAuctions(), 500);
+      this.callbacks.notify?.(`Bought ${auction.itemName} for ${auction.buyoutPrice}g!`, "success");
+      this.renderAuctions();
     } else {
-      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Buyout"; }, 2000); }
+      this.callbacks.notify?.(`Buyout failed: ${result.error ?? "unknown error"}`, "error");
+      this.renderAuctions();
     }
   }
 
   // ── Arena view ────────────────────────────────────────────────
 
   private renderArena() {
+    // Battle viewer mode takes priority over arena bootstrap so the standalone
+    // viewer (opened from inbox match-found) can render without an NPC anchor.
+    if (this.viewingBattle) {
+      this.renderBattleViewer();
+      return;
+    }
+    if (this.viewingBattleId && !this.viewingBattle) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading battle...</div>`;
+      return;
+    }
     if (this.arenaLoading) { this.contentEl.innerHTML = `<div class="nd-empty">Loading arena...</div>`; return; }
     if (!this.arenaInfo && !this.arenaLoading) {
       this.arenaLoading = true;
@@ -729,14 +1572,24 @@ export class NpcDialog {
       return;
     }
 
-    // Battle viewer mode
-    if (this.viewingBattle) {
-      this.renderBattleViewer();
-      return;
-    }
-
     const hasChar = !!this.callbacks.getOwnEntityId();
     let html = "";
+
+    // ── Already in battle ──
+    // If the player is currently fighting, hide queue controls and surface a
+    // return/forfeit card so they aren't confused by "Join queue" while in a match.
+    if (this.currentBattleId) {
+      html += `<div class="nd-shop-item" style="border-left:2px solid #54f28b">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#54f28b">You're in battle</span>`;
+      html += `<span class="nd-shop-item-slot">${esc(this.currentBattleId)}</span></div>`;
+      html += `<div class="nd-shop-item-desc" style="opacity:0.8">The arena master will teleport you to your match. Use Return to spectate or Forfeit to give up.</div>`;
+      html += `<div class="nd-shop-item-footer" style="display:flex;gap:6px">`;
+      html += `<button class="nd-btn" data-action="view-battle" data-battle-id="${esc(this.currentBattleId)}" style="flex:1;color:#54f28b;background:rgba(84,242,139,0.12);border-color:rgba(84,242,139,0.4)">Return to battle</button>`;
+      html += `<button class="nd-btn" data-action="forfeit" data-battle-id="${esc(this.currentBattleId)}" style="flex:1;color:#ff8866;background:rgba(255,136,102,0.12);border-color:rgba(255,136,102,0.4)">Forfeit</button>`;
+      html += `</div></div>`;
+      this.contentEl.innerHTML = html;
+      return;
+    }
 
     // ── Active Battles ──
     html += `<div class="nd-shop-item" style="border-bottom:1px solid rgba(255,68,102,0.2)">`;
@@ -788,7 +1641,25 @@ export class NpcDialog {
       html += `</div></div>`;
 
       if (!this.inQueue) {
-        html += `<div class="nd-shop-item"><button class="nd-btn" data-action="queue-join" style="width:100%;color:#fff;background:rgba(255,68,102,0.25);border-color:rgba(255,68,102,0.4);padding:10px">Join ${esc(this.selectedFormat.toUpperCase())} Queue</button></div>`;
+        const fmt = this.selectedFormat;
+        const isTeamFmt = fmt === "2v2" || fmt === "5v5";
+        const teamSize = fmt === "2v2" ? 2 : fmt === "5v5" ? 5 : 1;
+        const party = this.callbacks.getOwnParty?.() ?? null;
+        if (isTeamFmt) {
+          const partySize = party?.size ?? 0;
+          const partyReady = partySize >= teamSize;
+          const partyLabel = partyReady
+            ? `Join ${esc(fmt.toUpperCase())} as Party`
+            : party
+              ? `Party ${partySize}/${teamSize} — need more`
+              : `No Party — invite first`;
+          html += `<div class="nd-shop-item" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">`;
+          html += `<button class="nd-btn" data-action="queue-join" style="color:#fff;background:rgba(255,68,102,0.25);border-color:rgba(255,68,102,0.4);padding:10px">Join Solo</button>`;
+          html += `<button class="nd-btn" data-action="queue-join-party" ${partyReady ? "" : "disabled"} style="color:${partyReady ? "#fff" : "#776"};background:${partyReady ? "rgba(102,196,255,0.25)" : "rgba(120,120,120,0.12)"};border-color:${partyReady ? "rgba(102,196,255,0.4)" : "rgba(120,120,120,0.3)"};padding:10px${partyReady ? "" : ";cursor:not-allowed"}" title="${esc(partyLabel)}">${esc(partyLabel)}</button>`;
+          html += `</div>`;
+        } else {
+          html += `<div class="nd-shop-item"><button class="nd-btn" data-action="queue-join" style="width:100%;color:#fff;background:rgba(255,68,102,0.25);border-color:rgba(255,68,102,0.4);padding:10px">Join ${esc(fmt.toUpperCase())} Queue</button></div>`;
+        }
       } else {
         html += `<div class="nd-shop-item" style="text-align:center">`;
         html += `<div style="color:#54f28b;font-size:11px;margin-bottom:6px">Searching for match...</div>`;
@@ -828,7 +1699,10 @@ export class NpcDialog {
       html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:13px;font-weight:700">Winner: ${b.winner.toUpperCase()} Team</span></div>`;
     }
     if (b.mvp) {
-      html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:10px">MVP: ${esc(b.mvp.name)} (${b.mvp.damage} dmg)</span></div>`;
+      const mvpText = typeof b.mvp === "string"
+        ? (b.mvp.length > 14 ? `${b.mvp.slice(0, 12)}…` : b.mvp)
+        : `${b.mvp.name} (${b.mvp.damage} dmg)`;
+      html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:10px">MVP: ${esc(mvpText)}</span></div>`;
     }
 
     // Teams
@@ -921,6 +1795,7 @@ export class NpcDialog {
       if (result?.inBattle && result.battleId) {
         this.inQueue = false;
         this.queuedFormats = [];
+        this.currentBattleId = result.battleId;
         this.stopMatchPolling();
         // Auto-open battle viewer
         const details = await fetchBattleDetails(result.battleId);
@@ -931,6 +1806,62 @@ export class NpcDialog {
         if (this.activeTab === "arena") this.renderArena();
       }
     }, 2000);
+  }
+
+  /** Public hook so external pollers (main.ts) can drive the in-battle state. */
+  setCurrentBattleId(battleId: string | null) {
+    this.currentBattleId = battleId;
+    if (battleId) {
+      this.inQueue = false;
+      this.queuedFormats = [];
+    }
+    if (this.activeTab === "arena" && this.isOpen()) this.renderArena();
+  }
+
+  /**
+   * Open the arena tab pre-loaded onto a specific battle, without requiring
+   * the player to be standing next to an Arena Master. Used by the inbox
+   * match-found flow and the global PvP HUD's "view" action.
+   */
+  async openBattleViewer(battleId: string) {
+    const synthetic: Entity = {
+      id: "__battle-viewer__",
+      type: "arena-master",
+      name: "Arena Battle Viewer",
+      x: 0,
+      y: 0,
+      hp: 0,
+      maxHp: 0,
+    };
+    this.open(synthetic);
+    this.activeTab = "arena";
+    this.viewingBattleId = battleId;
+    this.viewingBattle = null;
+    this.renderContent();
+    const details = await fetchBattleDetails(battleId);
+    if (details && this.viewingBattleId === battleId) {
+      this.viewingBattle = details;
+      if (this.activeTab === "arena" && this.isOpen()) this.renderArena();
+    }
+  }
+
+  private async handleForfeit(battleId: string) {
+    const token = await this.callbacks.getAuthToken();
+    if (!token) {
+      this.callbacks.notify?.("Forfeit failed: deploy your agent first.", "error");
+      return;
+    }
+    this.callbacks.notify?.("Forfeiting battle...", "progress");
+    const result = await cancelPvpBattle(token, battleId);
+    if (result.ok) {
+      this.callbacks.notify?.("Battle forfeit.", "info");
+      this.currentBattleId = null;
+      this.viewingBattle = null;
+      this.viewingBattleId = null;
+      if (this.activeTab === "arena") this.renderArena();
+    } else {
+      this.callbacks.notify?.(`Forfeit failed: ${result.error ?? "unknown error"}`, "error");
+    }
   }
 
   private stopMatchPolling() {
@@ -946,16 +1877,71 @@ export class NpcDialog {
     const token = await this.callbacks.getAuthToken();
     const addr = this.callbacks.getOwnWalletAddress();
     const entityId = this.callbacks.getOwnEntityId();
-    if (!token || !addr || !entityId) return;
+    if (!token || !addr || !entityId) {
+      this.callbacks.notify?.("Queue failed: deploy your agent first.", "error");
+      return;
+    }
+    const info = this.callbacks.getOwnCharacterInfo?.();
+    if (!info?.characterTokenId) {
+      this.callbacks.notify?.(
+        "Queue failed: your character isn't fully registered on-chain yet. Wait a moment and try again.",
+        "error",
+      );
+      return;
+    }
     const btn = this.contentEl.querySelector("[data-action='queue-join']") as HTMLButtonElement;
     if (btn) { btn.textContent = "Joining..."; btn.disabled = true; }
-    const result = await joinPvpQueue(token, { agentId: entityId, walletAddress: addr, level: 1, format: this.selectedFormat });
+    this.callbacks.notify?.(`Joining ${this.selectedFormat.toUpperCase()} queue...`, "progress");
+    const result = await joinPvpQueue(token, {
+      agentId: info.agentId ?? entityId,
+      walletAddress: addr,
+      characterTokenId: info.characterTokenId,
+      level: info.level,
+      format: this.selectedFormat,
+    });
     if (result.ok) {
       this.inQueue = true;
       this.queuedFormats = [this.selectedFormat];
       this.startMatchPolling();
+      this.callbacks.notify?.(`Queued for ${this.selectedFormat.toUpperCase()}. Waiting for opponents…`, "success");
     } else {
+      this.callbacks.notify?.(`Queue failed: ${result.error ?? "unknown error"}`, "error");
       if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = `Join ${this.selectedFormat.toUpperCase()} Queue`; }, 2000); return; }
+    }
+    if (this.activeTab === "arena") this.renderArena();
+  }
+
+  private async handleQueuePartyJoin() {
+    const token = await this.callbacks.getAuthToken();
+    const party = this.callbacks.getOwnParty?.() ?? null;
+    if (!token) {
+      this.callbacks.notify?.("Party queue failed: deploy your agent first.", "error");
+      return;
+    }
+    if (!party) {
+      this.callbacks.notify?.("Party queue failed: form a party first (/party invite <name>).", "error");
+      return;
+    }
+    const teamSize = this.selectedFormat === "2v2" ? 2 : this.selectedFormat === "5v5" ? 5 : 0;
+    if (teamSize === 0) {
+      this.callbacks.notify?.(`Party queue is only available for 2v2 or 5v5.`, "error");
+      return;
+    }
+    if (party.size < teamSize) {
+      this.callbacks.notify?.(`Party queue failed: party is ${party.size}/${teamSize}.`, "error");
+      return;
+    }
+    const btn = this.contentEl.querySelector("[data-action='queue-join-party']") as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "Joining…"; btn.disabled = true; }
+    this.callbacks.notify?.(`Queueing party for ${this.selectedFormat.toUpperCase()}…`, "progress");
+    const result = await joinPvpPartyQueue(token, { leaderId: party.leaderId, format: this.selectedFormat });
+    if (result.ok) {
+      this.inQueue = true;
+      this.queuedFormats = [this.selectedFormat];
+      this.startMatchPolling();
+      this.callbacks.notify?.(`Party queued for ${this.selectedFormat.toUpperCase()}. Waiting for opponents…`, "success");
+    } else {
+      this.callbacks.notify?.(`Party queue failed: ${result.error ?? "unknown error"}`, "error");
     }
     if (this.activeTab === "arena") this.renderArena();
   }
@@ -1127,8 +2113,121 @@ export class NpcDialog {
   // ── Quests view ────────────────────────────────────────────────
 
   private renderQuests() {
-    this.contentEl.innerHTML = `<div class="nd-empty">Quest log opened in side panel.</div>`;
-    this.callbacks.onShowQuests();
+    const hasChar = !!this.callbacks.getOwnEntityId();
+    if (!hasChar) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Deploy a character to see quests</div>`;
+      this.footerEl.innerHTML = "";
+      return;
+    }
+    if (!this.npcQuestsLoaded && !this.npcQuestsLoading) {
+      this.npcQuestsLoading = true;
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading quests...</div>`;
+      void this.loadNpcQuests();
+      return;
+    }
+    if (this.npcQuestsLoading) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading quests...</div>`;
+      return;
+    }
+
+    let html = "";
+
+    if (this.npcActiveQuests.length > 0) {
+      html += `<div class="nd-sell-header"><span>In Progress</span><span class="nd-sell-sub">turn in here</span></div>`;
+      for (const q of this.npcActiveQuests) {
+        const icon = QUEST_OBJECTIVE_ICONS[q.objective.type] ?? "?";
+        html += `<div class="nd-shop-item">`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${icon} ${esc(q.title)}</span><span class="nd-shop-item-slot">${q.complete ? "Ready" : `${q.progress}/${q.required}`}</span></div>`;
+        if (q.description) html += `<div class="nd-shop-item-desc">${esc(q.description)}</div>`;
+        html += `<div class="nd-shop-item-stats">${esc(formatQuestObjective(q.objective))}</div>`;
+        html += `<div class="nd-shop-item-footer"><span class="nd-shop-item-price">${esc(formatQuestRewards(q.rewards))}</span>`;
+        if (q.complete) {
+          html += `<button class="nd-btn" data-action="turn-in-quest" data-quest-id="${esc(q.questId)}">Turn In</button>`;
+        } else {
+          html += `<span class="nd-shop-item-stock">${q.progress}/${q.required}</span>`;
+        }
+        html += `</div></div>`;
+      }
+    }
+
+    if (this.npcAvailableQuests.length > 0) {
+      html += `<div class="nd-sell-header"><span>Available</span><span class="nd-sell-sub">${this.npcAvailableQuests.length} quest${this.npcAvailableQuests.length === 1 ? "" : "s"}</span></div>`;
+      for (const q of this.npcAvailableQuests) {
+        const icon = QUEST_OBJECTIVE_ICONS[q.objective.type] ?? "?";
+        html += `<div class="nd-shop-item">`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${icon} ${esc(q.title)}</span><span class="nd-shop-item-slot">${esc(q.objective.type)}</span></div>`;
+        if (q.description) html += `<div class="nd-shop-item-desc">${esc(q.description)}</div>`;
+        html += `<div class="nd-shop-item-stats">${esc(formatQuestObjective(q.objective))}</div>`;
+        html += `<div class="nd-shop-item-footer"><span class="nd-shop-item-price">${esc(formatQuestRewards(q.rewards))}</span>`;
+        html += `<button class="nd-btn" data-action="accept-quest" data-quest-id="${esc(q.questId)}">Accept</button>`;
+        html += `</div></div>`;
+      }
+    }
+
+    if (!html) {
+      html = `<div class="nd-empty">${esc(this.entity?.name ?? "This NPC")} has nothing for you right now.</div>`;
+    }
+
+    html += `<div class="nd-quest-footer-link"><a href="#" data-action="open-quest-log">Open full quest log</a></div>`;
+    this.contentEl.innerHTML = `<div class="nd-shop-grid">${html}</div>`;
+    this.footerEl.innerHTML = "";
+  }
+
+  private async loadNpcQuests() {
+    if (!this.entity) { this.npcQuestsLoading = false; return; }
+    const playerId = this.callbacks.getOwnEntityId();
+    const wallet = this.callbacks.getOwnInventoryWallet?.() ?? this.callbacks.getOwnWalletAddress();
+    const zoneId = this.entity.zoneId;
+    if (!playerId || !zoneId) {
+      this.npcQuestsLoading = false;
+      this.npcQuestsLoaded = true;
+      return;
+    }
+    const [zone, log] = await Promise.all([
+      fetchZoneQuests(zoneId, playerId),
+      wallet ? fetchQuestLog(wallet) : Promise.resolve(null),
+    ]);
+    const npcId = this.entity.id;
+    this.npcAvailableQuests = (zone?.quests ?? []).filter((q) => q.npcEntityId === npcId);
+    this.npcActiveQuests = (log?.activeQuests ?? []).filter((q) => q.npcEntityId === npcId);
+    this.npcQuestsLoading = false;
+    this.npcQuestsLoaded = true;
+    if (this.activeTab === "quests") this.renderQuests();
+  }
+
+  private async handleAcceptQuest(questId: string) {
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+    const btn = this.contentEl.querySelector(`[data-action="accept-quest"][data-quest-id="${questId}"]`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await acceptQuest(token, entityId, questId);
+    if (result.ok) {
+      this.callbacks.notify?.(`Quest accepted`, "success");
+      this.npcQuestsLoaded = false;
+      void this.loadNpcQuests();
+    } else {
+      this.callbacks.notify?.(result.error ?? "Could not accept quest", "error");
+      if (btn) { btn.textContent = "Failed"; setTimeout(() => this.renderQuests(), 1500); }
+    }
+  }
+
+  private async handleTurnInQuest(questId: string) {
+    if (!this.entity) return;
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+    const btn = this.contentEl.querySelector(`[data-action="turn-in-quest"][data-quest-id="${questId}"]`) as HTMLButtonElement | null;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    const result = await completeQuest(token, entityId, questId, this.entity.id);
+    if (result.ok) {
+      this.callbacks.notify?.(`Quest complete!`, "success");
+      this.npcQuestsLoaded = false;
+      void this.loadNpcQuests();
+    } else {
+      this.callbacks.notify?.(result.error ?? "Could not turn in quest", "error");
+      if (btn) { btn.textContent = "Failed"; setTimeout(() => this.renderQuests(), 1500); }
+    }
   }
 
   // ── Styles ─────────────────────────────────────────────────────
@@ -1224,6 +2323,58 @@ export class NpcDialog {
       .nd-msg-name { display: block; font-size: 10px; font-weight: bold; margin-bottom: 2px; }
       .nd-msg-text { display: block; font-size: 12px; color: #dde; line-height: 1.5; }
 
+      /* Quest banner + quick replies */
+      .nd-quest-banner {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+        padding: 8px 16px; border-bottom: 1px solid rgba(255,255,255,0.06);
+      }
+      .nd-quest-chip {
+        font: bold 10px monospace; letter-spacing: 0.5px;
+        padding: 2px 8px; border-radius: 10px;
+      }
+      .nd-quest-ready { background: rgba(255, 204, 68, 0.18); color: #ffcc44; }
+      .nd-quest-available { background: rgba(68, 255, 136, 0.15); color: #4f8; }
+      .nd-quest-active { background: rgba(102, 187, 255, 0.15); color: #66bbff; }
+      .nd-quest-banner-btn {
+        margin-left: auto;
+        background: transparent;
+        border: 1px solid #4f8;
+        color: #4f8;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font: bold 11px monospace;
+        cursor: pointer;
+      }
+      .nd-quest-banner-btn:hover { background: rgba(68, 255, 136, 0.12); }
+
+      .nd-quick-replies {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        padding: 4px 16px 10px;
+      }
+      .nd-quick-reply {
+        background: transparent;
+        border: 1px solid #66bbff;
+        color: #66bbff;
+        padding: 4px 10px;
+        border-radius: 14px;
+        font: 11px monospace;
+        cursor: pointer;
+        transition: background 0.12s;
+      }
+      .nd-quick-reply:hover { background: rgba(102, 187, 255, 0.12); }
+      .nd-action-primary {
+        background: #66bbff;
+        border: 1px solid #66bbff;
+        color: #0b0f18;
+        padding: 5px 14px;
+        border-radius: 14px;
+        font: bold 11px monospace;
+        cursor: pointer;
+        transition: filter 0.12s;
+      }
+      .nd-action-primary:hover { filter: brightness(1.15); }
+      .nd-action-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
       .nd-chat-input-row {
         display: flex;
         gap: 6px;
@@ -1280,6 +2431,21 @@ export class NpcDialog {
       .nd-shop-item-price { color: #ffcc00; font-weight: bold; font-size: 12px; }
       .nd-shop-item-stock { color: #667; font-size: 10px; }
 
+      .nd-sell-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 8px 16px;
+        background: rgba(255,204,0,0.06);
+        border-bottom: 1px solid rgba(255,204,0,0.15);
+        color: #dde;
+        font-size: 11px;
+      }
+      .nd-sell-header b { color: #ffcc00; }
+      .nd-sell-sub { color: #778; font-size: 10px; font-style: italic; }
+      .nd-quest-footer-link { padding: 10px 16px; text-align: center; font-size: 11px; }
+      .nd-quest-footer-link a { color: #66bbff; text-decoration: underline; cursor: pointer; }
+
       .nd-btn {
         margin-left: auto;
         padding: 3px 10px;
@@ -1314,4 +2480,16 @@ function hexToRgba(hex: string, alpha: number): string {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function formatAuctionTime(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s <= 0) return "ended";
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) return r > 0 ? `${m}m ${r}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
 }

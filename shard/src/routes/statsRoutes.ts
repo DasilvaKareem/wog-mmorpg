@@ -175,4 +175,12 @@ export async function registerStatsRoutes(server: FastifyInstance): Promise<void
     cache = { data, expiresAt: now + CACHE_TTL_MS };
     reply.header("X-Cache", "MISS").send(data);
   });
+
+  // GET /playercount — minimal endpoint matching WebGameDB's required shape:
+  // { "playercount": <number> }. Returns true CCU: agents currently running
+  // an autonomous loop, not dormant spawned entities. No auth, briefly cached.
+  server.get("/playercount", async (_req, reply) => {
+    const playercount = agentManager.listRunning().length;
+    reply.header("Cache-Control", "public, max-age=30").send({ playercount });
+  });
 }

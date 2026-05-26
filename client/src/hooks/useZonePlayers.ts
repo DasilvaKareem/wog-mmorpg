@@ -5,7 +5,7 @@ import type { GameTime } from "@/types";
 export interface PlayerInfo {
   id: string;
   name: string;
-  level: number;
+  level?: number;
   hp: number;
   maxHp: number;
   essence?: number;
@@ -69,7 +69,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
           .map((e) => ({
             id: e.id,
             name: e.name,
-            level: e.level ?? 1,
+            level: e.level,
             hp: e.hp,
             maxHp: e.maxHp,
             essence: e.essence,
@@ -81,7 +81,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
             x: e.x,
             y: e.y,
           }))
-          .sort((a, b) => b.level - a.level); // Sort by level descending
+          .sort((a, b) => (b.level ?? 0) - (a.level ?? 0)); // Sort by level descending
 
         return {
           zoneId,

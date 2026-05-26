@@ -7,6 +7,11 @@ interface QuestPanelCallbacks {
   onTalkToNpc: (npcEntityId: string, npcName: string, questTitle: string, questDesc: string, objectiveType: string) => void;
   onAbandonQuest: (questId: string, questTitle: string) => void;
   onOpenAvailable?: () => void;
+  /**
+   * Pin the agent to a specific quest, or pass null to clear focus. The UI
+   * shows a Focus / Focused-Unfocus toggle on each active quest row.
+   */
+  onFocusQuest?: (questId: string | null, questTitle: string) => void;
 }
 
 type QuestTab = "active" | "available" | "completed";
@@ -30,6 +35,7 @@ export class QuestPanel {
   private availableQuests: AvailableQuest[] = [];
   private expandedIds = new Set<string>();
   private confirmAbandonId: string | null = null;
+  private focusedQuestId: string | null = null;
 
   constructor(callbacks: QuestPanelCallbacks) {
     this.callbacks = callbacks;
@@ -106,6 +112,14 @@ export class QuestPanel {
         } else if (action === "abandon-confirm") {
           this.confirmAbandonId = null;
           this.callbacks.onAbandonQuest(questId, btn.dataset.questTitle ?? "");
+        } else if (action === "focus") {
+          const title = btn.dataset.questTitle ?? "";
+          // Optimistic toggle so the user sees feedback immediately; main.ts
+          // can call setFocusedQuestId() after the server confirms.
+          const wasFocused = this.focusedQuestId === questId;
+          this.focusedQuestId = wasFocused ? null : questId;
+          this.render();
+          this.callbacks.onFocusQuest?.(wasFocused ? null : questId, title);
         }
         return;
       }
@@ -124,6 +138,13 @@ export class QuestPanel {
 
   setPlayer(_walletAddress: string | null, isOwn: boolean) {
     this.isOwn = isOwn;
+  }
+
+  /** Apply the server-confirmed focused quest so the badge stays in sync. */
+  setFocusedQuestId(questId: string | null) {
+    if (this.focusedQuestId === questId) return;
+    this.focusedQuestId = questId;
+    if (this.activeTab === "active") this.render();
   }
 
   updateQuestLog(data: QuestLogResponse) {
@@ -214,11 +235,13 @@ export class QuestPanel {
       const barColor = q.complete ? "#66bbff" : "#4488cc";
       const chevron = expanded ? "\u25BC" : "\u25B6";
 
-      html += `<div class="qp-quest${expanded ? " qp-expanded" : ""}">`;
+      const isFocused = this.focusedQuestId === q.questId;
+      html += `<div class="qp-quest${expanded ? " qp-expanded" : ""}${isFocused ? " qp-focused" : ""}">`;
       html += `<div class="qp-quest-header" data-expand-id="${esc(expandId)}">`;
       html += `<span class="qp-chevron">${chevron}</span>`;
       html += `<span class="qp-icon">${icon}</span>`;
       html += `<span class="qp-quest-title">${esc(q.title)}</span>`;
+      if (isFocused) html += `<span class="qp-focused-pill">FOCUS</span>`;
       if (q.complete) html += `<span class="qp-ready-pill">READY</span>`;
       html += `</div>`;
 
@@ -253,6 +276,9 @@ export class QuestPanel {
             html += `<button class="qp-btn qp-btn-ghost" data-action="abandon-cancel" data-quest-id="${esc(q.questId)}">Cancel</button>`;
             html += `</div>`;
           } else {
+            const focusLabel = isFocused ? "Unfocus" : "Focus Agent on This Quest";
+            const focusClass = isFocused ? "qp-btn qp-btn-focused qp-abandon" : "qp-btn qp-btn-focus qp-abandon";
+            html += `<button class="${focusClass}" data-action="focus" data-quest-id="${esc(q.questId)}" data-quest-title="${esc(q.title)}">${focusLabel}</button>`;
             html += `<button class="qp-btn qp-btn-ghost qp-abandon" data-action="abandon-request" data-quest-id="${esc(q.questId)}">Abandon Quest</button>`;
           }
         }
@@ -494,6 +520,20 @@ export class QuestPanel {
         letter-spacing: 0.06em;
         flex-shrink: 0;
       }
+      .qp-focused-pill {
+        background: rgba(255, 200, 80, 0.18);
+        color: #ffc850;
+        font-size: 9px;
+        font-weight: bold;
+        padding: 2px 6px;
+        border-radius: 3px;
+        letter-spacing: 0.06em;
+        flex-shrink: 0;
+      }
+      .qp-quest.qp-focused {
+        background: rgba(255, 200, 80, 0.06);
+        border-left: 2px solid rgba(255, 200, 80, 0.6);
+      }
 
       .qp-progress { margin-left: 34px; margin-top: 4px; }
       .qp-progress-text { font-size: 11px; color: #99b; margin-bottom: 2px; }
@@ -566,6 +606,18 @@ export class QuestPanel {
         color: #ff8888;
       }
       .qp-btn-danger:hover { background: rgba(220, 80, 80, 0.3); }
+      .qp-btn-focus {
+        background: rgba(255, 200, 80, 0.12);
+        border-color: rgba(255, 200, 80, 0.4);
+        color: #ffc850;
+      }
+      .qp-btn-focus:hover { background: rgba(255, 200, 80, 0.25); }
+      .qp-btn-focused {
+        background: rgba(255, 200, 80, 0.25);
+        border-color: rgba(255, 200, 80, 0.6);
+        color: #ffe3a8;
+      }
+      .qp-btn-focused:hover { background: rgba(255, 200, 80, 0.15); }
       .qp-abandon { width: calc(100% - 34px); text-align: center; margin-top: 8px; }
       .qp-abandon-confirm {
         margin: 8px 0 0 34px;
@@ -609,7 +661,33 @@ function capitalize(s: string): string {
 
 function formatObjective(obj: { type: string; count: number; targetMobName?: string; targetNpcName?: string; targetItemName?: string }): string {
   const target = obj.targetMobName ?? obj.targetNpcName ?? obj.targetItemName ?? "";
+  const count = obj.count;
+
+  // The shard quest data uses short tokens like "corpse" or "Tanned" because
+  // doesItemCountForQuest matches by substring. Those tokens render as broken
+  // English ("Gather 6 corpse", "Craft Tanned") if we hand them straight to
+  // the generic formatter. Map the known shorthand to readable copy here.
+  if (obj.type === "gather" && target.toLowerCase() === "corpse") {
+    return `Skin ${count} ${count === 1 ? "corpse" : "corpses"}`;
+  }
+  if (obj.type === "craft" && target === "Tanned") {
+    return count === 1
+      ? "Craft 1 piece of Tanned Leather armor"
+      : `Craft ${count} pieces of Tanned Leather armor`;
+  }
+  if (obj.type === "craft" && target.toLowerCase() === "leather") {
+    return count === 1
+      ? "Craft 1 leather item"
+      : `Craft ${count} leather items`;
+  }
+
   const verb = capitalize(obj.type);
-  if (obj.count > 1) return `${verb} ${obj.count} ${target}`.trim();
-  return `${verb} ${target}`.trim();
+  // Naive plural — append "s" when the target is a single-word noun and the
+  // count is > 1. Skip when target already ends in "s" or contains spaces.
+  let displayTarget = target;
+  if (count > 1 && target && !target.includes(" ") && !target.toLowerCase().endsWith("s")) {
+    displayTarget = `${target}s`;
+  }
+  if (count > 1) return `${verb} ${count} ${displayTarget}`.trim();
+  return `${verb} ${displayTarget}`.trim();
 }

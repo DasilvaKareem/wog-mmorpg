@@ -5,7 +5,7 @@ import { enqueueItemMint, enqueueItemBurn, getItemBalance, getGoldBalance } from
 import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { logDiary, narrativeCraft } from "../social/diary.js";
@@ -13,6 +13,8 @@ import { copperToGold } from "../blockchain/currency.js";
 import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
+import { emitAgentChat } from "../agents/agentDialogue.js";
+import { sendInboxToCustodialOwner } from "../agents/agentInbox.js";
 
 const lastCraftTime = new Map<string, number>();
 
@@ -713,7 +715,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -772,6 +774,35 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           ? Math.floor(PROFESSION_XP.FORGE_ADVANCED / 2)
           : Math.floor(PROFESSION_XP.FORGE_WEAPON / 2);
       awardProfessionXp(entity, zoneId, halfXp, "crafting");
+
+      const failItem = getItemByTokenId(recipe.outputTokenId);
+      logZoneEvent({
+        zoneId,
+        type: "loot",
+        tick: 0,
+        message: `${entity.name}: Crafting failed!`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: {
+          craftType: "crafting",
+          craftFailed: true,
+          itemName: failItem?.name ?? "an item",
+          recipeId,
+        },
+      });
+
+      if (entity.origin) {
+        emitAgentChat({
+          entityId: entity.id,
+          entityName: entity.name ?? "Agent",
+          zoneId,
+          event: "craft_fail",
+          origin: entity.origin,
+          classId: entity.classId,
+          detail: failItem?.name ?? "the item",
+        });
+      }
+
       return {
         ok: false,
         failed: true,
@@ -883,11 +914,50 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           craftType: "crafting",
           itemName: instance?.displayName ?? outputItem?.name ?? "an item",
           recipeId,
+          category: outputItem?.category,
+          equipSlot: outputItem?.equipSlot,
           ...(instance && { quality: instance.quality.tier, instanceId: instance.instanceId }),
         },
       });
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
+
+      const quality = instance?.quality.tier;
+      const isGreat = quality === "rare" || quality === "epic";
+      const craftedDisplay = instance?.displayName ?? outputItem?.name ?? "an item";
+
+      if (entity.origin) {
+        emitAgentChat({
+          entityId: entity.id,
+          entityName: entity.name ?? "Agent",
+          zoneId,
+          event: isGreat ? "craft_great" : "crafting",
+          origin: entity.origin,
+          classId: entity.classId,
+          detail: craftedDisplay,
+        });
+      }
+
+      if (isGreat) {
+        const fromName = entity.name ?? "Forge";
+        void sendInboxToCustodialOwner(walletAddress, {
+          from: walletAddress,
+          fromName,
+          type: "system",
+          body: `Forged a ${quality} ${outputItem?.category === "weapon" ? "weapon" : "item"}: ${craftedDisplay}!`,
+          data: {
+            kind: "craft-rare",
+            quality,
+            itemName: craftedDisplay,
+            tokenId: recipe.outputTokenId.toString(),
+            instanceId: instance?.instanceId,
+            recipeId: recipe.recipeId,
+            zoneId,
+          },
+        }).catch((err) => {
+          server.log.warn({ err }, `[crafting] failed to send rare-craft inbox for ${walletAddress}`);
+        });
+      }
 
       if (entity.agentId != null) {
         reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
@@ -902,7 +972,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
         : recipeId.startsWith("bar-")
           ? PROFESSION_XP.FORGE_ADVANCED
           : PROFESSION_XP.FORGE_WEAPON;
-      const profXpResult = awardProfessionXp(entity, zoneId, craftXp, "crafting", outputItem?.name);
+      const profXpResult = awardProfessionXp(entity, zoneId, craftXp, "crafting");
 
       // Log craft diary entry
       if (walletAddress) {

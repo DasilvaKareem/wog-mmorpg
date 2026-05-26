@@ -3,7 +3,7 @@
  * Extracted from AgentRunner to keep the main loop focused on orchestration.
  */
 
-import { patchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
+import { autoPatchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
 import { ZONE_LEVEL_REQUIREMENTS, FARM_ZONES, getZoneConnections } from "../world/worldLayout.js";
 import type { AgentContext } from "./agentUtils.js";
 import { COOKING_RECIPES } from "../professions/cooking.js";
@@ -151,7 +151,7 @@ export async function checkSelfAdaptation(
       const exitZone = isEstablished && ctx.homeZone ? ctx.homeZone : "village-square";
       console.log(`[agent:${ctx.walletTag}] Self-adapt: stuck in farm zone ${ctx.currentRegion} with focus ${currentFocus} — traveling to ${exitZone}`);
       void ctx.logActivity(`Wrong zone for ${currentFocus} — heading to ${exitZone}`);
-      await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: exitZone });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: exitZone });
       return true;
     }
 
@@ -165,7 +165,7 @@ export async function checkSelfAdaptation(
     ) {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: done ${currentFocus} after ${state.ticksSinceFocusChange} ticks, returning to questing`);
       void ctx.logActivity(`Done ${currentFocus} — back to questing`);
-      await patchAgentConfig(ctx.userWallet, { focus: "questing" });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "questing" });
       return true;
     }
 
@@ -174,7 +174,7 @@ export async function checkSelfAdaptation(
     if (!isEstablished && !state.hasActiveObjective && copper < 50 && currentFocus !== "combat" && currentFocus !== "shopping" && currentFocus !== "gathering") {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: only ${copper}c, need 50c — staying in combat`);
       void ctx.logActivity(`Only ${copper}c — killing mobs for starter gold`);
-      await patchAgentConfig(ctx.userWallet, { focus: "combat" });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "combat" });
       return true;
     }
 
@@ -182,7 +182,7 @@ export async function checkSelfAdaptation(
     if (!hasWeapon && copper >= 10) {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: no weapon, going shopping`);
       void ctx.logActivity("No weapon equipped — heading to shop");
-      await patchAgentConfig(ctx.userWallet, { focus: "shopping" });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "shopping" });
       return true;
     }
 
@@ -192,7 +192,7 @@ export async function checkSelfAdaptation(
     if (!state.hasActiveObjective && emptyArmorSlots.length >= 2 && copper >= 40 && currentFocus !== "shopping") {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: ${emptyArmorSlots.length} empty armor slots, going shopping`);
       void ctx.logActivity(`Missing ${emptyArmorSlots.length} armor pieces — heading to shop`);
-      await patchAgentConfig(ctx.userWallet, { focus: "shopping" });
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "shopping" });
       return true;
     }
 
@@ -206,13 +206,13 @@ export async function checkSelfAdaptation(
       if (hasCookingIngredients) {
         console.log(`[agent:${ctx.walletTag}] Self-adapt: has ingredients, going to cook`);
         void ctx.logActivity("Has ingredients — cooking food");
-        await patchAgentConfig(ctx.userWallet, { focus: "cooking" });
+        await autoPatchAgentConfig(ctx.userWallet, { focus: "cooking" });
         return true;
       }
       if (copper >= 10) {
         console.log(`[agent:${ctx.walletTag}] Self-adapt: no consumables, shopping for food`);
         void ctx.logActivity("No consumables — shopping for food");
-        await patchAgentConfig(ctx.userWallet, { focus: "shopping" });
+        await autoPatchAgentConfig(ctx.userWallet, { focus: "shopping" });
         return true;
       }
       return false;
@@ -245,7 +245,7 @@ export async function checkSelfAdaptation(
         const pick = neighbors[Math.floor(Math.random() * neighbors.length)];
         console.log(`[agent:${ctx.walletTag}] Self-adapt: roaming after ${state.ticksInCurrentZone} ticks → ${pick}`);
         void ctx.logActivity(`Exploring new territory — heading to ${pick}`);
-        await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: pick });
+        await autoPatchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: pick });
         return true;
       }
     }

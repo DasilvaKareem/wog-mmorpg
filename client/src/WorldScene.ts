@@ -106,6 +106,7 @@ export class WorldScene extends Phaser.Scene {
   private unsubscribeLockToPlayer: (() => void) | null = null;
   private unsubscribeFocusEntity: (() => void) | null = null;
   private unsubscribeFollowPlayer: (() => void) | null = null;
+  private unsubscribeGoldGained: (() => void) | null = null;
   private touchMode = false;
   private mobileMode = false;
   private lastPinchDistance: number | null = null;
@@ -280,6 +281,10 @@ export class WorldScene extends Phaser.Scene {
 
     // Click-to-move: detect clicks on empty ground
     this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      // Phaser registers pointerup on the window, so React overlay clicks reach
+      // this handler too. Bail if the press originated outside the game canvas.
+      if (pointer.downElement && pointer.downElement !== this.sys.game.canvas) return;
+
       // Skip if this was a drag (camera pan)
       if (this.isDragging) return;
       // Skip if an entity sprite was clicked (its handler already fired)
@@ -434,6 +439,28 @@ export class WorldScene extends Phaser.Scene {
       this.lockToPlayerWallet(walletAddress);
     });
 
+    // Gold gained from HTTP actions (sell/recycle/auction) — no zone event
+    // for these, so we spawn the popup over the camera-locked player entity.
+    // Falls back to viewport center if the entity isn't on screen yet.
+    this.unsubscribeGoldGained = gameBus.on("goldGained", ({ copper }) => {
+      if (copper <= 0) return;
+      let pos: { x: number; y: number } | undefined;
+      if (this.lockedWalletAddress) {
+        const target = this.lockedWalletAddress;
+        for (const [id, entity] of this.entityRenderer.getEntities()) {
+          if (entity.walletAddress?.toLowerCase() === target) {
+            pos = this.entityRenderer.getPixelPositions().get(id);
+            break;
+          }
+        }
+      }
+      if (!pos) {
+        const cam = this.cameras.main;
+        pos = { x: cam.midPoint.x, y: cam.midPoint.y };
+      }
+      this.floatingText.showGoldText(`gold:${Date.now()}:${Math.random()}`, pos, copper);
+    });
+
     if (typeof window !== "undefined") {
       this.audioUnlockListener = () => {
         void this.ensureAudioReady();
@@ -464,6 +491,8 @@ export class WorldScene extends Phaser.Scene {
       this.unsubscribeFocusEntity = null;
       this.unsubscribeFollowPlayer?.();
       this.unsubscribeFollowPlayer = null;
+      this.unsubscribeGoldGained?.();
+      this.unsubscribeGoldGained = null;
       if (typeof window !== "undefined") {
         if (this.audioUnlockListener) {
           window.removeEventListener("pointerdown", this.audioUnlockListener, true);
@@ -1371,6 +1400,13 @@ export class WorldScene extends Phaser.Scene {
         this.entityRenderer.triggerTechniqueLearned(evt.entityId, techName);
       }
 
+      // Quest accepted banner — fired for both agent- and player-driven accepts
+      if (evt.type === "quest" && evt.entityId && evtData?.action === "accept") {
+        const questTitle = evtData.questTitle as string | undefined;
+        this.entityRenderer.triggerQuestAccepted(evt.entityId, questTitle);
+        playSoundEffect("ui_notification");
+      }
+
       // Melee lunge animation — only for melee-style attacks (not ranged projectiles)
       const isMelee = combatAnimStyle === "melee" || (!combatAnimStyle && evt.type === "combat");
       if (isMelee && evt.entityId && evt.targetId) {
@@ -1459,6 +1495,40 @@ export class WorldScene extends Phaser.Scene {
       if (evt.type === "consume" && evt.entityId && evtData) {
         const pos = pixelPositions.get(evt.entityId);
         if (pos) this.floatingText.showConsumeText(evt.id + ":consume", pos, evtData);
+      }
+
+      // Kill-loot gold popup — fires for mob kills where the loot event
+      // carries a copperReward but no gatherType (gathering uses its own
+      // visual via showGatherText below).
+      if (evt.type === "loot" && evt.entityId && !evtData?.gatherType && !evtData?.craftType) {
+        const copper = (evtData?.copperReward as number | undefined) ?? 0;
+        if (copper > 0) {
+          const pos = pixelPositions.get(evt.entityId);
+          if (pos) this.floatingText.showGoldText(evt.id + ":gold", pos, copper);
+        }
+      }
+
+      // Crafting popup — colorful "Rare Sword" / "Crafting Failed!" above the crafter.
+      if (evt.type === "loot" && evt.entityId && evtData?.craftType) {
+        const pos = pixelPositions.get(evt.entityId);
+        if (pos) {
+          if (evtData.craftFailed) {
+            this.floatingText.showCraftFail(evt.id + ":craftfail", pos);
+          } else {
+            const itemName = (evtData.itemName as string) ?? "Item";
+            const quality = evtData.quality as string | undefined;
+            const equipSlot = evtData.equipSlot as string | undefined;
+            const category = evtData.category as string | undefined;
+            this.floatingText.showCraftText(
+              evt.id + ":craft",
+              pos,
+              itemName,
+              quality,
+              equipSlot,
+              category,
+            );
+          }
+        }
       }
 
       // Gathering profession animations — triggered by loot events with gatherType data

@@ -4,7 +4,7 @@ import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, controlsWallet } from "../auth/auth.js";
 import { logDiary, narrativeSkin } from "../social/diary.js";
 import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
@@ -76,7 +76,7 @@ export function registerSkinningRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -235,7 +235,7 @@ export function registerSkinningRoutes(server: FastifyInstance) {
 
       // Award profession XP
       const region = zoneId ?? entity.region ?? "unknown";
-      const profXpResult = awardProfessionXp(entity, region, PROFESSION_XP.SKIN, "skinning", undefined, "corpse");
+      const profXpResult = awardProfessionXp(entity, region, PROFESSION_XP.SKIN, "skinning");
 
       server.log.info(
         `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items (node: ${corpseId})`

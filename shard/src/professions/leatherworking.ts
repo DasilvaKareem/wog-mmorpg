@@ -394,7 +394,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
       const lwXp = recipeId.startsWith("reinforced-")
         ? PROFESSION_XP.LEATHER_ADVANCED
         : PROFESSION_XP.LEATHER_BASIC;
-      const profXpResult = awardProfessionXp(entity, zoneId, lwXp, "leatherworking", outputItem?.name);
+      const profXpResult = awardProfessionXp(entity, zoneId, lwXp, "leatherworking");
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 

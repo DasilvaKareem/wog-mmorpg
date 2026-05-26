@@ -12,6 +12,7 @@ import { registerWalletRoutes } from "./blockchain/wallet.js";
 import { registerShopRoutes } from "./economy/shop.js";
 import { registerCharacterRoutes } from "./character/characterRoutes.js";
 import { registerTradeRoutes } from "./economy/trade.js";
+import { registerTradeListingsTick } from "./economy/tradeListingsTick.js";
 import { registerEquipmentRoutes } from "./items/equipment.js";
 import { registerAuctionHouseRoutes } from "./economy/auctionHouse.js";
 import { registerAuctionHouseTick } from "./economy/auctionHouseTick.js";
@@ -24,7 +25,8 @@ import { registerMiningRoutes } from "./professions/mining.js";
 import { spawnOreNodes } from "./resources/oreSpawner.js";
 import { registerProfessionRoutes } from "./professions/professions.js";
 import { registerCraftingRoutes } from "./professions/crafting.js";
-import { registerQuestRoutes } from "./social/questSystem.js";
+import { auditQuestNpcMappings, registerQuestRoutes } from "./social/questSystem.js";
+import { flushAllPendingQuests } from "./social/questPersistence.js";
 import { registerHerbalismRoutes } from "./professions/herbalism.js";
 import { spawnFlowerNodes } from "./resources/flowerSpawner.js";
 import { spawnNectarNodes } from "./resources/nectarSpawner.js";
@@ -49,6 +51,7 @@ import { registerPvPRoutes } from "./combat/pvpRoutes.js";
 import { registerPredictionRoutes } from "./economy/predictionRoutes.js";
 import { registerX402Routes } from "./economy/x402Routes.js";
 import { registerAgentChatRoutes } from "./agents/agentChatRoutes.js";
+import { registerAgentTradingRoutes } from "./agents/agentTradingRoutes.js";
 import { registerAgentInboxRoutes } from "./agents/agentInboxRoutes.js";
 import { registerA2ARoutes } from "./agents/a2aRoutes.js";
 import { registerAgentDirectoryRoutes } from "./agents/agentDirectoryRoutes.js";
@@ -75,7 +78,9 @@ import { registerNotificationRoutes } from "./social/notificationRoutes.js";
 import { registerWebPushRoutes } from "./social/webPushRoutes.js";
 import { initWebPushAlerts } from "./social/webPushService.js";
 import { registerGoldPurchaseRoutes } from "./economy/goldPurchaseRoutes.js";
+import { registerNanopaymentRoutes, runSettlementBatch } from "./economy/nanopaymentRoutes.js";
 import { registerNpcDialogueRoutes } from "./social/npcDialogueRoutes.js";
+import { registerNpcActionRoutes } from "./social/npcActionRoutes.js";
 import { registerQuestGraphRoutes } from "./social/questGraphRoutes.js";
 import { initTelegramBot } from "./social/telegramNotifications.js";
 import { initWorldMapStore } from "./world/worldMapStore.js";
@@ -951,9 +956,6 @@ server.post<{
     completedQuests: entity.completedQuests ?? [],
     learnedTechniques: entity.learnedTechniques ?? [],
     professions: getLearnedProfessions(entity.walletAddress),
-    runEnergy: entity.runEnergy,
-    maxRunEnergy: entity.maxRunEnergy,
-    runModeEnabled: entity.runModeEnabled,
     equipment: entity.equipment ?? undefined,
   });
 
@@ -1005,17 +1007,21 @@ registerWalletRoutes(server);
 registerShopRoutes(server);
 registerCharacterRoutes(server);
 registerTradeRoutes(server);
+registerTradeListingsTick(server);
 registerEquipmentRoutes(server);
 registerAuctionHouseRoutes(server);
 registerAuctionHouseTick(server);
 registerGuildRoutes(server);
 registerGuildTick(server);
+// Batch-settle Circle Gateway nanopayment authorizations every 5 minutes
+setInterval(() => { void runSettlementBatch(); }, 5 * 60 * 1000);
 registerGuildVaultRoutes(server);
 registerMiningRoutes(server);
 registerProfessionRoutes(server);
 registerCraftingRoutes(server);
 registerQuestRoutes(server);
 registerNpcDialogueRoutes(server);
+registerNpcActionRoutes(server);
 registerQuestGraphRoutes(server);
 registerHerbalismRoutes(server);
 registerAlchemyRoutes(server);
@@ -1036,10 +1042,12 @@ registerJewelcraftingRoutes(server);
 registerPvPRoutes(server);
 registerPredictionRoutes(server);
 registerAgentChatRoutes(server);
+registerAgentTradingRoutes(server);
 registerAgentInboxRoutes(server);
 registerA2ARoutes(server);
 registerAgentDirectoryRoutes(server);
 registerGoldPurchaseRoutes(server);
+registerNanopaymentRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);
 registerDirectBuyRoutes(server);
@@ -1063,6 +1071,10 @@ registerWebPushRoutes(server);
 initDungeonLootTables();
 startGuildNameCacheRefresh(GUILD_CACHE_REFRESH_INTERVAL_MS);
 spawnNpcs();
+// Surface any quest ↔ NPC name drift now, before players hit a silent fallback.
+auditQuestNpcMappings(
+  Array.from(getAllEntities().values()).map((e) => ({ name: e.name, aliases: e.aliases })),
+);
 if (SKIP_MERCHANT_BOOTSTRAP) {
   server.log.info("[merchant] Skipping merchant bootstrap in LOCAL_TEST_MODE=core");
 } else {
@@ -1157,10 +1169,15 @@ const start = async () => {
       let body = "";
       if (action === "level_up") {
         const level = (entry.details.newLevel as number) ?? "?";
-        body = `${name} reached level ${level}!`;
+        body = `Reached level ${level}!`;
       } else if (action === "quest_complete") {
-        const quest = (entry.details.questName as string) ?? "a quest";
-        body = `${name} completed "${quest}"!`;
+        const title = (entry.details.questTitle as string) ?? (entry.details.questName as string) ?? "unknown quest";
+        const xp = (entry.details.xpReward as number) ?? 0;
+        const copper = (entry.details.copperReward as number) ?? 0;
+        const gold = Math.floor(copper / 100);
+        body = gold > 0
+          ? `Completed "${title}" · +${xp} XP · +${gold}g`
+          : `Completed "${title}" · +${xp} XP`;
       }
       if (body) {
         void sendSystemNotification(wallet, name, body, { action, ...entry.details });
@@ -1173,6 +1190,11 @@ const start = async () => {
   const host = "0.0.0.0";
   await server.listen({ port, host });
   server.log.info(`Shard listening on ${host}:${port}`);
+
+  // USDC deposit watcher: credits compute budget when USDC lands on an agent wallet (Base mainnet).
+  void (await import("./economy/usdcDepositWatcher.js")).startUsdcDepositWatcher().catch((err: any) => {
+    server.log.warn(`[usdcWatcher] startup failed: ${err.message?.slice(0, 140) ?? err}`);
+  });
 
   if (LAZY_RUNTIME_HYDRATION) {
     server.log.info("[runtime] Lazy hydration enabled; skipping eager restore of live sessions, parties, PvP, merchants, agents, plots, and gold reservations");
@@ -1215,12 +1237,14 @@ const start = async () => {
 process.on("SIGTERM", async () => {
   await stopChainBatcher();
   await agentManager.stopAll();
+  await flushAllPendingQuests();
   await server.close();
   process.exit(0);
 });
 process.on("SIGINT", async () => {
   await stopChainBatcher();
   await agentManager.stopAll();
+  await flushAllPendingQuests();
   await server.close();
   process.exit(0);
 });

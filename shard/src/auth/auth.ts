@@ -67,6 +67,23 @@ export function requireWalletMatch(
 }
 
 /**
+ * Wallet-ownership check that accepts a user wallet OR that user's custodial
+ * (agent) wallet. Use this anywhere the request body carries a wallet that
+ * may be either the user's own wallet or an agent character's custodial
+ * wallet — direct strict equality rejects valid agent-driven flows.
+ */
+export async function controlsWallet(
+  authenticatedWallet: string | null | undefined,
+  targetWallet: string | null | undefined,
+): Promise<boolean> {
+  if (!authenticatedWallet || !targetWallet) return false;
+  if (walletsMatch(authenticatedWallet, targetWallet)) return true;
+  const { getAgentCustodialWallet } = await import("../agents/agentConfigStore.js");
+  const custodial = await getAgentCustodialWallet(authenticatedWallet);
+  return walletsMatch(custodial, targetWallet);
+}
+
+/**
  * Verify a wallet signature
  * Message format: "Sign this message to authenticate with WoG MMORPG\nTimestamp: {timestamp}\nWallet: {address}"
  */

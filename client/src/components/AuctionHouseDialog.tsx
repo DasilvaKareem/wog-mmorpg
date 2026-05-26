@@ -65,13 +65,38 @@ interface NpcInfo {
 function formatTimeRemaining(endsAt: number): string {
   const seconds = Math.max(0, Math.floor(endsAt - Date.now() / 1000));
   if (seconds <= 0) return "Ended";
-  const hours = Math.floor(seconds / 3600);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
+  if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m ${secs}s`;
   return `${secs}s`;
 }
+
+// Mirror of shard listing-fee math so the UI can preview the cost without an RPC.
+// Keep in sync with shard/src/economy/auctionHouse.ts.
+const LISTING_FEE_BASE_GOLD = 0.005;     // 50 copper
+const LISTING_FEE_PER_DAY_GOLD = 0.01;   // 100 copper
+const MAX_DURATION_MINUTES = 30 * 24 * 60;
+
+function durationDaysFor(minutes: number): number {
+  return Math.max(1, Math.ceil(minutes / (24 * 60)));
+}
+function listingFeeFor(minutes: number): { days: number; total: number } {
+  const days = durationDaysFor(minutes);
+  return { days, total: LISTING_FEE_BASE_GOLD + days * LISTING_FEE_PER_DAY_GOLD };
+}
+
+const DURATION_OPTIONS: { label: string; value: string }[] = [
+  { label: "1h", value: "60" },
+  { label: "6h", value: "360" },
+  { label: "1d", value: String(24 * 60) },
+  { label: "3d", value: String(3 * 24 * 60) },
+  { label: "7d", value: String(7 * 24 * 60) },
+  { label: "30d", value: String(30 * 24 * 60) },
+];
 
 export function AuctionHouseDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -264,7 +289,17 @@ export function AuctionHouseDialog(): React.ReactElement {
       });
 
       if (res.ok) {
-        notify("Auction cancelled", "success");
+        const data = await res.json().catch(() => null);
+        const refunded = typeof data?.feeRefunded === "number" ? data.feeRefunded : 0;
+        const netCharge = typeof data?.netCharge === "number" ? data.netCharge : 0;
+        if (refunded > 0) {
+          notify(
+            `Auction cancelled — refunded ${refunded.toFixed(4)} GOLD (${netCharge >= 0 ? "net charge" : "net credit"}: ${Math.abs(netCharge).toFixed(4)} GOLD)`,
+            "success",
+          );
+        } else {
+          notify("Auction cancelled", "success");
+        }
         void loadAuctions(zoneId);
       } else {
         const err = await res.json();
@@ -517,16 +552,12 @@ export function AuctionHouseDialog(): React.ReactElement {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[8px] text-[#9aa7cc]">Duration</label>
-                  <div className="grid grid-cols-3 gap-1">
-                    {[
-                      { label: "30 min", value: "30" },
-                      { label: "1 hour", value: "60" },
-                      { label: "2 hours", value: "120" },
-                    ].map((opt) => (
+                  <label className="block text-[10px] sm:text-[8px] text-[#9aa7cc]">Duration</label>
+                  <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6 sm:gap-1">
+                    {DURATION_OPTIONS.map((opt) => (
                       <button
                         key={opt.value}
-                        className={`border-2 border-black p-1.5 text-[9px] font-bold shadow-[2px_2px_0_0_#000] transition ${
+                        className={`border-2 border-black p-2.5 text-[12px] sm:p-1.5 sm:text-[9px] font-bold shadow-[2px_2px_0_0_#000] transition ${
                           createDuration === opt.value
                             ? "bg-[#ffcc00] text-black"
                             : "bg-[#2b3656] text-[#9aa7cc] hover:bg-[#3a4870]"
@@ -537,6 +568,17 @@ export function AuctionHouseDialog(): React.ReactElement {
                       </button>
                     ))}
                   </div>
+                  {(() => {
+                    const minutes = parseInt(createDuration) || 0;
+                    if (minutes < 1 || minutes > MAX_DURATION_MINUTES) return null;
+                    const { days, total } = listingFeeFor(minutes);
+                    return (
+                      <div className="mt-1.5 text-[11px] sm:text-[8px] text-[#9aa7cc]">
+                        Listing fee: <span className="text-[#ffcc00]">{total.toFixed(4)} GOLD</span>{" "}
+                        ({LISTING_FEE_BASE_GOLD.toFixed(3)} base + {days}d × {LISTING_FEE_PER_DAY_GOLD.toFixed(2)} GOLD/day)
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="space-y-1">

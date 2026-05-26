@@ -35,9 +35,6 @@ type ExportedCharacter = {
   storyFlags?: string[];
   learnedTechniques?: string[];
   professions?: string[];
-  runEnergy?: number | null;
-  maxRunEnergy?: number | null;
-  runModeEnabled?: boolean | string | null;
   signatureTechniqueId?: string | null;
   ultimateTechniqueId?: string | null;
   equipment?: Record<string, unknown> | null;
@@ -127,15 +124,6 @@ function normalizeProfessionSkills(value: unknown): NonNullable<CharacterSaveDat
   return skills;
 }
 
-function normalizeBoolean(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    if (value === "true") return true;
-    if (value === "false") return false;
-  }
-  return undefined;
-}
-
 function buildCharacterSnapshot(character: ExportedCharacter): CharacterSaveData {
   const name = String(character.name ?? character.characterName ?? "").trim();
   const raceId = String(character.raceId ?? "").trim();
@@ -164,9 +152,6 @@ function buildCharacterSnapshot(character: ExportedCharacter): CharacterSaveData
     storyFlags: normalizeStringArray(character.storyFlags),
     learnedTechniques: normalizeStringArray(character.learnedTechniques),
     professions: normalizeStringArray(character.professions),
-    runEnergy: character.runEnergy != null ? Number(character.runEnergy) || 0 : undefined,
-    maxRunEnergy: character.maxRunEnergy != null ? Number(character.maxRunEnergy) || 0 : undefined,
-    runModeEnabled: normalizeBoolean(character.runModeEnabled),
     signatureTechniqueId: character.signatureTechniqueId ?? undefined,
     ultimateTechniqueId: character.ultimateTechniqueId ?? undefined,
     equipment: character.equipment && typeof character.equipment === "object" && !Array.isArray(character.equipment)

@@ -1,13 +1,15 @@
 /**
  * Agent Config Store — Redis CRUD for AI agent configurations
  * Keys:
- *   agent:config:{userWallet}  → JSON AgentConfig
- *   agent:wallet:{userWallet}  → custodialWalletAddress
- *   agent:entity:{userWallet}  → JSON { entityId, zoneId, characterName?, agentId?, characterTokenId? }
+ *   agent:config:{userWallet}               → JSON AgentConfig
+ *   agent:wallet:{userWallet}:{charName}     → custodialWalletAddress (per-character, lowercase charName)
+ *   agent:wallet:{userWallet}               → custodialWalletAddress (legacy single-wallet key, kept for migration)
+ *   agent:entity:{userWallet}               → JSON { entityId, zoneId, characterName?, agentId?, characterTokenId? }
  */
 
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { clearWalletEntityLink, upsertWalletLink } from "../character/characterProjectionStore.js";
+import { registerWatchedAgentWallet } from "../economy/usdcDepositWatcher.js";
 import { enqueueOutboxEvent } from "../db/outbox.js";
 import { getWalletRuntimeState, listWalletRuntimeStatesByPrefix, putWalletRuntimeState } from "../db/walletInfraStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
@@ -18,6 +20,7 @@ import type { Edict } from "../combat/edicts.js";
 export type AgentFocus =
   | "questing"
   | "combat"
+  | "party"
   | "enchanting"
   | "crafting"
   | "gathering"
@@ -29,11 +32,16 @@ export type AgentFocus =
   | "traveling"
   | "learning"
   | "idle"
+  | "user"
   | "goto"
   | "dungeon"
   | "leatherworking"
   | "jewelcrafting"
   | "farming";
+
+/** Focuses where the user is explicitly driving the agent — no autonomous
+ *  patch should ever overwrite focus or targetZone while one of these is set. */
+export const USER_PINNED_FOCUSES: ReadonlySet<AgentFocus> = new Set(["user", "idle", "party"]);
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 export type GatherPreference = NonNullable<BotScript["nodeType"]>;
@@ -79,6 +87,33 @@ export interface AgentObjective {
   completedAt?: number;
 }
 
+/**
+ * User-defined "limit order" rule for an item the agent should auto-buy and/or
+ * auto-sell. Runs independently of focus — DeFi-trader-style passive strategy.
+ */
+export interface TradingRule {
+  id: string;
+  tokenId: number;
+  itemName?: string;
+  /** Buy any auction with price ≤ this (per unit). Omit to disable buying. */
+  maxBuy?: number;
+  /** List inventory of this token at this price (per unit). Omit to disable selling. */
+  minSell?: number;
+  /** Never hold more than this many of this token. */
+  maxQty?: number;
+  /** Total gold cap for buy spend on this rule, ever. */
+  budget?: number;
+  /** Cumulative gold spent on buys for this rule. */
+  spent?: number;
+  /** Days to list when auto-selling (1..30, default 7). */
+  listDurationDays?: number;
+  venue: "auction" | "direct" | "both";
+  enabled: boolean;
+  createdAt: number;
+  /** Last tick the rule fired a buy/sell, for cooldown rate-limiting. */
+  lastFiredAt?: number;
+}
+
 export interface AgentConfig {
   enabled: boolean;
   focus: AgentFocus;
@@ -113,6 +148,16 @@ export interface AgentConfig {
    *  when the agent is productively questing/combating in a zone. Detour chains
    *  (shop, learn, etc.) travel back here when they complete. */
   homeZone?: string;
+  /**
+   * When set, the agent's quest behavior filters its active-quest pool down to
+   * just this quest id (plus any prerequisites it can finish first). Cleared
+   * once the quest is completed/abandoned or the user toggles focus off.
+   */
+  focusedQuestId?: string;
+  /** Passive auto-trading rules — run on a separate cadence from focus. */
+  tradingRules?: TradingRule[];
+  /** Global on/off switch for the auto-trader pass. Disabled by default. */
+  tradingEnabled?: boolean;
 }
 
 export interface AgentEntityRef {
@@ -142,6 +187,9 @@ const memEntity = new Map<string, AgentEntityRef>();
 
 function walletKey(k: string) { return `agent:config:${k.toLowerCase()}`; }
 function custWalletKey(k: string) { return `agent:wallet:${k.toLowerCase()}`; }
+function charCustWalletKey(userWallet: string, charName: string) {
+  return `agent:wallet:${userWallet.toLowerCase()}:${charName.toLowerCase()}`;
+}
 function entityKey(k: string) { return `agent:entity:${k.toLowerCase()}`; }
 function runtimeKey(k: string) { return `agent:runtime:${k.toLowerCase()}`; }
 
@@ -203,6 +251,33 @@ export async function patchAgentConfig(
 ): Promise<AgentConfig> {
   const existing = (await getAgentConfig(userWallet)) ?? defaultConfig();
   const updated: AgentConfig = { ...existing, ...patch, lastUpdated: Date.now() };
+  await setAgentConfig(userWallet, updated);
+  return updated;
+}
+
+/**
+ * Autonomous-flow variant of patchAgentConfig: refuses to overwrite focus or
+ * targetZone when the user has pinned focus (idle / user). Other fields in
+ * the patch still apply.
+ *
+ * USE THIS from any agent-driven logic that changes focus or travel target.
+ * Direct user actions (slash commands, explicit chat directives) should keep
+ * using patchAgentConfig so the user can always reassign their own focus.
+ */
+export async function autoPatchAgentConfig(
+  userWallet: string,
+  patch: Partial<AgentConfig>
+): Promise<AgentConfig> {
+  const existing = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  let effective = patch;
+  if (USER_PINNED_FOCUSES.has(existing.focus)) {
+    if ("focus" in patch || "targetZone" in patch) {
+      effective = { ...patch };
+      delete effective.focus;
+      delete effective.targetZone;
+    }
+  }
+  const updated: AgentConfig = { ...existing, ...effective, lastUpdated: Date.now() };
   await setAgentConfig(userWallet, updated);
   return updated;
 }
@@ -486,19 +561,24 @@ export async function incrementDeployCount(userWallet: string): Promise<number> 
   return current + 1;
 }
 
-// ── Custodial wallet mapping ─────────────────────────────────────────────────
+// ── Custodial wallet mapping (per-character) ─────────────────────────────────
+//
+// Primary storage: agent:wallet:{owner}:{charName} — one wallet per character.
+// Legacy key:      agent:wallet:{owner}            — kept for migration & backward-compat.
+//
+// All callers that only have `userWallet` (no charName) use getAgentCustodialWallet()
+// which resolves via the entity ref (characterName field). This means auth checks and
+// status lookups always see the CURRENTLY ACTIVE character's wallet without needing
+// a code change.
 
-export async function getAgentCustodialWallet(userWallet: string): Promise<string | null> {
+async function readWallet(redisKey: string, userWallet: string): Promise<string | null> {
   if (isPostgresConfigured()) {
-    const addr = await getWalletRuntimeState<string>(custWalletKey(userWallet));
-    return addr ?? null;
+    return (await getWalletRuntimeState<string>(redisKey)) ?? null;
   }
   const redis = getRedis();
   if (redis) {
     try {
-      const addr = await redis.get(custWalletKey(userWallet));
-      if (addr) return addr;
-      return null;
+      return (await redis.get(redisKey)) ?? null;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;
     }
@@ -508,21 +588,17 @@ export async function getAgentCustodialWallet(userWallet: string): Promise<strin
   return memWallet.get(userWallet.toLowerCase()) ?? null;
 }
 
-export async function setAgentCustodialWallet(userWallet: string, custodialAddress: string): Promise<void> {
-  const key = userWallet.toLowerCase();
-  const normalized = custodialAddress.toLowerCase();
+async function writeWallet(redisKey: string, userWallet: string, normalized: string): Promise<void> {
   if (isPostgresConfigured()) {
-    await putWalletRuntimeState(custWalletKey(key), normalized);
+    await putWalletRuntimeState(redisKey, normalized);
   }
   const redis = getRedis();
   if (redis) {
     try {
-      await redis.set(custWalletKey(key), normalized);
-      await upsertWalletLink({
-        ownerWallet: key,
-        custodialWallet: normalized,
-      }).catch((err) => {
-        console.warn(`[walletLinks] Failed to sync custodial mapping for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+      await redis.set(redisKey, normalized);
+      void registerWatchedAgentWallet(normalized).catch(() => { /* non-fatal */ });
+      await upsertWalletLink({ ownerWallet: userWallet, custodialWallet: normalized }).catch((err) => {
+        console.warn(`[walletLinks] Failed to sync custodial mapping for ${userWallet}: ${err.message?.slice(0, 140) ?? err}`);
       });
       return;
     } catch (err) {
@@ -531,38 +607,30 @@ export async function setAgentCustodialWallet(userWallet: string, custodialAddre
   } else {
     if (!isPostgresConfigured()) assertRedisAvailable("setAgentCustodialWallet");
   }
-  memWallet.set(key, normalized);
-  await upsertWalletLink({
-    ownerWallet: key,
-    custodialWallet: normalized,
-  }).catch((err) => {
-    console.warn(`[walletLinks] Failed to sync custodial mapping for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+  void registerWatchedAgentWallet(normalized).catch(() => { /* non-fatal */ });
+  memWallet.set(userWallet, normalized);
+  await upsertWalletLink({ ownerWallet: userWallet, custodialWallet: normalized }).catch((err) => {
+    console.warn(`[walletLinks] Failed to sync custodial mapping for ${userWallet}: ${err.message?.slice(0, 140) ?? err}`);
   });
   await enqueueOutboxEvent({
     topic: "wallet_link.updated",
     aggregateType: "wallet_link",
-    aggregateKey: key,
-    payload: {
-      ownerWallet: key,
-      custodialWallet: normalized,
-    },
+    aggregateKey: userWallet,
+    payload: { ownerWallet: userWallet, custodialWallet: normalized },
   }).catch((err) => {
-    console.warn(`[outbox] Failed to enqueue wallet_link.updated for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+    console.warn(`[outbox] Failed to enqueue wallet_link.updated for ${userWallet}: ${err.message?.slice(0, 140) ?? err}`);
   });
 }
 
-export async function clearAgentCustodialWallet(userWallet: string): Promise<void> {
-  const key = userWallet.toLowerCase();
+async function deleteWallet(redisKey: string, memKey: string): Promise<void> {
   if (isPostgresConfigured()) {
-    await putWalletRuntimeState(custWalletKey(key), null);
+    await putWalletRuntimeState(redisKey, null);
   }
   const redis = getRedis();
   if (redis) {
     try {
-      await redis.del(custWalletKey(key));
-      if (isMemoryFallbackAllowed()) {
-        memWallet.delete(key);
-      }
+      await redis.del(redisKey);
+      if (isMemoryFallbackAllowed()) memWallet.delete(memKey);
       return;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;
@@ -570,7 +638,64 @@ export async function clearAgentCustodialWallet(userWallet: string): Promise<voi
   } else {
     if (!isPostgresConfigured()) assertRedisAvailable("clearAgentCustodialWallet");
   }
-  memWallet.delete(key);
+  memWallet.delete(memKey);
+}
+
+// ── Per-character custodial wallet ───────────────────────────────────────────
+
+export async function getCharacterCustodialWallet(userWallet: string, characterName: string): Promise<string | null> {
+  return readWallet(charCustWalletKey(userWallet, characterName), userWallet);
+}
+
+export async function setCharacterCustodialWallet(
+  userWallet: string,
+  characterName: string,
+  custodialAddress: string,
+): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const normalized = custodialAddress.toLowerCase();
+  await writeWallet(charCustWalletKey(key, characterName), key, normalized);
+}
+
+export async function clearCharacterCustodialWallet(userWallet: string, characterName: string): Promise<void> {
+  const key = userWallet.toLowerCase();
+  await deleteWallet(charCustWalletKey(key, characterName), key);
+}
+
+// ── Legacy single-wallet helpers (kept for migration reads and backward compat) ──
+
+/** @deprecated Use getCharacterCustodialWallet — kept only for migration reads. */
+async function getLegacyCustodialWallet(userWallet: string): Promise<string | null> {
+  return readWallet(custWalletKey(userWallet), userWallet);
+}
+
+/** @deprecated Use setCharacterCustodialWallet. */
+export async function setAgentCustodialWallet(userWallet: string, custodialAddress: string): Promise<void> {
+  const key = userWallet.toLowerCase();
+  await writeWallet(custWalletKey(key), key, custodialAddress.toLowerCase());
+}
+
+/** @deprecated Use clearCharacterCustodialWallet. */
+export async function clearAgentCustodialWallet(userWallet: string): Promise<void> {
+  await deleteWallet(custWalletKey(userWallet.toLowerCase()), userWallet.toLowerCase());
+}
+
+/**
+ * Backward-compatible lookup: resolves the custodial wallet for the currently
+ * active character by reading the entity ref (which stores characterName).
+ * Falls back to the legacy single-wallet key if no entity ref is found.
+ *
+ * All existing callers that only have userWallet continue to work unchanged.
+ */
+export async function getAgentCustodialWallet(userWallet: string): Promise<string | null> {
+  // Try to resolve via entity ref so we always return the active character's wallet.
+  const entityRef = await getAgentEntityRef(userWallet).catch(() => null);
+  if (entityRef?.characterName) {
+    const addr = await getCharacterCustodialWallet(userWallet, entityRef.characterName);
+    if (addr) return addr;
+  }
+  // Fall back to legacy key (pre-migration or non-agent deployments).
+  return getLegacyCustodialWallet(userWallet);
 }
 
 // ── Entity ref ───────────────────────────────────────────────────────────────
@@ -984,6 +1109,71 @@ export async function clearCompletedObjectives(userWallet: string): Promise<Agen
 /** Get the first non-completed objective (the one the agent should work on). */
 export function getActiveObjective(objectives: AgentObjective[]): AgentObjective | null {
   return objectives.find((o) => o.status === "pending" || o.status === "active") ?? null;
+}
+
+// ── Trading rules ──────────────────────────────────────────────────────────
+
+let tradingRuleIdCounter = 0;
+export function createTradingRuleId(): string {
+  return `tr-${Date.now()}-${++tradingRuleIdCounter}`;
+}
+
+export async function getTradingRules(userWallet: string): Promise<TradingRule[]> {
+  const cfg = await getAgentConfig(userWallet);
+  return cfg?.tradingRules ?? [];
+}
+
+export async function upsertTradingRule(
+  userWallet: string,
+  rule: TradingRule,
+): Promise<TradingRule[]> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = cfg.tradingRules ?? [];
+  const idx = rules.findIndex((r) => r.id === rule.id);
+  if (idx >= 0) {
+    // Preserve running spend total on update.
+    rules[idx] = { ...rules[idx], ...rule, spent: rules[idx].spent ?? rule.spent ?? 0 };
+  } else {
+    rules.push({ ...rule, spent: rule.spent ?? 0 });
+  }
+  await patchAgentConfig(userWallet, { tradingRules: rules });
+  return rules;
+}
+
+export async function removeTradingRule(
+  userWallet: string,
+  ruleId: string,
+): Promise<TradingRule[]> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = (cfg.tradingRules ?? []).filter((r) => r.id !== ruleId);
+  await patchAgentConfig(userWallet, { tradingRules: rules });
+  return rules;
+}
+
+/** Increment the running spend on a rule. Returns true if budget still has room. */
+export async function recordRuleSpend(
+  userWallet: string,
+  ruleId: string,
+  amount: number,
+): Promise<boolean> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = cfg.tradingRules ?? [];
+  const rule = rules.find((r) => r.id === ruleId);
+  if (!rule) return false;
+  rule.spent = (rule.spent ?? 0) + amount;
+  rule.lastFiredAt = Date.now();
+  await patchAgentConfig(userWallet, { tradingRules: rules });
+  return rule.budget == null || rule.spent < rule.budget;
+}
+
+/** Update lastFiredAt without changing spend (used for sell-listings). */
+export async function markRuleFired(userWallet: string, ruleId: string): Promise<void> {
+  const cfg = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const rules = cfg.tradingRules ?? [];
+  const rule = rules.find((r) => r.id === ruleId);
+  if (!rule) return;
+  rule.lastFiredAt = Date.now();
+  await patchAgentConfig(userWallet, { tradingRules: rules });
 }
 
 export async function listEnabledAgentWallets(): Promise<string[]> {

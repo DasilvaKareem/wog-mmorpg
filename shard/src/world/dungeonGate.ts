@@ -21,10 +21,24 @@ import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { logZoneEvent } from "./zoneEvents.js";
+import { enqueueGoldMint } from "../blockchain/blockchain.js";
+import { notifyDungeonClearForQuests } from "../social/questSystem.js";
+import { spawnGateInZone } from "./dungeonGateTick.js";
 
 // --- Types ---
 
 type GateRank = "E" | "D" | "C" | "B" | "A" | "S";
+
+type RoomKind = "combat" | "elite" | "boss";
+
+export interface RoomDef {
+  idx: number;
+  kind: RoomKind;
+  entrance: { x: number; y: number };
+  mobNames: string[];
+  mobCount: number;
+  bossName?: string;
+}
 
 export interface DungeonInstance {
   instanceId: string;
@@ -40,6 +54,11 @@ export interface DungeonInstance {
   cleared: boolean;
   totalMobs: number;
   remainingMobs: number;
+  // Linear room progression
+  rooms: RoomDef[];
+  currentRoomIdx: number;
+  currentRoomMobIds: Set<string>;
+  roomEnteredAt: number;
 }
 
 // --- Constants ---
@@ -159,85 +178,187 @@ function distance(x1: number, y1: number, x2: number, y2: number): number {
   return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 }
 
-function spawnDungeonMobs(
-  dungeonZoneId: string,
-  rank: GateRank,
-  isDanger: boolean
-): { totalMobs: number } {
-  const zone = getOrCreateZone(dungeonZoneId);
+const ROOM_COUNT_BY_RANK: Record<GateRank, number> = {
+  E: 3, D: 4, C: 5, B: 6, A: 7, S: 8,
+};
+
+const DUNGEON_CHEST_DROPS: Record<GateRank, Array<{ tokenId: bigint; quantity: bigint }>> = {
+  E: [{ tokenId: 0n, quantity: 2n }],                              // 2x Health Potion
+  D: [{ tokenId: 0n, quantity: 3n }],                              // 3x Health Potion
+  C: [{ tokenId: 0n, quantity: 4n }, { tokenId: 2n, quantity: 1n }], // + Iron Sword
+  B: [{ tokenId: 0n, quantity: 5n }, { tokenId: 3n, quantity: 1n }], // + Steel Longsword
+  A: [{ tokenId: 0n, quantity: 6n }, { tokenId: 5n, quantity: 1n }], // + Battle Axe
+  S: [{ tokenId: 0n, quantity: 8n }, { tokenId: 6n, quantity: 1n }], // + Apprentice Staff
+};
+
+const CHEST_GOLD_BY_RANK: Record<GateRank, bigint> = {
+  E: 25n, D: 60n, C: 150n, B: 350n, A: 800n, S: 2000n,
+};
+
+export function roomCountForRank(rank: GateRank): number {
+  return ROOM_COUNT_BY_RANK[rank];
+}
+
+/**
+ * Build a linear sequence of rooms for a dungeon instance.
+ * Rooms walk down a corridor at x=200, y stepping 180 units per room.
+ * Last room is always the boss room; for rank E (no boss in MOB_NAMES) an elite mob is used.
+ */
+export function buildRoomSequence(rank: GateRank, isDanger: boolean): RoomDef[] {
   const scaling = RANK_SCALING[rank];
   const names = MOB_NAMES[rank];
+  const totalRooms = ROOM_COUNT_BY_RANK[rank];
+  const combatRooms = totalRooms - 1; // last room is boss
+
+  // Distribute mob budget across combat rooms
+  const totalMobBudget = randomInt(scaling.mobCountMin, scaling.mobCountMax);
+  const perRoom = Math.max(2, Math.floor(totalMobBudget / combatRooms));
+
+  const rooms: RoomDef[] = [];
+  for (let i = 0; i < combatRooms; i++) {
+    rooms.push({
+      idx: i,
+      kind: "combat",
+      entrance: { x: 200, y: 100 + i * 180 },
+      mobNames: names.regular,
+      mobCount: perRoom,
+    });
+  }
+
+  // Boss room (last)
+  const hasBoss = scaling.bossCount > 0 && !!names.boss;
+  const bossName = hasBoss ? names.boss : (names.regular[0] + " Elite");
+  rooms.push({
+    idx: combatRooms,
+    kind: hasBoss ? "boss" : "elite",
+    entrance: { x: 200, y: 100 + combatRooms * 180 },
+    mobNames: names.regular,
+    mobCount: Math.max(1, scaling.bossCount || 1),
+    bossName,
+  });
+
+  return rooms;
+}
+
+/**
+ * Spawn the mobs for a single room. Returns the spawned entity IDs.
+ */
+function spawnRoomMobs(
+  dungeonZoneId: string,
+  room: RoomDef,
+  rank: GateRank,
+  isDanger: boolean,
+): string[] {
+  const zone = getOrCreateZone(dungeonZoneId);
+  const scaling = RANK_SCALING[rank];
   const dangerHpMult = isDanger ? 1.5 : 1.0;
   const dangerXpMult = isDanger ? 1.3 : 1.0;
+  const spawned: string[] = [];
 
-  const mobCount = randomInt(scaling.mobCountMin, scaling.mobCountMax);
-  let totalSpawned = 0;
-
-  // Spawn regular mobs in 3 room clusters
-  const rooms = [
-    { cx: 100, cy: 100 }, // Room 1
-    { cx: 300, cy: 100 }, // Room 2
-    { cx: 200, cy: 250 }, // Room 3
-  ];
-
-  const mobsPerRoom = Math.ceil(mobCount / rooms.length);
-
-  for (const room of rooms) {
-    for (let i = 0; i < mobsPerRoom && totalSpawned < mobCount; i++) {
-      const mobName = names.regular[Math.floor(Math.random() * names.regular.length)];
+  if (room.kind === "combat") {
+    for (let i = 0; i < room.mobCount; i++) {
+      const mobName = room.mobNames[Math.floor(Math.random() * room.mobNames.length)];
       const hp = Math.round(randomInt(scaling.hpMin, scaling.hpMax) * dangerHpMult);
       const level = randomInt(scaling.levelMin, scaling.levelMax);
-
       const mob: Entity = {
         id: randomUUID(),
         type: "mob",
         name: mobName,
-        x: room.cx + randomInt(-40, 40),
-        y: room.cy + randomInt(-40, 40),
+        x: room.entrance.x + randomInt(-40, 40),
+        y: room.entrance.y + randomInt(-40, 40),
         hp,
         maxHp: hp,
         createdAt: Date.now(),
         level,
         xpReward: Math.round(scaling.xpPerMob * dangerXpMult),
-        mobName: mobName, // for loot table lookup
+        mobName,
       };
-
       zone.entities.set(mob.id, mob);
-      totalSpawned++;
+      spawned.push(mob.id);
     }
-  }
-
-  // Spawn boss(es) in boss room
-  if (scaling.bossCount > 0 && names.boss) {
-    const bossRoom = { cx: 200, cy: 360 };
-
-    for (let i = 0; i < scaling.bossCount; i++) {
-      const bossHp = Math.round(scaling.bossHp * dangerHpMult);
+  } else {
+    // boss / elite room
+    const bossHp = Math.round((scaling.bossHp || scaling.hpMax * 3) * dangerHpMult);
+    const bossXp = Math.round((scaling.xpPerBoss || scaling.xpPerMob * 4) * dangerXpMult);
+    for (let i = 0; i < room.mobCount; i++) {
       const boss: Entity = {
         id: randomUUID(),
         type: "mob",
-        name: names.boss,
-        x: bossRoom.cx + randomInt(-30, 30),
-        y: bossRoom.cy + randomInt(-20, 20),
+        name: room.bossName ?? "Dungeon Boss",
+        x: room.entrance.x + randomInt(-30, 30),
+        y: room.entrance.y + randomInt(-20, 20),
         hp: bossHp,
         maxHp: bossHp,
         createdAt: Date.now(),
         level: scaling.levelMax,
-        xpReward: Math.round(scaling.xpPerBoss * dangerXpMult),
-        mobName: names.boss,
+        xpReward: bossXp,
+        mobName: room.bossName,
       };
-
       zone.entities.set(boss.id, boss);
-      totalSpawned++;
+      spawned.push(boss.id);
     }
   }
-
-  return { totalMobs: totalSpawned };
+  return spawned;
 }
 
 /**
- * Cleanup a dungeon instance — teleport players back, delete zone.
- * Called by dungeonGateTick on clear or timeout.
+ * Count alive mobs from a tracked id set. Prunes dead/missing ids.
+ */
+export function countRoomMobsAlive(instance: DungeonInstance): number {
+  const zone = getAllZones().get(instance.dungeonZoneId);
+  if (!zone) return 0;
+  let alive = 0;
+  for (const id of instance.currentRoomMobIds) {
+    const ent = zone.entities.get(id);
+    if (ent && (ent.hp ?? 0) > 0) alive++;
+  }
+  return alive;
+}
+
+/**
+ * Advance the instance to the next room: spawn its mobs and teleport surviving players in.
+ * Returns true if advanced, false if no next room.
+ */
+export function advanceToNextRoom(instance: DungeonInstance): boolean {
+  if (instance.currentRoomIdx + 1 >= instance.rooms.length) return false;
+
+  instance.currentRoomIdx++;
+  instance.roomEnteredAt = Date.now();
+  const room = instance.rooms[instance.currentRoomIdx];
+
+  const spawnedIds = spawnRoomMobs(instance.dungeonZoneId, room, instance.gateRank, instance.isDangerGate);
+  instance.currentRoomMobIds = new Set(spawnedIds);
+  instance.totalMobs += spawnedIds.length;
+  instance.remainingMobs += spawnedIds.length;
+
+  // Teleport all alive players in the dungeon to the new room entrance
+  const dungeonZone = getAllZones().get(instance.dungeonZoneId);
+  if (dungeonZone) {
+    for (const [, ent] of dungeonZone.entities) {
+      if (ent.type === "player" && (ent.hp ?? 0) > 0) {
+        ent.x = room.entrance.x + randomInt(-15, 15);
+        ent.y = room.entrance.y + randomInt(-10, 10);
+      }
+    }
+  }
+
+  logZoneEvent({
+    zoneId: instance.dungeonZoneId,
+    type: "system",
+    tick: 0,
+    message: `Entering Room ${instance.currentRoomIdx + 1}/${instance.rooms.length}${room.kind === "boss" ? " — BOSS" : ""}!`,
+    data: { roomIdx: instance.currentRoomIdx, totalRooms: instance.rooms.length, roomKind: room.kind },
+  });
+
+  console.log(
+    `[dungeon] Instance ${instance.instanceId} → Room ${instance.currentRoomIdx + 1}/${instance.rooms.length} (${room.kind}, ${spawnedIds.length} mobs)`
+  );
+  return true;
+}
+
+/**
+ * Cleanup a dungeon instance — award rewards on full clear, teleport players back, delete zone.
+ * Called by dungeonGateTick on full clear or timeout.
  */
 export function cleanupDungeonInstance(instanceId: string, cleared: boolean): void {
   const instance = dungeonInstances.get(instanceId);
@@ -245,14 +366,56 @@ export function cleanupDungeonInstance(instanceId: string, cleared: boolean): vo
 
   instance.cleared = cleared;
 
-  // Teleport all surviving party members back to source zone
   const dungeonZone = getAllZones().get(instance.dungeonZoneId);
   const sourceZone = getOrCreateZone(instance.sourceZoneId);
 
+  // Collect surviving members for rewards + quest progress
+  const survivors: { entityId: string; walletAddress?: string; name?: string }[] = [];
+  if (dungeonZone) {
+    for (const [entityId, entity] of dungeonZone.entities) {
+      if (entity.type === "player" && (entity.hp ?? 0) > 0) {
+        survivors.push({ entityId, walletAddress: entity.walletAddress, name: entity.name });
+      }
+    }
+  }
+
+  // Award chest + gold on full clear
+  if (cleared) {
+    const goldReward = CHEST_GOLD_BY_RANK[instance.gateRank] * (instance.isDangerGate ? 2n : 1n);
+    const chestItems = DUNGEON_CHEST_DROPS[instance.gateRank] ?? [];
+
+    for (const s of survivors) {
+      if (!s.walletAddress) continue;
+      enqueueGoldMint(s.walletAddress, goldReward.toString()).catch((err) =>
+        console.error(`[dungeon] Failed to mint gold for ${s.name}:`, err)
+      );
+      for (const item of chestItems) {
+        queueItemMint(s.walletAddress, item.tokenId, item.quantity).catch((err) =>
+          console.error(`[dungeon] Failed to mint chest item ${item.tokenId} for ${s.name}:`, err)
+        );
+      }
+    }
+
+    // Advance any clear_dungeon quests on surviving members
+    try {
+      notifyDungeonClearForQuests(survivors.map((s) => s.entityId), instance.gateRank);
+    } catch (err) {
+      console.error(`[dungeon] notifyDungeonClearForQuests failed:`, err);
+    }
+
+    logZoneEvent({
+      zoneId: instance.dungeonZoneId,
+      type: "system",
+      tick: 0,
+      message: `Dungeon cleared! Each survivor receives ${goldReward} gold + chest.`,
+      data: { rank: instance.gateRank, goldReward: goldReward.toString(), survivors: survivors.length },
+    });
+  }
+
+  // Teleport all surviving party members back to source zone
   if (dungeonZone) {
     for (const [entityId, entity] of dungeonZone.entities) {
       if (entity.type === "player") {
-        // Move player to source zone
         entity.x = instance.sourcePosition.x + randomInt(-20, 20);
         entity.y = instance.sourcePosition.y + randomInt(-20, 20);
         sourceZone.entities.set(entityId, entity);
@@ -583,8 +746,9 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
     const dungeonZoneId = `dungeon-${instanceId}`;
     const scaling = RANK_SCALING[rank];
 
-    // Spawn mobs in dungeon zone
-    const { totalMobs } = spawnDungeonMobs(dungeonZoneId, rank, isDanger);
+    // Build linear room sequence + spawn only room 0
+    const rooms = buildRoomSequence(rank, isDanger);
+    const firstRoomMobIds = spawnRoomMobs(dungeonZoneId, rooms[0], rank, isDanger);
 
     const instance: DungeonInstance = {
       instanceId,
@@ -598,8 +762,12 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       expiresAt: Date.now() + scaling.timeLimitMs,
       dungeonZoneId,
       cleared: false,
-      totalMobs,
-      remainingMobs: totalMobs,
+      totalMobs: firstRoomMobIds.length,
+      remainingMobs: firstRoomMobIds.length,
+      rooms,
+      currentRoomIdx: 0,
+      currentRoomMobIds: new Set(firstRoomMobIds),
+      roomEnteredAt: Date.now(),
     };
 
     dungeonInstances.set(instanceId, instance);
@@ -607,17 +775,16 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
     // Mark gate as opened
     gate.gateOpened = true;
 
-    // Teleport all party members into dungeon
+    // Teleport all party members to room 0 entrance
     const dungeonZone = getOrCreateZone(dungeonZoneId);
-    const spawnX = 200;
-    const spawnY = 20;
+    const entrance = rooms[0].entrance;
 
     for (const memberId of memberIds) {
       const member = zone.entities.get(memberId);
       if (member) {
         zone.entities.delete(memberId);
-        member.x = spawnX + randomInt(-15, 15);
-        member.y = spawnY + randomInt(-10, 10);
+        member.x = entrance.x + randomInt(-15, 15);
+        member.y = entrance.y + randomInt(-10, 10);
         dungeonZone.entities.set(memberId, member);
         if (member.walletAddress) updateSpawnedWalletZone(member.walletAddress, dungeonZoneId);
       }
@@ -635,11 +802,12 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       zoneId: dungeonZoneId,
       type: "system",
       tick: 0,
-      message: `Dungeon instance started! ${totalMobs} enemies await. Time limit: ${scaling.timeLimitMs / 60000} minutes.`,
+      message: `Dungeon started — ${rooms.length} rooms ahead. Room 1/${rooms.length}: ${firstRoomMobIds.length} enemies. Time limit: ${scaling.timeLimitMs / 60000} minutes.`,
+      data: { totalRooms: rooms.length, roomIdx: 0 },
     });
 
     server.log.info(
-      `[dungeon] Instance ${instanceId} created: Rank ${rank}${isDanger ? " DANGER" : ""}, ${totalMobs} mobs, ${memberIds.length} players`
+      `[dungeon] Instance ${instanceId} created: Rank ${rank}${isDanger ? " DANGER" : ""}, ${rooms.length} rooms, ${memberIds.length} players`
     );
 
     return {
@@ -648,7 +816,9 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       dungeonZoneId,
       rank,
       isDangerGate: isDanger,
-      totalMobs,
+      totalRooms: rooms.length,
+      currentRoom: 1,
+      currentRoomMobs: firstRoomMobIds.length,
       timeLimitSeconds: scaling.timeLimitMs / 1000,
       expiresAt: instance.expiresAt,
       members: memberIds,
@@ -667,10 +837,8 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
         return { error: "Dungeon instance not found" };
       }
 
-      const dungeonZone = getAllZones().get(instance.dungeonZoneId);
-      const remainingMobs = dungeonZone
-        ? [...dungeonZone.entities.values()].filter((e) => e.type === "mob" && e.hp > 0).length
-        : 0;
+      const currentRoomMobsAlive = countRoomMobsAlive(instance);
+      const currentRoom = instance.rooms[instance.currentRoomIdx];
 
       return {
         instanceId: instance.instanceId,
@@ -679,8 +847,11 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
         dungeonZoneId: instance.dungeonZoneId,
         sourceZoneId: instance.sourceZoneId,
         members: instance.memberIds,
-        totalMobs: instance.totalMobs,
-        remainingMobs,
+        totalRooms: instance.rooms.length,
+        currentRoom: instance.currentRoomIdx + 1,
+        currentRoomKind: currentRoom?.kind,
+        currentRoomMobsAlive,
+        currentRoomMobsTotal: instance.currentRoomMobIds.size,
         cleared: instance.cleared,
         createdAt: instance.createdAt,
         expiresAt: instance.expiresAt,
@@ -692,18 +863,15 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
   // GET /dungeon/active — List all active instances
   server.get("/dungeon/active", async () => {
     const instances = [...dungeonInstances.values()].map((inst) => {
-      const dungeonZone = getAllZones().get(inst.dungeonZoneId);
-      const remainingMobs = dungeonZone
-        ? [...dungeonZone.entities.values()].filter((e) => e.type === "mob" && e.hp > 0).length
-        : 0;
-
+      const currentRoomMobsAlive = countRoomMobsAlive(inst);
       return {
         instanceId: inst.instanceId,
         rank: inst.gateRank,
         isDangerGate: inst.isDangerGate,
         members: inst.memberIds,
-        totalMobs: inst.totalMobs,
-        remainingMobs,
+        totalRooms: inst.rooms.length,
+        currentRoom: inst.currentRoomIdx + 1,
+        currentRoomMobsAlive,
         cleared: inst.cleared,
         timeRemainingMs: Math.max(0, inst.expiresAt - Date.now()),
       };
@@ -817,6 +985,24 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       returnedToZone: foundInstance.sourceZoneId,
       position: { x: player.x, y: player.y },
     };
+  });
+
+  // POST /admin/dungeon/spawn-gate — force-spawn a gate (testing/debug)
+  server.post<{
+    Body: { zoneId: string; rank?: GateRank; isDanger?: boolean };
+  }>("/admin/dungeon/spawn-gate", async (request, reply) => {
+    const { zoneId, rank, isDanger } = request.body ?? ({} as any);
+    if (!zoneId) {
+      reply.code(400);
+      return { error: "zoneId is required" };
+    }
+    try {
+      const entityId = spawnGateInZone(zoneId, rank, isDanger ?? false);
+      return { ok: true, entityId, zoneId, rank: rank ?? "rolled", isDanger: !!isDanger };
+    } catch (err: any) {
+      reply.code(400);
+      return { error: err.message ?? "Failed to spawn gate" };
+    }
   });
 
   server.log.info("[dungeon] Gate routes registered");

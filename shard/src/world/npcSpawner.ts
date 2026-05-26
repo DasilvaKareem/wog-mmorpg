@@ -15,6 +15,11 @@ export interface NpcDef {
   zoneId: string;
   type: string;
   name: string;
+  /** Alternate names this NPC answers to — quest matcher checks aliases when
+   * a quest's `npcId` doesn't match `name`. Useful when the spawn name is
+   * long (e.g., "Thrain Ironforge - Warrior Trainer") and quests target a
+   * short form ("Thrain"). */
+  aliases?: string[];
   x: number;
   y: number;
   hp: number;
@@ -234,6 +239,7 @@ function spawnSingleNpc(def: NpcDef, scatter = false): void {
     id: randomUUID(),
     type: def.type,
     name: def.name,
+    ...(def.aliases && def.aliases.length > 0 && { aliases: def.aliases }),
     x: worldX,
     y: worldY,
     hp: spawnHp,

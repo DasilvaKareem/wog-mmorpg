@@ -6,7 +6,7 @@ interface InboxMessage {
   from: string;
   fromName: string;
   to: string;
-  type: "direct" | "trade-request" | "party-invite" | "broadcast" | "system";
+  type: "direct" | "trade-request" | "trade-offer" | "trade-result" | "match-found" | "duel-request" | "duel-result" | "party-invite" | "friend-request" | "quest-approval" | "broadcast" | "system";
   body: string;
   data?: Record<string, unknown>;
   ts: number;
@@ -14,35 +14,153 @@ interface InboxMessage {
   readAt?: number | null;
 }
 
+export interface TradeOfferPayload {
+  tradeId: number;
+  tokenId: number;
+  quantity: number;
+  askPrice: number;
+  itemName: string | null;
+  sellerName: string;
+  sellerWallet: string;
+  expiresAtMs: number;
+}
+
 const TYPE_ICONS: Record<string, string> = {
   system: "\u2728",
   direct: "\u{1F4E8}",
   "trade-request": "\u{1F4B0}",
+  "trade-offer": "\u{1F381}",
+  "trade-result": "\u{1F4DC}",
+  "match-found": "\u{1F3DB}",
+  "duel-request": "\u2694",
+  "duel-result": "\u{1F4DC}",
   "party-invite": "\u{1F465}",
+  "friend-request": "\u{1F91D}",
   broadcast: "\u{1F4E2}",
+};
+
+const ACTION_ICONS: Record<string, string> = {
+  quest_complete: "\u2705",  // ✅
+  level_up: "\u26A1",        // ⚡
+  agent_stuck: "\u26A0\uFE0F", // ⚠️
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  quest_complete: "Quest Complete",
+  level_up: "Level Up",
+  agent_stuck: "Agent Stuck",
+};
+
+const ACTION_COLORS: Record<string, string> = {
+  quest_complete: "#5dff9a",
+  level_up: "#ffd86b",
+  agent_stuck: "#ff8c42",
 };
 
 const TYPE_COLORS: Record<string, string> = {
   system: "#ffc24f",
   direct: "#8cc8ff",
   "trade-request": "#f0c05a",
+  "trade-offer": "#5dff9a",
+  "trade-result": "#ffc850",
+  "match-found": "#ff4466",
+  "duel-request": "#ff4466",
+  "duel-result": "#ffc850",
   "party-invite": "#b48cff",
+  "friend-request": "#7fd6be",
   broadcast: "#ff88aa",
 };
 
 const MESSAGE_LIMIT = 60;
+
+export interface InboxPanelCallbacks {
+  onUnreadChange?: (count: number) => void;
+  /** Accept a targeted trade offer. Resolves with ok+message; ok=false → keep buttons. */
+  onAcceptTrade?: (offer: TradeOfferPayload) => Promise<{ ok: boolean; error?: string }>;
+  /** Decline a targeted trade offer. Resolves with ok+message; ok=false → keep buttons. */
+  onDeclineTrade?: (offer: TradeOfferPayload) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * A `trade-result` message just arrived (accepted/declined/expired). Use this
+   * to refresh inventory + gold so the user sees the delta without waiting for
+   * the next inventory poll. Fires once per new message id.
+   */
+  onTradeResult?: (data: { kind?: string; tradeId?: number }) => void;
+  /**
+   * A `match-found` message just arrived. Fired once per new message id so the
+   * host can play a sound, toast, and auto-open the battle viewer.
+   */
+  onMatchFound?: (data: { battleId?: string; format?: string; team?: string; arenaName?: string }) => void;
+  /** Player clicked "Enter Arena" on a match-found row. */
+  onOpenBattle?: (battleId: string) => void;
+  /** Accept a duel challenge. */
+  onAcceptDuel?: (challengeId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Decline a duel challenge. */
+  onDeclineDuel?: (challengeId: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * A `duel-request` message just arrived. Fired once per new message id so the
+   * host can show a popup. Skipped on first-fetch to avoid replaying old requests.
+   */
+  onDuelRequest?: (req: { challengeId: string; challengerName: string; challengerWallet: string; format: string; expiresAtMs: number }) => void;
+  /**
+   * A `party-invite` message just arrived. First-sight only.
+   */
+  onPartyInviteArrived?: (req: { inviteId: string; inviterName: string; inviterWallet: string; partyId?: string }) => void;
+  /**
+   * A `trade-offer` message just arrived. First-sight only.
+   */
+  onTradeOfferArrived?: (offer: TradeOfferPayload) => void;
+  /** Accept a party invite. */
+  onAcceptPartyInvite?: (inviteId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Decline a party invite. */
+  onDeclinePartyInvite?: (inviteId: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * A `friend-request` message just arrived. First-sight only.
+   */
+  onFriendRequestArrived?: (req: { requestId: string; fromName: string; fromWallet: string }) => void;
+  /** Accept a friend request. */
+  onAcceptFriendRequest?: (requestId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Decline a friend request. */
+  onDeclineFriendRequest?: (requestId: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
+const COUNTDOWN_TICK_MS = 30_000;
 
 export class InboxPanel {
   private container: HTMLDivElement;
   private listEl: HTMLDivElement;
   private footerEl: HTMLDivElement;
   private custodialWallet: string | null = null;
+  private currentCharacterName: string | null = null;
   private messages: InboxMessage[] = [];
   private serverUnread = 0;
   private onUnreadChange: (count: number) => void;
+  private callbacks: InboxPanelCallbacks;
   private apiBase: string | null = null;
+  /** tradeIds whose Accept/Decline buttons are currently inflight or settled. */
+  private tradeActionState = new Map<number, "pending" | "accepted" | "declined" | "failed">();
+  /** message ids we've already surfaced — used to detect first-sight trade-result deliveries. */
+  private seenTradeResultIds = new Set<string>();
+  /** First-sight tracking for match-found notifications. */
+  private seenMatchFoundIds = new Set<string>();
+  /** First-sight tracking for duel-request notifications. */
+  private seenDuelRequestIds = new Set<string>();
+  /** First-sight tracking for party-invite notifications. */
+  private seenPartyInviteIds = new Set<string>();
+  /** First-sight tracking for trade-offer notifications. */
+  private seenTradeOfferIds = new Set<string>();
+  /** First-sight tracking for friend-request notifications. */
+  private seenFriendRequestIds = new Set<string>();
+  /** challengeIds whose Accept/Decline buttons are pending or settled. */
+  private duelActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
+  /** inviteIds whose Join/Decline buttons are pending or settled. */
+  private partyInviteActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
+  /** requestIds whose Accept/Decline buttons are pending or settled. */
+  private friendRequestActionState = new Map<string, "pending" | "accepted" | "declined" | "failed">();
+  /** Local timer that re-renders countdown chips while the panel is open. */
+  private countdownTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(callbacks: { onUnreadChange?: (count: number) => void } = {}) {
+  constructor(callbacks: InboxPanelCallbacks = {}) {
+    this.callbacks = callbacks;
     this.onUnreadChange = callbacks.onUnreadChange ?? (() => {});
 
     this.container = document.createElement("div");
@@ -56,6 +174,56 @@ export class InboxPanel {
 
     this.listEl = document.createElement("div");
     this.listEl.className = "ibx-list";
+    this.listEl.addEventListener("click", (e) => {
+      const tradeBtn = (e.target as HTMLElement).closest("[data-trade-action]") as HTMLElement | null;
+      if (tradeBtn) {
+        const action = tradeBtn.dataset.tradeAction;
+        const tradeId = Number(tradeBtn.dataset.tradeId);
+        if (!Number.isFinite(tradeId)) return;
+        const msg = this.messages.find(
+          (m) => m.type === "trade-offer" && (m.data as TradeOfferPayload | undefined)?.tradeId === tradeId,
+        );
+        if (!msg) return;
+        const payload = msg.data as TradeOfferPayload | undefined;
+        if (!payload) return;
+        void this.handleTradeAction(action ?? "", payload);
+        return;
+      }
+
+      const matchBtn = (e.target as HTMLElement).closest("[data-match-action]") as HTMLElement | null;
+      if (matchBtn) {
+        const battleId = matchBtn.dataset.battleId;
+        if (battleId) this.callbacks.onOpenBattle?.(battleId);
+        return;
+      }
+
+      const duelBtn = (e.target as HTMLElement).closest("[data-duel-action]") as HTMLElement | null;
+      if (duelBtn) {
+        const action = duelBtn.dataset.duelAction;
+        const challengeId = duelBtn.dataset.challengeId;
+        if (!challengeId) return;
+        void this.handleDuelAction(action ?? "", challengeId);
+        return;
+      }
+
+      const partyBtn = (e.target as HTMLElement).closest("[data-party-action]") as HTMLElement | null;
+      if (partyBtn) {
+        const action = partyBtn.dataset.partyAction;
+        const inviteId = partyBtn.dataset.inviteId;
+        if (!inviteId) return;
+        void this.handlePartyInviteAction(action ?? "", inviteId);
+        return;
+      }
+
+      const friendBtn = (e.target as HTMLElement).closest("[data-friend-action]") as HTMLElement | null;
+      if (friendBtn) {
+        const action = friendBtn.dataset.friendAction;
+        const requestId = friendBtn.dataset.requestId;
+        if (!requestId) return;
+        void this.handleFriendRequestAction(action ?? "", requestId);
+        return;
+      }
+    });
     this.container.appendChild(this.listEl);
 
     this.footerEl = document.createElement("div");
@@ -66,10 +234,52 @@ export class InboxPanel {
     this.injectStyles();
   }
 
+  /** Expose the container so it can be embedded inside a parent (tabs). */
+  getElement(): HTMLElement {
+    return this.container;
+  }
+
+  /** Mark a duel as actioned from outside (e.g. popup). Keeps inbox row in sync. */
+  markDuelActioned(challengeId: string, state: "accepted" | "declined" | "failed") {
+    if (!challengeId) return;
+    this.duelActionState.set(challengeId, state);
+    if (state === "failed") this.duelActionState.delete(challengeId);
+    this.render();
+  }
+
+  /** Mark a party invite as actioned from outside (e.g. popup). */
+  markPartyInviteActioned(inviteId: string, state: "accepted" | "declined" | "failed") {
+    if (!inviteId) return;
+    this.partyInviteActionState.set(inviteId, state);
+    if (state === "failed") this.partyInviteActionState.delete(inviteId);
+    this.render();
+  }
+
+  /** Mark a trade offer as actioned from outside (e.g. popup). */
+  markTradeActioned(tradeId: number, state: "accepted" | "declined" | "failed") {
+    if (!Number.isFinite(tradeId)) return;
+    this.tradeActionState.set(tradeId, state);
+    if (state === "failed") this.tradeActionState.delete(tradeId);
+    this.render();
+  }
+
+  /** Mark a friend request as actioned from outside (e.g. popup). */
+  markFriendRequestActioned(requestId: string, state: "accepted" | "declined" | "failed") {
+    if (!requestId) return;
+    this.friendRequestActionState.set(requestId, state);
+    if (state === "failed") this.friendRequestActionState.delete(requestId);
+    this.render();
+  }
+
   setCustodialWallet(wallet: string | null) {
     this.custodialWallet = wallet ? wallet.toLowerCase() : null;
     this.messages = [];
     this.serverUnread = 0;
+    this.render();
+  }
+
+  setCharacterName(name: string | null) {
+    this.currentCharacterName = name;
     this.render();
   }
 
@@ -87,15 +297,129 @@ export class InboxPanel {
         const data = await res.json();
         const msgs: InboxMessage[] = Array.isArray(data.messages) ? data.messages : [];
         msgs.sort((a, b) => b.ts - a.ts);
+
+        // Detect newly-arrived actionable messages so the host can show popups
+        // without waiting for the user to open the inbox.
+        const isFirstFetch = this.messages.length === 0
+          && this.seenTradeResultIds.size === 0
+          && this.seenMatchFoundIds.size === 0
+          && this.seenDuelRequestIds.size === 0
+          && this.seenPartyInviteIds.size === 0
+          && this.seenTradeOfferIds.size === 0
+          && this.seenFriendRequestIds.size === 0;
+        const freshTradeResults: InboxMessage[] = [];
+        const freshMatchFound: InboxMessage[] = [];
+        const freshDuelRequests: InboxMessage[] = [];
+        const freshPartyInvites: InboxMessage[] = [];
+        const freshTradeOffers: InboxMessage[] = [];
+        const freshFriendRequests: InboxMessage[] = [];
+        for (const m of msgs) {
+          if (m.type === "trade-result") {
+            if (this.seenTradeResultIds.has(m.id)) continue;
+            this.seenTradeResultIds.add(m.id);
+            if (!isFirstFetch) freshTradeResults.push(m);
+          } else if (m.type === "match-found") {
+            if (this.seenMatchFoundIds.has(m.id)) continue;
+            this.seenMatchFoundIds.add(m.id);
+            if (!isFirstFetch) freshMatchFound.push(m);
+          } else if (m.type === "duel-request") {
+            if (this.seenDuelRequestIds.has(m.id)) continue;
+            this.seenDuelRequestIds.add(m.id);
+            const data = (m.data ?? {}) as { challengeId?: string; expiresAtMs?: number };
+            if (!data.challengeId) continue;
+            const actioned = this.duelActionState.get(data.challengeId);
+            const expired = typeof data.expiresAtMs === "number" && data.expiresAtMs < Date.now();
+            if (actioned || expired) continue;
+            if (!isFirstFetch) freshDuelRequests.push(m);
+          } else if (m.type === "party-invite") {
+            if (this.seenPartyInviteIds.has(m.id)) continue;
+            this.seenPartyInviteIds.add(m.id);
+            const data = (m.data ?? {}) as { inviteId?: string };
+            if (!data.inviteId) continue;
+            if (this.partyInviteActionState.get(data.inviteId)) continue;
+            if (!isFirstFetch) freshPartyInvites.push(m);
+          } else if (m.type === "trade-offer") {
+            if (this.seenTradeOfferIds.has(m.id)) continue;
+            this.seenTradeOfferIds.add(m.id);
+            const data = m.data as TradeOfferPayload | undefined;
+            if (!data?.tradeId) continue;
+            const actioned = this.tradeActionState.get(data.tradeId);
+            const expired = typeof data.expiresAtMs === "number" && data.expiresAtMs < Date.now();
+            if (actioned || expired) continue;
+            if (!isFirstFetch) freshTradeOffers.push(m);
+          } else if (m.type === "friend-request") {
+            if (this.seenFriendRequestIds.has(m.id)) continue;
+            this.seenFriendRequestIds.add(m.id);
+            const data = (m.data ?? {}) as { requestId?: string };
+            if (!data.requestId) continue;
+            if (this.friendRequestActionState.get(data.requestId)) continue;
+            if (!isFirstFetch) freshFriendRequests.push(m);
+          }
+        }
+
         this.messages = msgs;
-        const newUnread = Number(data.unread ?? msgs.filter((m) => !m.readAt).length);
-        if (newUnread > this.serverUnread) {
+        // Count unread only for visible (current-character) messages to keep
+        // badge accurate when multiple characters share one custodial wallet.
+        const visibleUnread = this.currentCharacterName
+          ? msgs.filter((m) =>
+              !m.readAt && (
+                m.type !== "system" ||
+                !m.fromName ||
+                m.fromName.toLowerCase() === this.currentCharacterName!.toLowerCase()
+              )
+            ).length
+          : msgs.filter((m) => !m.readAt).length;
+        if (visibleUnread > this.serverUnread) {
           playSoundEffect("ui_notification");
         }
-        this.serverUnread = newUnread;
+        this.serverUnread = visibleUnread;
         this.apiBase = base;
         this.render();
         this.onUnreadChange(this.serverUnread);
+
+        for (const m of freshTradeResults) {
+          const data = (m.data ?? {}) as { kind?: string; tradeId?: number };
+          this.callbacks.onTradeResult?.(data);
+        }
+        for (const m of freshMatchFound) {
+          const data = (m.data ?? {}) as { battleId?: string; format?: string; team?: string; arenaName?: string };
+          this.callbacks.onMatchFound?.(data);
+        }
+        for (const m of freshDuelRequests) {
+          const data = (m.data ?? {}) as { challengeId?: string; format?: string; expiresAtMs?: number };
+          if (!data.challengeId) continue;
+          this.callbacks.onDuelRequest?.({
+            challengeId: data.challengeId,
+            challengerName: m.fromName || "A challenger",
+            challengerWallet: m.from || "",
+            format: data.format ?? "1v1",
+            expiresAtMs: data.expiresAtMs ?? (Date.now() + 5 * 60_000),
+          });
+        }
+        for (const m of freshPartyInvites) {
+          const data = (m.data ?? {}) as { inviteId?: string; partyId?: string };
+          if (!data.inviteId) continue;
+          this.callbacks.onPartyInviteArrived?.({
+            inviteId: data.inviteId,
+            inviterName: m.fromName || "A player",
+            inviterWallet: m.from || "",
+            partyId: data.partyId,
+          });
+        }
+        for (const m of freshTradeOffers) {
+          const data = m.data as TradeOfferPayload | undefined;
+          if (!data) continue;
+          this.callbacks.onTradeOfferArrived?.(data);
+        }
+        for (const m of freshFriendRequests) {
+          const data = (m.data ?? {}) as { requestId?: string; fromName?: string };
+          if (!data.requestId) continue;
+          this.callbacks.onFriendRequestArrived?.({
+            requestId: data.requestId,
+            fromName: data.fromName || m.fromName || "A player",
+            fromWallet: m.from || "",
+          });
+        }
         return;
       } catch {
         // try next base
@@ -118,13 +442,43 @@ export class InboxPanel {
       await this.refresh();
       await this.markAllSeen();
     })();
+    this.startCountdownTimer();
     playSoundEffect("ui_dialog_open");
   }
 
   hide() {
     if (this.container.style.display === "none") return;
     this.container.style.display = "none";
+    this.stopCountdownTimer();
     playSoundEffect("ui_dialog_close");
+  }
+
+  /**
+   * Re-render every 30s while the panel is visible so trade-offer countdown
+   * chips ("expires in 2h 14m") stay current without a network round-trip.
+   * Only re-renders if there's at least one live trade-offer row.
+   */
+  private startCountdownTimer() {
+    if (this.countdownTimer) return;
+    this.countdownTimer = setInterval(() => {
+      if (this.container.style.display === "none") {
+        this.stopCountdownTimer();
+        return;
+      }
+      const hasLiveOffer = this.messages.some(
+        (m) => m.type === "trade-offer" && this.tradeActionState.get((m.data as TradeOfferPayload | undefined)?.tradeId ?? -1) === undefined,
+      );
+      const hasLiveDuel = this.messages.some(
+        (m) => m.type === "duel-request" && this.duelActionState.get(((m.data ?? {}) as { challengeId?: string }).challengeId ?? "") === undefined,
+      );
+      if (hasLiveOffer || hasLiveDuel) this.render();
+    }, COUNTDOWN_TICK_MS);
+  }
+
+  private stopCountdownTimer() {
+    if (!this.countdownTimer) return;
+    clearInterval(this.countdownTimer);
+    this.countdownTimer = null;
   }
 
   isVisible(): boolean {
@@ -170,34 +524,313 @@ export class InboxPanel {
       this.footerEl.textContent = "";
       return;
     }
-    if (this.messages.length === 0) {
+    // Filter system messages to current character only — all characters on the
+    // same owner wallet share one custodial wallet (and thus one inbox).
+    // Non-system messages (trade, duel, party, direct) are always shown.
+    const visibleMessages = this.currentCharacterName
+      ? this.messages.filter((m) =>
+          m.type !== "system" ||
+          !m.fromName ||
+          m.fromName.toLowerCase() === this.currentCharacterName!.toLowerCase()
+        )
+      : this.messages;
+
+    if (visibleMessages.length === 0) {
       this.listEl.innerHTML = `<div class="ibx-empty">No messages yet. Your agent will log events here.</div>`;
       this.footerEl.textContent = "";
       return;
     }
 
     let html = "";
-    for (const m of this.messages) {
+    for (const m of visibleMessages) {
       const unread = !m.readAt;
-      const icon = TYPE_ICONS[m.type] ?? "\u2709";
-      const color = TYPE_COLORS[m.type] ?? "#9ab";
-      const sender = m.fromName || m.from.slice(0, 8) || "system";
       const time = formatTime(m.ts);
-      html += `<div class="ibx-row${unread ? " ibx-unread" : ""}">`;
-      html += `<div class="ibx-icon" style="color:${color}">${icon}</div>`;
-      html += `<div class="ibx-content">`;
-      html += `<div class="ibx-meta"><span class="ibx-from" style="color:${color}">${esc(sender)}</span><span class="ibx-time">${esc(time)}</span></div>`;
-      html += `<div class="ibx-body">${esc(m.body)}</div>`;
-      html += `</div>`;
-      html += `</div>`;
+      const agentAction = m.type === "system" ? (m.data?.action as string | undefined) : undefined;
+
+      if (agentAction && ACTION_LABELS[agentAction]) {
+        // Rich agent-event row: quest complete, level up, stuck — no redundant sender name
+        const icon = ACTION_ICONS[agentAction] ?? TYPE_ICONS.system;
+        const color = ACTION_COLORS[agentAction] ?? TYPE_COLORS.system;
+        const label = ACTION_LABELS[agentAction];
+        html += `<div class="ibx-row ibx-row-event${unread ? " ibx-unread" : ""}">`;
+        html += `<div class="ibx-icon" style="color:${color}">${icon}</div>`;
+        html += `<div class="ibx-content">`;
+        html += `<div class="ibx-meta"><span class="ibx-from" style="color:${color};font-weight:bold">${esc(label)}</span><span class="ibx-time">${esc(time)}</span></div>`;
+        html += `<div class="ibx-body">${esc(m.body)}</div>`;
+        html += `</div></div>`;
+      } else {
+        // Standard row: direct messages, trade, duel, party — show sender
+        const icon = TYPE_ICONS[m.type] ?? "\u2709";
+        const color = TYPE_COLORS[m.type] ?? "#9ab";
+        const sender = m.fromName || m.from.slice(0, 8) || "system";
+        html += `<div class="ibx-row${unread ? " ibx-unread" : ""}">`;
+        html += `<div class="ibx-icon" style="color:${color}">${icon}</div>`;
+        html += `<div class="ibx-content">`;
+        html += `<div class="ibx-meta"><span class="ibx-from" style="color:${color}">${esc(sender)}</span><span class="ibx-time">${esc(time)}</span></div>`;
+        html += `<div class="ibx-body">${esc(m.body)}</div>`;
+        if (m.type === "trade-offer") {
+          html += this.renderTradeOfferControls(m);
+        } else if (m.type === "match-found") {
+          html += this.renderMatchFoundControls(m);
+        } else if (m.type === "duel-request") {
+          html += this.renderDuelRequestControls(m);
+        } else if (m.type === "party-invite") {
+          html += this.renderPartyInviteControls(m);
+        } else if (m.type === "friend-request") {
+          html += this.renderFriendRequestControls(m);
+        }
+        html += `</div></div>`;
+      }
     }
 
     this.listEl.innerHTML = html;
     const total = this.messages.length;
     const unread = this.getUnreadCount();
-    this.footerEl.textContent = unread > 0
+    const summary = unread > 0
       ? `${unread} unread of ${total}`
       : `${total} message${total === 1 ? "" : "s"}`;
+    this.footerEl.innerHTML = `<span class="ibx-summary">${summary}</span><button type="button" class="ibx-clear-btn" data-action="clear-inbox">Clear all</button>`;
+    const clearBtn = this.footerEl.querySelector("[data-action='clear-inbox']") as HTMLButtonElement | null;
+    clearBtn?.addEventListener("click", () => void this.clearInbox());
+  }
+
+  /**
+   * Hard-delete every message for this wallet on the server (Postgres + Redis)
+   * and locally. Used when the "Clear all" button is clicked. No confirmation
+   * dialog — the user asked for a button that just works.
+   */
+  private async clearInbox(): Promise<void> {
+    if (!this.custodialWallet) return;
+    const bases = this.apiBase != null ? [this.apiBase, ...CANDIDATE_BASES.filter((b) => b !== this.apiBase)] : CANDIDATE_BASES;
+    const path = `/inbox/${this.custodialWallet}/clear`;
+    for (const base of bases) {
+      try {
+        const res = await fetch(toUrl(base, path), { method: "POST" });
+        if (!res.ok) continue;
+        this.messages = [];
+        this.serverUnread = 0;
+        this.seenTradeResultIds.clear();
+        this.seenMatchFoundIds.clear();
+        this.seenFriendRequestIds.clear();
+        this.tradeActionState.clear();
+        this.duelActionState.clear();
+        this.partyInviteActionState.clear();
+        this.friendRequestActionState.clear();
+        this.render();
+        this.onUnreadChange(0);
+        return;
+      } catch {
+        // try next base
+      }
+    }
+  }
+
+  private renderTradeOfferControls(m: InboxMessage): string {
+    const payload = m.data as TradeOfferPayload | undefined;
+    if (!payload || typeof payload.tradeId !== "number") return "";
+    const state = this.tradeActionState.get(payload.tradeId);
+    const now = Date.now();
+    const expired = typeof payload.expiresAtMs === "number" && payload.expiresAtMs <= now;
+
+    if (state === "accepted") {
+      return `<div class="ibx-trade-result ibx-trade-success">Trade accepted.</div>`;
+    }
+    if (state === "declined") {
+      return `<div class="ibx-trade-result ibx-trade-muted">Offer declined.</div>`;
+    }
+    if (expired) {
+      return `<div class="ibx-trade-result ibx-trade-muted">Offer expired.</div>`;
+    }
+
+    const askPrice = typeof payload.askPrice === "number" ? payload.askPrice : 0;
+    const item = payload.itemName ?? `token #${payload.tokenId}`;
+    const qty = payload.quantity > 1 ? ` ×${payload.quantity}` : "";
+    const disabled = state === "pending";
+    const busy = state === "pending" ? ` <span class="ibx-trade-busy">working…</span>` : "";
+    const countdown = typeof payload.expiresAtMs === "number"
+      ? `<span class="ibx-trade-countdown" title="expires ${new Date(payload.expiresAtMs).toLocaleString()}">expires in ${esc(formatTimeUntil(payload.expiresAtMs))}</span>`
+      : "";
+    return `<div class="ibx-trade-actions">
+      <div class="ibx-trade-summary">${esc(item)}${esc(qty)} · <span class="ibx-trade-price">${askPrice}g</span>${countdown ? " · " + countdown : ""}</div>
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-trade-action="accept" data-trade-id="${payload.tradeId}"${disabled ? " disabled" : ""}>Accept</button>
+        <button class="ibx-trade-btn ibx-trade-decline" data-trade-action="decline" data-trade-id="${payload.tradeId}"${disabled ? " disabled" : ""}>Decline</button>${busy}
+      </div>
+    </div>`;
+  }
+
+  private async handleTradeAction(action: string, payload: TradeOfferPayload) {
+    if (this.tradeActionState.get(payload.tradeId) === "pending") return;
+    this.tradeActionState.set(payload.tradeId, "pending");
+    this.render();
+
+    try {
+      if (action === "accept") {
+        const result = await this.callbacks.onAcceptTrade?.(payload);
+        if (result?.ok) {
+          this.tradeActionState.set(payload.tradeId, "accepted");
+        } else {
+          this.tradeActionState.set(payload.tradeId, "failed");
+        }
+      } else if (action === "decline") {
+        const result = await this.callbacks.onDeclineTrade?.(payload);
+        if (result?.ok) {
+          this.tradeActionState.set(payload.tradeId, "declined");
+        } else {
+          this.tradeActionState.set(payload.tradeId, "failed");
+        }
+      }
+    } catch {
+      this.tradeActionState.set(payload.tradeId, "failed");
+    }
+
+    // If failed, re-enable the buttons for retry by clearing the entry.
+    if (this.tradeActionState.get(payload.tradeId) === "failed") {
+      this.tradeActionState.delete(payload.tradeId);
+    }
+    this.render();
+  }
+
+  private renderMatchFoundControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { battleId?: string; format?: string; team?: string; arenaName?: string };
+    if (!data.battleId) return "";
+    const team = data.team ? data.team.toUpperCase() : "";
+    const teamColor = data.team === "red" ? "#ff4466" : data.team === "blue" ? "#66bbff" : "#cce";
+    return `<div class="ibx-trade-actions">
+      <div class="ibx-trade-summary">${esc(data.format?.toUpperCase() ?? "PVP")} · <span style="color:${teamColor}">Team ${esc(team)}</span> · ${esc(data.arenaName ?? "Arena")}</div>
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-match-action="enter" data-battle-id="${esc(data.battleId)}">Enter Arena</button>
+      </div>
+    </div>`;
+  }
+
+  private renderDuelRequestControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { challengeId?: string; challengerName?: string; format?: string; expiresAtMs?: number };
+    if (!data.challengeId) return "";
+    const state = this.duelActionState.get(data.challengeId);
+    const expired = typeof data.expiresAtMs === "number" && data.expiresAtMs <= Date.now();
+
+    if (state === "accepted") return `<div class="ibx-trade-result ibx-trade-success">Duel accepted — queueing now.</div>`;
+    if (state === "declined") return `<div class="ibx-trade-result ibx-trade-muted">Duel declined.</div>`;
+    if (expired) return `<div class="ibx-trade-result ibx-trade-muted">Challenge expired.</div>`;
+
+    const disabled = state === "pending";
+    const busy = state === "pending" ? ` <span class="ibx-trade-busy">working…</span>` : "";
+    const countdown = typeof data.expiresAtMs === "number"
+      ? `<span class="ibx-trade-countdown">expires in ${esc(formatTimeUntil(data.expiresAtMs))}</span>`
+      : "";
+    return `<div class="ibx-trade-actions">
+      <div class="ibx-trade-summary">Duel: ${esc(data.format?.toUpperCase() ?? "1V1")}${countdown ? " · " + countdown : ""}</div>
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-duel-action="accept" data-challenge-id="${esc(data.challengeId)}"${disabled ? " disabled" : ""}>Accept</button>
+        <button class="ibx-trade-btn ibx-trade-decline" data-duel-action="decline" data-challenge-id="${esc(data.challengeId)}"${disabled ? " disabled" : ""}>Decline</button>${busy}
+      </div>
+    </div>`;
+  }
+
+  private async handleDuelAction(action: string, challengeId: string) {
+    if (this.duelActionState.get(challengeId) === "pending") return;
+    this.duelActionState.set(challengeId, "pending");
+    this.render();
+
+    try {
+      if (action === "accept") {
+        const result = await this.callbacks.onAcceptDuel?.(challengeId);
+        this.duelActionState.set(challengeId, result?.ok ? "accepted" : "failed");
+      } else if (action === "decline") {
+        const result = await this.callbacks.onDeclineDuel?.(challengeId);
+        this.duelActionState.set(challengeId, result?.ok ? "declined" : "failed");
+      }
+    } catch {
+      this.duelActionState.set(challengeId, "failed");
+    }
+
+    if (this.duelActionState.get(challengeId) === "failed") {
+      this.duelActionState.delete(challengeId);
+    }
+    this.render();
+  }
+
+  private renderPartyInviteControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { inviteId?: string; fromName?: string; partyId?: string };
+    if (!data.inviteId) return "";
+    const state = this.partyInviteActionState.get(data.inviteId);
+
+    if (state === "accepted") return `<div class="ibx-trade-result ibx-trade-success">Joined the party!</div>`;
+    if (state === "declined") return `<div class="ibx-trade-result ibx-trade-muted">Invite declined.</div>`;
+
+    const disabled = state === "pending";
+    const busy = state === "pending" ? ` <span class="ibx-trade-busy">working…</span>` : "";
+    return `<div class="ibx-trade-actions" style="border-left-color:rgba(180,140,255,0.5)">
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-party-action="accept" data-invite-id="${esc(data.inviteId)}"${disabled ? " disabled" : ""}>Join Party</button>
+        <button class="ibx-trade-btn ibx-trade-decline" data-party-action="decline" data-invite-id="${esc(data.inviteId)}"${disabled ? " disabled" : ""}>Decline</button>${busy}
+      </div>
+    </div>`;
+  }
+
+  private async handlePartyInviteAction(action: string, inviteId: string) {
+    if (this.partyInviteActionState.get(inviteId) === "pending") return;
+    this.partyInviteActionState.set(inviteId, "pending");
+    this.render();
+
+    try {
+      if (action === "accept") {
+        const result = await this.callbacks.onAcceptPartyInvite?.(inviteId);
+        this.partyInviteActionState.set(inviteId, result?.ok ? "accepted" : "failed");
+      } else if (action === "decline") {
+        const result = await this.callbacks.onDeclinePartyInvite?.(inviteId);
+        this.partyInviteActionState.set(inviteId, result?.ok ? "declined" : "failed");
+      }
+    } catch {
+      this.partyInviteActionState.set(inviteId, "failed");
+    }
+
+    if (this.partyInviteActionState.get(inviteId) === "failed") {
+      this.partyInviteActionState.delete(inviteId);
+    }
+    this.render();
+  }
+
+  private renderFriendRequestControls(m: InboxMessage): string {
+    const data = (m.data ?? {}) as { requestId?: string };
+    if (!data.requestId) return "";
+    const state = this.friendRequestActionState.get(data.requestId);
+
+    if (state === "accepted") return `<div class="ibx-trade-result ibx-trade-success">Friend added.</div>`;
+    if (state === "declined") return `<div class="ibx-trade-result ibx-trade-muted">Request declined.</div>`;
+
+    const disabled = state === "pending";
+    const busy = state === "pending" ? ` <span class="ibx-trade-busy">working…</span>` : "";
+    return `<div class="ibx-trade-actions" style="border-left-color:rgba(127,214,190,0.5)">
+      <div class="ibx-trade-btn-row">
+        <button class="ibx-trade-btn ibx-trade-accept" data-friend-action="accept" data-request-id="${esc(data.requestId)}"${disabled ? " disabled" : ""}>Accept</button>
+        <button class="ibx-trade-btn ibx-trade-decline" data-friend-action="decline" data-request-id="${esc(data.requestId)}"${disabled ? " disabled" : ""}>Decline</button>${busy}
+      </div>
+    </div>`;
+  }
+
+  private async handleFriendRequestAction(action: string, requestId: string) {
+    if (this.friendRequestActionState.get(requestId) === "pending") return;
+    this.friendRequestActionState.set(requestId, "pending");
+    this.render();
+
+    try {
+      if (action === "accept") {
+        const result = await this.callbacks.onAcceptFriendRequest?.(requestId);
+        this.friendRequestActionState.set(requestId, result?.ok ? "accepted" : "failed");
+      } else if (action === "decline") {
+        const result = await this.callbacks.onDeclineFriendRequest?.(requestId);
+        this.friendRequestActionState.set(requestId, result?.ok ? "declined" : "failed");
+      }
+    } catch {
+      this.friendRequestActionState.set(requestId, "failed");
+    }
+
+    if (this.friendRequestActionState.get(requestId) === "failed") {
+      this.friendRequestActionState.delete(requestId);
+    }
+    this.render();
   }
 
   private injectStyles() {
@@ -270,6 +903,55 @@ export class InboxPanel {
         white-space: pre-wrap;
       }
 
+      .ibx-trade-actions {
+        margin-top: 6px;
+        padding: 6px 8px;
+        background: rgba(0, 0, 0, 0.25);
+        border-left: 2px solid rgba(93, 255, 154, 0.4);
+        border-radius: 3px;
+      }
+      .ibx-trade-summary { font-size: 11px; color: #cce; margin-bottom: 5px; }
+      .ibx-trade-price { color: #ffc850; font-weight: bold; }
+      .ibx-trade-countdown { color: #99a; font-size: 10px; }
+      .ibx-trade-btn-row { display: flex; gap: 6px; align-items: center; }
+      .ibx-trade-btn {
+        flex: 1;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font: bold 11px monospace;
+        cursor: pointer;
+        background: transparent;
+        border: 1px solid;
+      }
+      .ibx-trade-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .ibx-trade-accept {
+        color: #5dff9a;
+        border-color: rgba(93, 255, 154, 0.45);
+      }
+      .ibx-trade-accept:hover:not(:disabled) { background: rgba(93, 255, 154, 0.12); }
+      .ibx-trade-decline {
+        color: #ff8866;
+        border-color: rgba(255, 136, 102, 0.4);
+      }
+      .ibx-trade-decline:hover:not(:disabled) { background: rgba(255, 136, 102, 0.12); }
+      .ibx-trade-busy { font-size: 10px; color: #aab; }
+      .ibx-trade-result {
+        margin-top: 6px;
+        padding: 4px 8px;
+        font-size: 11px;
+        border-radius: 3px;
+      }
+      .ibx-trade-success {
+        color: #5dff9a;
+        background: rgba(93, 255, 154, 0.08);
+        border-left: 2px solid rgba(93, 255, 154, 0.4);
+      }
+      .ibx-trade-muted {
+        color: #889;
+        background: rgba(0, 0, 0, 0.2);
+        border-left: 2px solid rgba(150, 150, 170, 0.25);
+      }
+
       .ibx-empty {
         padding: 24px 16px;
         color: #556;
@@ -282,8 +964,24 @@ export class InboxPanel {
         font-size: 10px;
         color: #556;
         border-top: 1px solid rgba(255, 194, 79, 0.1);
-        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
+      .ibx-footer .ibx-summary { flex: 1; text-align: left; }
+      .ibx-clear-btn {
+        background: transparent;
+        border: 1px solid rgba(255, 100, 100, 0.4);
+        color: #d88;
+        padding: 3px 8px;
+        font-size: 10px;
+        font-family: inherit;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .ibx-clear-btn:hover { background: rgba(255, 100, 100, 0.15); color: #fbb; }
     `;
     document.head.appendChild(style);
   }
@@ -305,4 +1003,20 @@ function formatTime(ts: number): string {
   const ampm = hour24 < 12 ? "am" : "pm";
   const minutes = String(d.getMinutes()).padStart(2, "0");
   return `${d.getMonth() + 1}/${d.getDate()} ${hour12}:${minutes}${ampm}`;
+}
+
+/** Render the time remaining until `expiresAtMs` as a compact chip. */
+export function formatTimeUntil(expiresAtMs: number): string {
+  const diff = expiresAtMs - Date.now();
+  if (diff <= 0) return "expired";
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h < 24) return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const hh = h % 24;
+  return hh > 0 ? `${d}d ${hh}h` : `${d}d`;
 }

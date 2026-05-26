@@ -4,8 +4,11 @@ import { CollisionMap } from "./CollisionMap.js";
 import { EnvironmentAssets } from "./EnvironmentAssets.js";
 import { CharacterAssets } from "./CharacterAssets.js";
 import { ArmorSystem } from "./ArmorSystem.js";
+import { HorizonBackdrop } from "./HorizonBackdrop.js";
+import { TerrainSkirt } from "./TerrainSkirt.js";
 import { fetchTerrain } from "../api.js";
 import type { WorldLayout, WorldLayoutZone, ElevationProvider } from "../types.js";
+import { QualityManager } from "../quality/QualityManager.js";
 
 const COORD_SCALE = 1 / 10;
 /** All terrain grids are 64x64 tiles = 64 3D units */
@@ -50,6 +53,8 @@ export class WorldManager implements ElevationProvider {
   private borderGroup = new THREE.Group();
   private borderElapsed = 0;
   private borderWalls: THREE.Mesh[] = [];
+  private horizon = new HorizonBackdrop();
+  private skirt = new TerrainSkirt();
   private envAssets = new EnvironmentAssets();
   private charAssets = new CharacterAssets();
   private armorSystem = new ArmorSystem();
@@ -59,24 +64,39 @@ export class WorldManager implements ElevationProvider {
     this.group.name = "world";
     this.borderGroup.name = "borders";
     this.group.add(this.borderGroup);
+    this.group.add(this.skirt.group);
+    this.group.add(this.horizon.group);
+
+    const qcfg = QualityManager.config();
+
     // Environment/town assets are only needed for decorative props. Let the
     // first terrain build happen without blocking on every GLB, then rebuild
-    // loaded zones when these assets are ready.
-    this.envAssetsReady = Promise.all([
-      this.envAssets.preload(),
-      this.envAssets.preloadTown(),
-    ]).then(() => {
+    // loaded zones when these assets are ready. On POTATO we skip the town
+    // preload entirely — buildings load on demand when first sighted.
+    const envPromises: Promise<unknown>[] = [this.envAssets.preload()];
+    if (qcfg.preloadTown) envPromises.push(this.envAssets.preloadTown());
+    this.envAssetsReady = Promise.all(envPromises).then(() => {
       this.rebuildZonesWithAssets();
     });
 
-    // Character/armor preloads are useful for later smoothness, but they are
-    // expensive on mobile and should not compete with initial world load.
-    window.setTimeout(() => {
-      void Promise.allSettled([
-        this.charAssets.preload(),
-        this.armorSystem.preload(),
-      ]);
-    }, 3_000);
+    // Player class models (~7 GLBs) are needed for the Character Select
+    // screen — start immediately so the preview isn't blocked behind the
+    // full NPC/trainer set. POTATO defers this to CharacterSelect.show().
+    if (qcfg.preloadPlayerClassesAtBoot) {
+      void this.charAssets.preloadPlayerClasses();
+    }
+
+    // NPC/trainer models (~20 GLBs) are only needed once in-world. Defer
+    // them so they don't compete with initial terrain/character-select load.
+    // POTATO never auto-preloads — models load on demand via EntityManager.
+    if (qcfg.npcDeferMs !== null) {
+      window.setTimeout(() => {
+        void Promise.allSettled([
+          this.charAssets.preload(),
+          this.armorSystem.preload(),
+        ]);
+      }, qcfg.npcDeferMs);
+    }
   }
 
   /** Get the shared environment assets instance */
@@ -119,7 +139,9 @@ export class WorldManager implements ElevationProvider {
 
   /**
    * Build border walls along world edges where no neighboring zone exists.
-   * Uses a grid of occupied 64x64 cells to detect boundaries.
+   * Uses a grid of occupied 64x64 cells to detect boundaries. Also wires the
+   * horizon backdrop to render distant silhouette mountains beyond those
+   * edges so the world doesn't visibly end at a wall.
    */
   private buildBorders() {
     // Build set of occupied grid cells (keyed by cell coords)
@@ -136,6 +158,10 @@ export class WorldManager implements ElevationProvider {
         cells.push({ gx, gz, ox: gx * TERRAIN_SIZE, oz: gz * TERRAIN_SIZE });
       }
     }
+
+    // Horizon silhouettes + foothill skirts share the same cell topology as the borders.
+    this.skirt.build(cells, TERRAIN_SIZE);
+    this.horizon.build(cells, TERRAIN_SIZE);
 
     // Shared wall material — custom shader for energy barrier effect
     const wallMat = new THREE.ShaderMaterial({
@@ -323,8 +349,8 @@ export class WorldManager implements ElevationProvider {
     return Array.from(this.zones.keys());
   }
 
-  /** Update all loaded terrain animations + border pulse */
-  updateAnimations(dt: number) {
+  /** Update all loaded terrain animations + border pulse + horizon tint */
+  updateAnimations(dt: number, fogColor?: THREE.Color) {
     for (const zone of this.zones.values()) {
       zone.terrain?.update(dt);
     }
@@ -334,6 +360,14 @@ export class WorldManager implements ElevationProvider {
       this.borderElapsed += dt;
       const mat = this.borderWalls[0].material as THREE.ShaderMaterial;
       mat.uniforms.uTime.value = this.borderElapsed;
+    }
+
+    // Horizon silhouettes lerp toward fog tint so they read as part of the
+    // atmosphere (orange-ish at sunset, deep blue at night). Falls back to
+    // the material's base color when no fog is passed in.
+    if (fogColor) {
+      this.horizon.update(dt, fogColor);
+      this.skirt.update(dt, fogColor);
     }
   }
 

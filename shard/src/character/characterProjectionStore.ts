@@ -818,6 +818,21 @@ export async function upsertWalletLink(params: {
   );
 }
 
+/**
+ * Reverse-lookup the owner wallet for a custodial wallet. Returns the owner
+ * (the wallet a player signs in with) when a custodial mapping exists, else
+ * null. Used to deliver inbox notifications to the human user when an
+ * agent-managed custodial wallet is the on-chain actor.
+ */
+export async function getOwnerByCustodialWallet(custodialWallet: string): Promise<string | null> {
+  if (!custodialWallet) return null;
+  const { rows } = await postgresQuery<{ owner_wallet: string }>(
+    `select owner_wallet from game.wallet_links where custodial_wallet = $1 limit 1`,
+    [normalizeWallet(custodialWallet)],
+  );
+  return rows[0]?.owner_wallet ?? null;
+}
+
 export async function clearWalletEntityLink(ownerWallet: string): Promise<void> {
   await postgresQuery(
     `

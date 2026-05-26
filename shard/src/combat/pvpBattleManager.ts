@@ -8,6 +8,7 @@ import { MatchmakingSystem } from "./matchmaking.js";
 import type {
   PvPBattleConfig,
   PvPBattleState,
+  PvPCombatant,
   PvPFormat,
   MatchmakingEntry,
   PvPMatchResult,
@@ -18,6 +19,41 @@ import { pvpReputationIntegration } from "./pvpReputationIntegration.js";
 import { getRedis } from "../redis.js";
 import { arenaManager, type ArenaMatchState, type ArenaMatchResult } from "./arenaManager.js";
 import { predictionPoolManager } from "../economy/predictionPoolManager.js";
+import { sendInboxMessage } from "../agents/agentInbox.js";
+import { getEntity } from "../world/zoneRuntime.js";
+
+function notifyMatchFound(
+  battleId: string,
+  combatant: PvPCombatant,
+  team: "red" | "blue",
+  format: PvPFormat,
+  arenaName: string,
+  startsAtMs: number,
+): void {
+  // Best-effort: resolve walletAddress via the entity. If the entity is gone
+  // (rare race), skip — the player will discover the match via the existing
+  // /api/pvp/player/:agentId/current-battle poll.
+  const entity = getEntity(combatant.agentId);
+  const wallet = entity?.walletAddress;
+  if (!wallet) return;
+  void sendInboxMessage({
+    from: wallet.toLowerCase(),
+    fromName: "Arena Master",
+    to: wallet.toLowerCase(),
+    type: "match-found",
+    body: `Your ${format.toUpperCase()} match is starting in the ${arenaName} (team ${team.toUpperCase()}).`,
+    data: {
+      kind: "match-found",
+      battleId,
+      format,
+      team,
+      arenaName,
+      startsAtMs,
+    },
+  }).catch((err) =>
+    console.warn(`[pvp] match-found inbox delivery failed for ${wallet}: ${(err as Error).message}`),
+  );
+}
 
 export interface PvPDatabase {
   // Player stats
@@ -331,6 +367,18 @@ export class PvPBattleManager {
         arena: config.arena,
       });
       console.log(`[pvp] Arena match started: ${battleId} (${config.format})`);
+
+      // Notify every combatant via inbox so they learn about the match even if
+      // their Arena tab is closed. Fire-and-forget; one failure shouldn't block
+      // others.
+      const arenaName = config.arena?.name ?? "the coliseum";
+      const startsAtMs = Date.now();
+      for (const c of config.teamRed) {
+        notifyMatchFound(battleId, c, "red", config.format, arenaName, startsAtMs);
+      }
+      for (const c of config.teamBlue) {
+        notifyMatchFound(battleId, c, "blue", config.format, arenaName, startsAtMs);
+      }
 
       // Create prediction pool for betting (non-blocking)
       predictionPoolManager.createPool(battleId, 180, 15).then((poolId) => {

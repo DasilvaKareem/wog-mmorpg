@@ -13,6 +13,7 @@ import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getRedis } from "../redis.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { reputationManager } from "../economy/reputationManager.js";
+import { sendInboxMessage } from "../agents/agentInbox.js";
 import { reverseLookupOnChain, resolveNameOnChain } from "../blockchain/nameServiceChain.js";
 import { resolvePreferredAgentIdForWallet } from "../erc8004/agentResolution.js";
 import { isPostgresConfigured } from "../db/postgres.js";
@@ -224,6 +225,26 @@ function findOnlinePlayer(wallet: string): {
   return null;
 }
 
+/** Strip a character's class suffix ("Foo the Warrior" → "foo") for matching. */
+function characterBaseName(name: string): string {
+  return name.trim().replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
+}
+
+/** Find an online player by character username (case-insensitive, ignoring "the X" suffix). */
+function findOnlinePlayerByName(name: string): { wallet: string; name: string } | null {
+  const target = characterBaseName(name);
+  if (!target) return null;
+  for (const entity of getAllEntities().values()) {
+    const e = entity as any;
+    if (e.type !== "player") continue;
+    if (!e.walletAddress || !e.name) continue;
+    if (characterBaseName(e.name) === target) {
+      return { wallet: norm(e.walletAddress), name: e.name };
+    }
+  }
+  return null;
+}
+
 // ── Routes ─────────────────────────────────────────────────────────
 
 export function registerFriendsRoutes(server: FastifyInstance): void {
@@ -316,6 +337,15 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       createdAt: Date.now(),
     };
     await persistRequests(to, [...deduped, request]);
+
+    sendInboxMessage({
+      from,
+      fromName,
+      to,
+      type: "friend-request",
+      body: `${fromName} wants to be your friend!`,
+      data: { requestId: request.id, fromName },
+    }).catch(() => {});
 
     return reply.send({ success: true, requestId: request.id });
   });
@@ -441,7 +471,9 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
   }, async (req, reply) => {
     const authenticatedWallet = ((req as any).walletAddress as string).toLowerCase();
     const from = norm(req.body.fromWallet);
-    const rawName = (req.body.toName ?? "").replace(/\.wog$/i, "").trim();
+    const rawInput = (req.body.toName ?? "").trim();
+    const hadWogSuffix = /\.wog$/i.test(rawInput);
+    const rawName = rawInput.replace(/\.wog$/i, "").trim();
 
     if (!(await controlsWallet(authenticatedWallet, from))) {
       return reply.code(403).send({ error: "Not authorized to send requests for this wallet" });
@@ -451,9 +483,17 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       return reply.code(400).send({ error: "Name is required" });
     }
 
-    const resolved = await resolveNameOnChain(rawName);
+    // Try character username first (unless the user explicitly typed "foo.wog"),
+    // then fall back to on-chain .wog name resolution.
+    let resolved: string | null = null;
+    if (!hadWogSuffix) {
+      resolved = findOnlinePlayerByName(rawName)?.wallet ?? null;
+    }
     if (!resolved) {
-      return reply.code(404).send({ error: `"${rawName}.wog" not found` });
+      resolved = await resolveNameOnChain(rawName);
+    }
+    if (!resolved) {
+      return reply.code(404).send({ error: `Player "${rawName}" not found` });
     }
 
     const to = norm(resolved);

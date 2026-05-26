@@ -11,10 +11,16 @@ import type {
   QuestLogResponse,
   ZoneQuestsResponse,
   ShopResponse,
+  SellPricesResponse,
+  SellResult,
+  RecycleResult,
   NpcDialogueResponse,
   TechniqueInfo,
   CraftingRecipe,
   GuildSummary,
+  GuildProposal,
+  GuildProposalType,
+  MyGuildResponse,
   AuctionListing,
   ProfessionEntry,
   EnchantmentEntry,
@@ -113,6 +119,29 @@ export async function fetchWorldLayout(): Promise<WorldLayout | null> {
 
 export async function fetchActivePlayers(): Promise<ActivePlayersResponse | null> {
   return fetchJsonWithFallback<ActivePlayersResponse>("/players/active");
+}
+
+export interface CatalogItem {
+  tokenId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  equipSlot?: string | null;
+  armorSlot?: string | null;
+  statBonuses?: Record<string, number>;
+  maxDurability?: number | null;
+}
+
+let itemCatalogPromise: Promise<Map<string, CatalogItem>> | null = null;
+export function fetchItemCatalog(): Promise<Map<string, CatalogItem>> {
+  if (itemCatalogPromise) return itemCatalogPromise;
+  itemCatalogPromise = (async () => {
+    const list = (await fetchJsonWithFallback<CatalogItem[]>("/shop/catalog")) ?? [];
+    const map = new Map<string, CatalogItem>();
+    for (const item of list) map.set(String(item.tokenId), item);
+    return map;
+  })();
+  return itemCatalogPromise;
 }
 
 export async function fetchFriends(walletAddress: string): Promise<FriendsResponse | null> {
@@ -417,6 +446,127 @@ export async function abandonQuest(
   return postJsonWithFallback("/quests/abandon", token, { entityId, questId });
 }
 
+// ── Targeted P2P Trade ───────────────────────────────────────────
+
+export interface IncomingTradeOffer {
+  tradeId: number;
+  sellerWallet: string;
+  sellerName: string;
+  tokenId: number;
+  quantity: number;
+  askPrice: number;
+  itemName: string | null;
+  createdAtMs: number;
+  expiresAtMs: number;
+}
+
+export interface TradeStatusResponse {
+  tradeId: number;
+  seller: string;
+  buyer: string;
+  tokenId: number;
+  quantity: number;
+  status: string;
+  askPrice: number | string;
+  bidPrice: number | string;
+  matched: boolean;
+}
+
+export type OutgoingTradeStatus = "pending" | "matched" | "cancelled" | "expired";
+
+export interface OutgoingTradeListing {
+  tradeId: number;
+  sellerWallet: string;
+  sellerName: string;
+  targetBuyerWallet: string | null;
+  tokenId: number;
+  quantity: number;
+  askPrice: number;
+  itemName: string | null;
+  createdAtMs: number;
+  expiresAtMs: number;
+  cancelledAtMs: number | null;
+  matchedAtMs: number | null;
+  status: OutgoingTradeStatus;
+}
+
+export async function listTrade(
+  token: string,
+  body: {
+    sellerAddress: string;
+    tokenId: number;
+    quantity: number;
+    askPrice: number;
+    targetBuyerWallet?: string;
+    expiresAtMs?: number;
+  },
+): Promise<{ ok: boolean; tradeId?: number; expiresAtMs?: number; error?: string }> {
+  return postJsonWithFallback("/trade/list", token, body);
+}
+
+export async function acceptTradeOffer(
+  token: string,
+  body: { tradeId: number; buyerAddress: string; bidPrice: number },
+): Promise<{ ok: boolean; matched?: boolean; error?: string; reason?: string }> {
+  return postJsonWithFallback("/trade/offer", token, body);
+}
+
+export async function rejectTradeOffer(
+  token: string,
+  tradeId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/trade/reject", token, { tradeId });
+}
+
+export async function fetchIncomingTrades(
+  token: string,
+  wallet: string,
+): Promise<{ offers: IncomingTradeOffer[] } | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/trade/incoming/${wallet}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as { offers: IncomingTradeOffer[] };
+    } catch {
+      // Try next candidate base.
+    }
+  }
+  return null;
+}
+
+export async function fetchTradeStatus(
+  tradeId: number,
+): Promise<TradeStatusResponse | null> {
+  return fetchJsonWithFallback<TradeStatusResponse>(`/trade/${tradeId}`);
+}
+
+export async function fetchOutgoingTrades(
+  token: string,
+  wallet: string,
+): Promise<{ offers: OutgoingTradeListing[] } | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/trade/outgoing/${wallet}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as { offers: OutgoingTradeListing[] };
+    } catch {
+      // Try next candidate base.
+    }
+  }
+  return null;
+}
+
+export async function cancelTrade(
+  token: string,
+  tradeId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/trade/cancel", token, { tradeId });
+}
+
 // ── NPC interaction endpoints ─────────────────────────────────────
 
 export async function fetchShopInventory(entityId: string): Promise<ShopResponse | null> {
@@ -432,6 +582,33 @@ export async function buyShopItem(
 ): Promise<{ ok: boolean; data?: { item: string; totalCost: number; remainingGold: number }; error?: string }> {
   return postJsonWithFallback("/shop/buy", token, {
     buyerAddress, tokenId, quantity, merchantEntityId,
+  });
+}
+
+export async function fetchSellPrices(merchantEntityId: string): Promise<SellPricesResponse | null> {
+  return fetchJsonWithFallback<SellPricesResponse>(`/shop/sell-prices/${merchantEntityId}`);
+}
+
+export async function sellShopItem(
+  token: string,
+  sellerAddress: string,
+  merchantEntityId: string,
+  tokenId: number,
+  quantity: number,
+): Promise<{ ok: boolean; data?: SellResult; error?: string }> {
+  return postJsonWithFallback("/shop/sell", token, {
+    sellerAddress, merchantEntityId, tokenId, quantity,
+  });
+}
+
+export async function recycleItem(
+  token: string,
+  sellerAddress: string,
+  tokenId: number,
+  quantity: number,
+): Promise<{ ok: boolean; data?: RecycleResult; error?: string }> {
+  return postJsonWithFallback("/shop/recycle", token, {
+    sellerAddress, tokenId, quantity,
   });
 }
 
@@ -477,6 +654,14 @@ export async function sendFriendRequest(
   return postJsonWithFallback("/friends/request", token, { fromWallet, toWallet });
 }
 
+export async function sendFriendRequestByName(
+  token: string,
+  fromWallet: string,
+  toName: string,
+): Promise<{ ok: boolean; error?: string; resolvedWallet?: string }> {
+  return postJsonWithFallback("/friends/request-by-name", token, { fromWallet, toName });
+}
+
 export async function acceptFriendRequest(
   token: string,
   wallet: string,
@@ -499,6 +684,46 @@ export async function removeFriend(
   targetWallet: string,
 ): Promise<{ ok: boolean; error?: string }> {
   return postJsonWithFallback("/friends/remove", token, { wallet, targetWallet });
+}
+
+export async function inviteToParty(
+  token: string,
+  fromEntityId: string,
+  fromZoneId: string,
+  toCustodialWallet: string,
+): Promise<{ ok: boolean; error?: string; inviteId?: string }> {
+  return postJsonWithFallback("/party/invite-champion", token, { fromEntityId, fromZoneId, toCustodialWallet });
+}
+
+export async function fetchPartyStatus(custodialWallet: string): Promise<{
+  inParty: boolean;
+  partyId?: string;
+  members: Array<{ entityId: string; name: string; level: number; hp: number; maxHp: number; classId?: string; isLeader: boolean }>;
+} | null> {
+  return fetchJsonWithFallback(`/party/status/${custodialWallet}`);
+}
+
+export async function leaveParty(
+  token: string,
+  custodialWallet: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/party/leave-wallet", token, { custodialWallet });
+}
+
+export async function acceptPartyInvite(
+  token: string,
+  custodialWallet: string,
+  inviteId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/party/accept-invite", token, { custodialWallet, inviteId });
+}
+
+export async function declinePartyInvite(
+  token: string,
+  custodialWallet: string,
+  inviteId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/party/decline-invite", token, { custodialWallet, inviteId });
 }
 
 export async function sendInboxMessage(
@@ -529,6 +754,17 @@ export async function sendNpcDialogue(
 ): Promise<{ ok: boolean; data?: NpcDialogueResponse; error?: string }> {
   return postJsonWithFallback("/npc/dialogue", token, {
     npcEntityId, entityId, message, recentHistory,
+  });
+}
+
+export async function sendNpcAction(
+  token: string,
+  npcEntityId: string,
+  entityId: string,
+  action: import("./types.js").NpcActionBinding,
+): Promise<{ ok: boolean; data?: { ok: boolean; result?: Record<string, unknown>; dialogue: NpcDialogueResponse }; error?: string }> {
+  return postJsonWithFallback("/npc/action", token, {
+    npcEntityId, entityId, action,
   });
 }
 
@@ -577,6 +813,73 @@ export async function createGuild(
   return postJsonWithFallback("/guild/create", token, body);
 }
 
+export async function joinGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/join`, token, { memberAddress });
+}
+
+export async function fetchMyGuild(walletAddress: string): Promise<MyGuildResponse | null> {
+  return fetchJsonWithFallback<MyGuildResponse>(`/guild/wallet/${walletAddress}`);
+}
+
+export async function leaveGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/leave`, token, { memberAddress });
+}
+
+export async function inviteToGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/invite`, token, { memberAddress });
+}
+
+export async function depositToGuild(
+  token: string,
+  guildId: number,
+  memberAddress: string,
+  amount: number,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/deposit`, token, { memberAddress, amount });
+}
+
+export async function proposeGuildAction(
+  token: string,
+  guildId: number,
+  body: {
+    proposerAddress: string;
+    proposalType: GuildProposalType | string;
+    description: string;
+    targetAddress?: string;
+    targetAmount?: number;
+  },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/propose`, token, body);
+}
+
+export async function voteOnGuildProposal(
+  token: string,
+  guildId: number,
+  body: { proposalId: number; voterAddress: string; vote: boolean },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/guild/${guildId}/vote`, token, body);
+}
+
+export async function fetchGuildProposals(
+  guildId: number,
+  status?: string,
+): Promise<GuildProposal[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return (await fetchJsonWithFallback<GuildProposal[]>(`/guild/${guildId}/proposals${qs}`)) ?? [];
+}
+
 // ── Auction House ─────────────────────────────────────────────────
 
 export async function fetchAuctions(zoneId: string): Promise<AuctionListing[]> {
@@ -611,6 +914,111 @@ export async function joinPvpQueue(
   body: { agentId: string; walletAddress: string; characterTokenId?: string; level: number; format: string },
 ): Promise<{ ok: boolean; data?: any; error?: string }> {
   return postJsonWithFallback("/api/pvp/queue/join", token, body);
+}
+
+export async function joinPvpPartyQueue(
+  token: string,
+  body: { leaderId: string; format: string },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback("/api/pvp/queue/join-party", token, body);
+}
+
+/**
+ * Pin the agent's quest behavior to a single quest, or clear focus by passing
+ * null. Server biases doQuestObjective's combat/gather work to this quest and
+ * auto-clears the focus once the quest leaves the active list.
+ */
+export async function focusAgentQuest(
+  token: string,
+  questId: string | null,
+): Promise<{ ok: boolean; focusedQuestId?: string | null; error?: string }> {
+  return postJsonWithFallback("/agent/focus-quest", token, { questId });
+}
+
+export async function cancelPvpBattle(
+  token: string,
+  battleId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback(`/api/pvp/battle/${battleId}/cancel`, token, {});
+}
+
+// ── Duels ────────────────────────────────────────────────────────
+
+export async function challengeDuel(
+  token: string,
+  body: { targetWallet: string; format?: string },
+): Promise<{ ok: boolean; challengeId?: string; expiresAtMs?: number; error?: string }> {
+  return postJsonWithFallback("/api/pvp/duel/challenge", token, body);
+}
+
+export async function acceptDuel(
+  token: string,
+  challengeId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/api/pvp/duel/accept", token, { challengeId });
+}
+
+export async function declineDuel(
+  token: string,
+  challengeId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/api/pvp/duel/decline", token, { challengeId });
+}
+
+// ── Prediction markets ────────────────────────────────────────────
+
+export interface PredictionPoolStats {
+  poolId: string;
+  battleId: string;
+  status: string;
+  totalStaked: string;
+  participantCount: number;
+  lockTimestamp: number;
+  timeUntilLock?: number;
+}
+
+export interface BetHistoryRecord {
+  positionId: string;
+  poolId: string;
+  battleId: string;
+  choice: "RED" | "BLUE";
+  amount: string;
+  timestamp: number;
+  result?: "win" | "loss";
+  payout?: string;
+  profit?: string;
+  claimed: boolean;
+}
+
+export async function fetchActivePools(): Promise<PredictionPoolStats[]> {
+  const data = await fetchJsonWithFallback<{ pools: PredictionPoolStats[] }>(
+    "/api/prediction/pools/active",
+  );
+  return data?.pools ?? [];
+}
+
+export async function placeBet(
+  token: string,
+  body: { poolId: string; choice: "RED" | "BLUE"; amount: number; walletAddress: string },
+): Promise<{ ok: boolean; position?: { positionId: string }; error?: string }> {
+  return postJsonWithFallback("/api/prediction/bet", token, body);
+}
+
+export async function claimWinnings(
+  token: string,
+  poolId: string,
+  walletAddress: string,
+): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  return postJsonWithFallback(`/api/prediction/pool/${poolId}/claim`, token, { walletAddress });
+}
+
+export async function fetchBettingHistory(
+  walletAddress: string,
+): Promise<{ bets: BetHistoryRecord[]; totalStaked: string; netProfit: string } | null> {
+  const data = await fetchJsonWithFallback<{
+    history: { bets: BetHistoryRecord[]; totalStaked: string; netProfit: string };
+  }>(`/api/prediction/history/${walletAddress}`);
+  return data?.history ?? null;
 }
 
 export async function fetchPvpLeaderboard(): Promise<PvpLeaderboardEntry[]> {
@@ -676,7 +1084,11 @@ export interface BattleDetails {
     teamBlue: Array<{ name: string; hp: number; maxHp: number; level: number }>;
   };
   combatLog?: Array<{ turn: number; description: string }>;
-  mvp?: { name: string; damage: number };
+  /**
+   * MVP may be returned as an object by the new arena adapter or as a bare
+   * entity ID by the legacy adapter. Renderers must handle both.
+   */
+  mvp?: string | { name: string; damage: number };
 }
 
 // ── Professions ───────────────────────────────────────────────────
@@ -693,6 +1105,59 @@ export async function learnProfession(
   return postJsonWithFallback("/professions/learn", token, body);
 }
 
+// ── Nanopayments ─────────────────────────────────────────────────
+
+export interface NanopayStatus {
+  budget: number;
+  spent: number;
+  remaining: number;
+  freeGranted: boolean;
+  needsTopUp: boolean;
+  lowBalance: boolean;
+  hasAuth: boolean;
+}
+
+export async function fetchNanopayStatus(wallet: string, token: string): Promise<NanopayStatus | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/nanopay/status/${encodeURIComponent(wallet)}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as NanopayStatus;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+export interface SpendBreakdown {
+  breakdown: Record<string, number>;
+  topups: Array<{ ts: number; amount: number }>;
+}
+
+export async function fetchNanopayBreakdown(wallet: string, token: string): Promise<SpendBreakdown | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/nanopay/breakdown/${encodeURIComponent(wallet)}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as SpendBreakdown;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+export async function fetchNanopayGatewayInfo(): Promise<{
+  gatewayWalletContract: string;
+  sellerAddress: string;
+  defaultSessionBudgetUsdc: number;
+  freeStarterUsdc: number;
+  pricing: Record<string, number>;
+} | null> {
+  return fetchJsonWithFallback("/nanopay/gateway-info");
+}
+
 // ── Enchanting ────────────────────────────────────────────────────
 
 export async function fetchEnchantingCatalog(): Promise<EnchantmentEntry[]> {
@@ -705,4 +1170,14 @@ export async function applyEnchantment(
   body: { walletAddress: string; zoneId: string; entityId: string; altarId: string; enchantmentElixirTokenId: string; equipmentSlot: string },
 ): Promise<{ ok: boolean; data?: any; error?: string }> {
   return postJsonWithFallback("/enchanting/apply", token, body);
+}
+
+// ── Telegram notifications ────────────────────────────────────────
+
+export async function fetchTelegramStatus(wallet: string): Promise<{ linked: boolean } | null> {
+  return fetchJsonWithFallback(`/notifications/telegram/status/${encodeURIComponent(wallet)}`);
+}
+
+export async function fetchTelegramBotLink(wallet: string): Promise<{ url: string | null; botUsername: string | null } | null> {
+  return fetchJsonWithFallback(`/notifications/telegram/bot-link/${encodeURIComponent(wallet)}`);
 }

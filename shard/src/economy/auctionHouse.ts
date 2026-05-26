@@ -5,6 +5,7 @@ import {
   getAvailableGoldAsync,
   recordGoldSpendAsync,
   reserveGoldAsync,
+  revertGoldSpendAsync,
   unreserveGoldAsync,
 } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -18,13 +19,28 @@ import {
   getZoneAuctionsFromChain,
   type AuctionData,
 } from "./auctionHouseChain.js";
+import { listAuctionProjections } from "../db/auctionProjectionStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import { sendInboxToCustodialOwner } from "../agents/agentInbox.js";
 import { getAllEntities, getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getEquippedInstanceIds, getEquippedItemCounts } from "../items/inventoryState.js";
 
-const AUCTION_LISTING_FEE = copperToGold(50); // 50 copper = 0.005 GOLD
-const AUCTION_CANCEL_FEE = copperToGold(25);  // 25 copper = 0.0025 GOLD
+const AUCTION_LISTING_FEE_BASE = copperToGold(50);     // flat one-time: 0.005 GOLD
+const AUCTION_LISTING_FEE_PER_DAY = copperToGold(100); // per day: 1 silver (0.01 GOLD)
+const AUCTION_CANCEL_FEE = copperToGold(25);           // 25 copper = 0.0025 GOLD
+const MAX_DURATION_MINUTES = 30 * 24 * 60;             // 30 days
+const MINUTES_PER_DAY = 24 * 60;
+const SECONDS_PER_DAY = 24 * 60 * 60;
+
+function durationDaysFor(durationMinutes: number): number {
+  return Math.max(1, Math.ceil(durationMinutes / MINUTES_PER_DAY));
+}
+
+function computeListingFee(durationMinutes: number): number {
+  return AUCTION_LISTING_FEE_BASE + durationDaysFor(durationMinutes) * AUCTION_LISTING_FEE_PER_DAY;
+}
 
 const STATUS_NAMES = ["active", "ended", "cancelled"];
 
@@ -168,9 +184,11 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       return { error: "Start price must be positive" };
     }
 
-    if (durationMinutes < 1) {
+    if (durationMinutes < 1 || durationMinutes > MAX_DURATION_MINUTES) {
       reply.code(400);
-      return { error: "Duration must be at least 1 minute" };
+      return {
+        error: `Duration must be between 1 minute and ${MAX_DURATION_MINUTES} minutes (30 days)`,
+      };
     }
 
     if (buyoutPrice !== undefined && buyoutPrice > 0 && buyoutPrice <= startPrice) {
@@ -231,17 +249,25 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         return { error: "Item instance not found for this wallet" };
       }
 
-      // Ensure seller can pay the listing fee.
+      // Ensure seller can pay the duration-scaled listing fee.
+      const durationDays = durationDaysFor(durationMinutes);
+      const listingFee = computeListingFee(durationMinutes);
       const onChainGold = parseFloat(await getGoldBalance(sellerAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
       const availableGold = await getAvailableGoldAsync(sellerAddress, safeOnChainGold);
-      if (availableGold < AUCTION_LISTING_FEE) {
+      if (availableGold < listingFee) {
         reply.code(400);
         return {
           error: "Insufficient gold for listing fee",
-          required: AUCTION_LISTING_FEE,
+          required: listingFee,
           available: availableGold,
-          message: `Listing fee is ${formatGold(AUCTION_LISTING_FEE)} (50 copper)`,
+          message: `Listing fee is ${formatGold(listingFee)} (50 base + ${durationDays} × 100 copper/day)`,
+          breakdown: {
+            base: AUCTION_LISTING_FEE_BASE,
+            perDay: AUCTION_LISTING_FEE_PER_DAY,
+            days: durationDays,
+            total: listingFee,
+          },
         };
       }
 
@@ -259,7 +285,9 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         quantity,
         startPrice,
         durationSeconds,
-        finalBuyoutPrice
+        finalBuyoutPrice,
+        listingFee,
+        durationDays
       );
       auctionCreated = true;
       createdAuctionId = auctionId;
@@ -272,9 +300,9 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         escrowedInstanceId = escrowed.instanceId;
       }
 
-      await recordGoldSpendAsync(sellerAddress, AUCTION_LISTING_FEE);
+      await recordGoldSpendAsync(sellerAddress, listingFee);
       server.log.info(
-        `Auction ${auctionId} created in ${zoneId} by ${sellerAddress}: tokenId=${tokenId} qty=${quantity} escrowTx=${escrowBurnTx}${escrowedInstanceId ? ` instance=${escrowedInstanceId}` : ""}`
+        `Auction ${auctionId} created in ${zoneId} by ${sellerAddress}: tokenId=${tokenId} qty=${quantity} durationDays=${durationDays} fee=${listingFee} escrowTx=${escrowBurnTx}${escrowedInstanceId ? ` instance=${escrowedInstanceId}` : ""}`
       );
 
       return {
@@ -285,6 +313,8 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         escrowTx: escrowBurnTx,
         instanceId: escrowedInstanceId,
         txHash,
+        listingFee,
+        durationDays,
       };
     } catch (err) {
       if (createdAuctionId != null) {
@@ -529,6 +559,29 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         `Auction ${auctionId} bought out by ${buyerAddress} for ${auction.buyoutPrice} gold`
       );
 
+      // Notify the seller — even if the seller was a human listing directly,
+      // sendInboxToCustodialOwner falls back to the seller address itself when
+      // no owner mapping exists.
+      const buyoutItem = getItemByTokenId(BigInt(auction.tokenId));
+      const buyoutItemName = buyoutItem?.name ?? `Token #${auction.tokenId}`;
+      sendInboxToCustodialOwner(auction.seller, {
+        from: "0x0000000000000000000000000000000000000000",
+        fromName: "Auction House",
+        type: "system",
+        body: `Sold ${auction.quantity}× ${buyoutItemName} (buyout) for ${auction.buyoutPrice} GOLD`,
+        data: {
+          kind: "auction_buyout",
+          auctionId,
+          zoneId,
+          tokenId: auction.tokenId,
+          quantity: auction.quantity,
+          salePrice: auction.buyoutPrice,
+          buyer: buyerAddress,
+        },
+      }).catch((err) => {
+        server.log.warn({ err, auctionId }, "auction buyout inbox notify failed");
+      });
+
       return {
         ok: true,
         auctionId,
@@ -587,18 +640,34 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         return { error: "Cannot cancel auction with bids" };
       }
 
-      // Charge cancellation fee (25 copper)
-      const onChainGold = parseFloat(await getGoldBalance(authenticatedWallet));
-      const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = await getAvailableGoldAsync(authenticatedWallet, safeOnChainGold);
-      if (availableGold < AUCTION_CANCEL_FEE) {
-        reply.code(400);
-        return {
-          error: "Insufficient gold for cancellation fee",
-          required: AUCTION_CANCEL_FEE,
-          available: availableGold,
-          message: "Cancellation fee is 25 copper (0.0025 GOLD)",
-        };
+      // Compute prorated listing-fee refund for unused days.
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const durationDays = auction.durationDays ?? 0;
+      const feePaid = auction.feePaid ?? 0;
+      const createdAt = auction.createdAt ?? null;
+      const perDayPaid = durationDays > 0 && feePaid > AUCTION_LISTING_FEE_BASE
+        ? (feePaid - AUCTION_LISTING_FEE_BASE) / durationDays
+        : 0;
+      const elapsedSeconds = createdAt != null ? Math.max(0, nowSeconds - createdAt) : 0;
+      const elapsedDays = Math.min(durationDays, Math.ceil(elapsedSeconds / SECONDS_PER_DAY));
+      const unusedDays = Math.max(0, durationDays - elapsedDays);
+      const refund = unusedDays * perDayPaid;
+      // Net = cancel fee minus refund. May be negative (net credit to seller).
+      const netCharge = AUCTION_CANCEL_FEE - refund;
+
+      if (netCharge > 0) {
+        const onChainGold = parseFloat(await getGoldBalance(authenticatedWallet));
+        const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+        const availableGold = await getAvailableGoldAsync(authenticatedWallet, safeOnChainGold);
+        if (availableGold < netCharge) {
+          reply.code(400);
+          return {
+            error: "Insufficient gold for cancellation fee",
+            required: netCharge,
+            available: availableGold,
+            message: `Cancellation costs ${formatGold(netCharge)} (25 copper cancel fee minus ${formatGold(refund)} refund)`,
+          };
+        }
       }
 
       const txHash = await cancelAuctionOnChain(auctionId);
@@ -611,11 +680,26 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       if (escrowedInstance) {
         await assignItemInstanceOwner(escrowedInstance.instanceId, authenticatedWallet);
       }
-      await recordGoldSpendAsync(authenticatedWallet, AUCTION_CANCEL_FEE);
+      if (netCharge > 0) {
+        await recordGoldSpendAsync(authenticatedWallet, netCharge);
+      } else if (netCharge < 0) {
+        await revertGoldSpendAsync(authenticatedWallet, -netCharge);
+      }
 
-      server.log.info(`Auction ${auctionId} cancelled and escrow returned via ${restoreTx}`);
+      server.log.info(
+        `Auction ${auctionId} cancelled: escrow returned via ${restoreTx}, refund=${refund} netCharge=${netCharge}`
+      );
 
-      return { ok: true, auctionId, txHash, restoreTx };
+      return {
+        ok: true,
+        auctionId,
+        txHash,
+        restoreTx,
+        cancelFee: AUCTION_CANCEL_FEE,
+        feeRefunded: refund,
+        netCharge,
+        unusedDays,
+      };
     } catch (err) {
       server.log.error(err, `Failed to cancel auction ${auctionId}`);
       reply.code(500);
@@ -646,19 +730,40 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         statusFilter = statusIndex;
       }
 
-      // Get all auctions for this zone
-      const auctionIds = await getZoneAuctionsFromChain(zoneId, statusFilter);
+      // Fast path: when Postgres is configured, fetch all rows for the zone in
+      // a single query — avoids the historic N+1 (one getAuctionFromChain call
+      // per id) that left the client stuck on "Loading auctions…".
+      const tokenIdFilter = tokenId ? parseInt(tokenId, 10) : null;
+      let auctionRows: AuctionData[] = [];
+      if (isPostgresConfigured()) {
+        auctionRows = await listAuctionProjections(statusFilter, zoneId);
+      } else {
+        const auctionIds = await getZoneAuctionsFromChain(zoneId, statusFilter);
+        for (const auctionId of auctionIds) {
+          try {
+            auctionRows.push(await getAuctionFromChain(auctionId));
+          } catch (auctionErr) {
+            server.log.warn(
+              { auctionId, zoneId, err: auctionErr instanceof Error ? auctionErr.message : auctionErr },
+              "Skipping auction id missing from cache/chain",
+            );
+          }
+        }
+      }
 
       const auctions = [];
-      for (const auctionId of auctionIds) {
-        const auction = await getAuctionFromChain(auctionId);
-
-        // Filter by tokenId if specified
-        if (tokenId && auction.tokenId !== parseInt(tokenId, 10)) {
+      for (const auction of auctionRows) {
+        try {
+          if (tokenIdFilter !== null && auction.tokenId !== tokenIdFilter) continue;
+          auctions.push(formatAuctionForResponse(auction));
+        } catch (auctionErr) {
+          // Defensive: a single broken row should not 500 the whole response.
+          server.log.warn(
+            { auctionId: auction.auctionId, zoneId, err: auctionErr instanceof Error ? auctionErr.message : auctionErr },
+            "Skipping auction id missing from cache/chain",
+          );
           continue;
         }
-
-        auctions.push(formatAuctionForResponse(auction));
       }
 
       return auctions;

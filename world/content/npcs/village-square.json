@@ -320,6 +320,33 @@
     },
     {
       "type": "mob",
+      "name": "Hungry Wolf",
+      "x": 450,
+      "y": 155,
+      "hp": 65,
+      "level": 2,
+      "xpReward": 54
+    },
+    {
+      "type": "mob",
+      "name": "Hungry Wolf",
+      "x": 530,
+      "y": 220,
+      "hp": 65,
+      "level": 2,
+      "xpReward": 54
+    },
+    {
+      "type": "mob",
+      "name": "Hungry Wolf",
+      "x": 420,
+      "y": 310,
+      "hp": 65,
+      "level": 2,
+      "xpReward": 54
+    },
+    {
+      "type": "mob",
       "name": "Goblin Raider",
       "x": 570,
       "y": 190,
@@ -332,6 +359,33 @@
       "name": "Mire Slime",
       "x": 570,
       "y": 380,
+      "hp": 110,
+      "level": 3,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
+      "name": "Mire Slime",
+      "x": 555,
+      "y": 395,
+      "hp": 110,
+      "level": 3,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
+      "name": "Mire Slime",
+      "x": 585,
+      "y": 370,
+      "hp": 110,
+      "level": 3,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
+      "name": "Mire Slime",
+      "x": 600,
+      "y": 405,
       "hp": 110,
       "level": 3,
       "xpReward": 72

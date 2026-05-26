@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { getGradientMap } from "./ToonPipeline.js";
 
 const MODEL_BASE = new URL(
@@ -37,13 +38,67 @@ const ASSET_DEFS: Record<string, { file: string; scale: number; yOffset: number 
   // Resources
   rare_ore:     { file: "rare_ore.glb",     scale: 1.5, yOffset: 0 },
   flower_patch: { file: "flower_patch.glb", scale: 1.2, yOffset: 0 },
-  // Mobs
-  shadow_wolf:      { file: "shadow_wolf.glb",      scale: 2.0, yOffset: 0 },
-  dark_cultist:     { file: "dark_cultist.glb",      scale: 2.2, yOffset: 0 },
-  undead_knight:    { file: "undead_knight.glb",     scale: 2.4, yOffset: 0 },
-  forest_troll:     { file: "forest_troll.glb",      scale: 2.8, yOffset: 0 },
-  ancient_golem:    { file: "ancient_golem.glb",     scale: 3.0, yOffset: 0 },
-  necromancer_boss: { file: "necromancer_boss.glb",  scale: 3.5, yOffset: 0 },
+  // Mobs — scales target player-relative size (player is ~1.7 units tall at 0.7).
+  // Source GLBs are ~2.4 units tall, so a scale of 0.7 ≈ player height.
+  shadow_wolf:      { file: "shadow_wolf.glb",      scale: 1.3, yOffset: 0 },
+  dark_cultist:     { file: "dark_cultist.glb",      scale: 1.0, yOffset: 0 },
+  undead_knight:    { file: "undead_knight.glb",     scale: 1.1, yOffset: 0 },
+  forest_troll:     { file: "forest_troll.glb",      scale: 1.3, yOffset: 0 },
+  ancient_golem:    { file: "ancient_golem.glb",     scale: 1.4, yOffset: 0 },
+  necromancer_boss: { file: "necromancer_boss.glb",  scale: 1.6, yOffset: 0 },
+  // Quaternius Easy Animated Enemy Pack (CC0)
+  frog:             { file: "frog.glb",              scale: 0.75, yOffset: 0 },
+  rat:              { file: "rat.glb",               scale: 0.65, yOffset: 0 },
+  snake:            { file: "snake.glb",             scale: 0.7, yOffset: 0 },
+  snake_angry:      { file: "snake_angry.glb",       scale: 0.9, yOffset: 0 },
+  spider:           { file: "spider.glb",            scale: 0.9, yOffset: 0 },
+  wasp:             { file: "wasp.glb",              scale: 0.85, yOffset: 1.0 },
+  // Quaternius Ultimate Monsters — Big (humanoid/large)
+  big_birb:         { file: "big_birb.glb",          scale: 0.75, yOffset: 0.8 },
+  big_bluedemon:    { file: "big_bluedemon.glb",     scale: 0.9, yOffset: 0 },
+  big_cactoro:      { file: "big_cactoro.glb",       scale: 0.7, yOffset: 0 },
+  big_demon:        { file: "big_demon.glb",         scale: 0.85, yOffset: 0 },
+  big_fish:         { file: "big_fish.glb",          scale: 0.65, yOffset: 0 },
+  big_monkroose:    { file: "big_monkroose.glb",     scale: 0.8, yOffset: 0 },
+  big_mushroomking: { file: "big_mushroomking.glb",  scale: 1.05, yOffset: 0 },   // boss
+  big_ninja:        { file: "big_ninja.glb",         scale: 0.75, yOffset: 0 },
+  big_orc:          { file: "big_orc.glb",           scale: 0.8, yOffset: 0 },
+  big_orc_skull:    { file: "big_orc_skull.glb",     scale: 0.8, yOffset: 0 },
+  big_tribal:       { file: "big_tribal.glb",        scale: 0.75, yOffset: 0 },
+  big_yeti:         { file: "big_yeti.glb",          scale: 1.05, yOffset: 0 },   // boss
+  // Quaternius Ultimate Monsters — Blob (chibi/small)
+  blob_birb:        { file: "blob_birb.glb",         scale: 0.85, yOffset: 0 },
+  blob_cactoro:     { file: "blob_cactoro.glb",      scale: 0.9, yOffset: 0 },
+  blob_cat:         { file: "blob_cat.glb",          scale: 0.85, yOffset: 0 },
+  blob_chicken:     { file: "blob_chicken.glb",      scale: 0.8, yOffset: 0 },
+  blob_dog:         { file: "blob_dog.glb",          scale: 0.85, yOffset: 0 },
+  blob_fish:        { file: "blob_fish.glb",         scale: 0.85, yOffset: 0 },
+  blob_greenblob:   { file: "blob_greenblob.glb",    scale: 0.9, yOffset: 0 },
+  blob_greenspikyblob:    { file: "blob_greenspikyblob.glb",    scale: 0.9, yOffset: 0 },
+  blob_mushnub:     { file: "blob_mushnub.glb",      scale: 0.9, yOffset: 0 },
+  blob_mushnub_evolved:   { file: "blob_mushnub_evolved.glb",   scale: 1.05, yOffset: 0 },
+  blob_ninja:       { file: "blob_ninja.glb",        scale: 0.9, yOffset: 0 },
+  blob_orc:         { file: "blob_orc.glb",          scale: 0.9, yOffset: 0 },
+  blob_pigeon:      { file: "blob_pigeon.glb",       scale: 0.8, yOffset: 0 },
+  blob_pinkblob:    { file: "blob_pinkblob.glb",     scale: 0.9, yOffset: 0 },
+  blob_wizard:      { file: "blob_wizard.glb",       scale: 0.95, yOffset: 0 },
+  blob_yeti:        { file: "blob_yeti.glb",         scale: 0.95, yOffset: 0 },
+  // Quaternius Ultimate Monsters — Flying (yOffset lifts actual flyers off ground)
+  flying_armabee:   { file: "flying_armabee.glb",    scale: 0.55, yOffset: 0.8 },
+  flying_armabee_evolved: { file: "flying_armabee_evolved.glb", scale: 0.7, yOffset: 1.0 },
+  flying_demon:     { file: "flying_demon.glb",      scale: 0.65, yOffset: 0.7 },
+  flying_dragon:    { file: "flying_dragon.glb",     scale: 0.9, yOffset: 0.8 },   // boss
+  flying_dragon_evolved:  { file: "flying_dragon_evolved.glb",  scale: 1.2, yOffset: 1.2 },   // epic boss
+  flying_ghost:     { file: "flying_ghost.glb",      scale: 0.65, yOffset: 0.8 },
+  flying_ghost_skull:     { file: "flying_ghost_skull.glb",     scale: 0.7, yOffset: 0.8 },
+  flying_glub:      { file: "flying_glub.glb",       scale: 0.55, yOffset: 0.7 },
+  flying_glub_evolved:    { file: "flying_glub_evolved.glb",    scale: 0.65, yOffset: 0.8 },
+  flying_goleling:  { file: "flying_goleling.glb",   scale: 0.65, yOffset: 0.5 },
+  flying_goleling_evolved:{ file: "flying_goleling_evolved.glb",scale: 0.8, yOffset: 0.7 },
+  flying_hywirl:    { file: "flying_hywirl.glb",     scale: 0.65, yOffset: 0.7 },
+  flying_pigeon:    { file: "flying_pigeon.glb",     scale: 0.5, yOffset: 0.9 },
+  flying_squidle:   { file: "flying_squidle.glb",    scale: 0.7, yOffset: 1.0 },
+  flying_tribal:    { file: "flying_tribal.glb",     scale: 0.7, yOffset: 1.0 },
 };
 
 /** Kenney Fantasy Town Kit 2.0 — 167 modular building pieces (CC0) */
@@ -289,20 +344,237 @@ const TILE_TO_ASSET_FALLBACK: Record<number, string> = {
   30: "stone_wall", 31: "stone_wall", 32: "stone_wall", 33: "stone_wall",
 };
 
-/** Map from mob name substring → asset name */
+/** Map from mob name keyword → asset name. Matched as whole word (\b), case-insensitive.
+ *  First match wins, so list more specific keywords before general ones. */
 const MOB_NAME_TO_ASSET: [string, string][] = [
+  // ── Originals ──────────────────────────────────────────────────────
   ["wolf", "shadow_wolf"],
+  ["worg", "shadow_wolf"],
   ["cultist", "dark_cultist"],
   ["undead", "undead_knight"],
   ["skeleton", "undead_knight"],
   ["troll", "forest_troll"],
-  ["golem", "ancient_golem"],
   ["necromancer", "necromancer_boss"],
+  // ── Enemy pack ─────────────────────────────────────────────────────
+  ["viper", "snake_angry"],
+  ["cobra", "snake_angry"],
+  ["rattler", "snake_angry"],
+  ["adder", "snake_angry"],
+  ["basilisk", "snake_angry"],
+  ["serpent", "snake"],
+  ["snake", "snake"],
+  ["weaver", "spider"],
+  ["spider", "spider"],
+  ["scorpion", "spider"],
+  ["hornet", "wasp"],
+  ["wasp", "wasp"],
+  ["toad", "frog"],
+  ["frog", "frog"],
+  ["rat", "rat"],
+  ["mouse", "rat"],
+  // ── Dragons (Flying) ───────────────────────────────────────────────
+  ["wyrm", "flying_dragon"],
+  ["dragonkin", "flying_dragon"],
+  ["drake", "flying_dragon"],
+  ["dragon", "flying_dragon_evolved"],
+  // ── Ghosts / Wraiths / Wisps (Flying) ─────────────────────────────
+  ["wraith", "flying_ghost_skull"],
+  ["specter", "flying_ghost_skull"],
+  ["phantom", "flying_ghost"],
+  ["ghost", "flying_ghost"],
+  ["wisp", "flying_ghost"],
+  // ── Elementals (Flying Goleling) — before existing "golem" key ────
+  ["elemental", "flying_goleling"],
+  ["devil", "flying_goleling"],   // Dust Devil
+  ["golem", "ancient_golem"],
+  // ── Slimes / Blobs / Worms ─────────────────────────────────────────
+  ["slime", "blob_greenblob"],
+  ["slug", "blob_greenblob"],
+  ["crawler", "blob_greenblob"],
+  ["worm", "blob_greenspikyblob"],
+  ["weevil", "blob_greenspikyblob"],
+  ["beetle", "blob_greenspikyblob"],
+  // ── Mushrooms / Plants / Vines ─────────────────────────────────────
+  ["spore", "blob_mushnub"],
+  ["mushroom", "blob_mushnub"],
+  ["treant", "blob_mushnub_evolved"],
+  ["ent", "blob_mushnub_evolved"],   // Corrupted Ent — \b prevents matching "sentinel"
+  ["cactus", "big_cactoro"],
+  ["cactoro", "big_cactoro"],
+  ["vine", "flying_hywirl"],
+  ["nightbloom", "flying_hywirl"],
+  ["strangler", "flying_hywirl"],
+  ["lurker", "flying_hywirl"],
+  ["thorn sprite", "blob_greenspikyblob"],
+  ["sprite", "big_cactoro"],
+  // ── Birds ──────────────────────────────────────────────────────────
+  ["rooster", "blob_chicken"],
+  ["chicken", "blob_chicken"],
+  ["owl", "blob_pigeon"],
+  ["heron", "blob_pigeon"],
+  ["pigeon", "blob_pigeon"],
+  ["condor", "big_birb"],
+  ["eagle", "big_birb"],
+  ["hawk", "big_birb"],
+  ["harpy", "flying_tribal"],
+  ["bat", "flying_pigeon"],
+  ["moth", "flying_armabee"],
+  ["bee", "flying_armabee"],
+  // ── Mammals ────────────────────────────────────────────────────────
+  ["fox", "blob_cat"],
+  ["cat", "blob_cat"],
+  ["hound", "blob_dog"],
+  ["dog", "blob_dog"],
+  ["yeti", "big_yeti"],
+  ["titan", "big_yeti"],
+  ["giant", "big_yeti"],
+  ["bear", "big_monkroose"],
+  ["boar", "big_monkroose"],
+  ["stag", "big_monkroose"],
+  ["lion", "big_monkroose"],
+  // ── Humanoids ──────────────────────────────────────────────────────
+  ["forgemaster", "big_bluedemon"],
+  ["infernal", "big_bluedemon"],
+  ["forgebound", "big_demon"],
+  ["demon", "big_demon"],
+  ["horror", "big_demon"],
+  ["raider", "big_orc"],
+  ["goblin", "big_orc"],
+  ["orc", "big_orc"],
+  ["automaton", "big_orc_skull"],
+  ["zombie", "big_orc_skull"],
+  ["scarecrow", "big_orc_skull"],
+  ["drowned", "big_orc_skull"],   // Drowned Knight
+  ["scout", "big_ninja"],
+  ["bandit", "big_ninja"],
+  ["rogue", "big_ninja"],
+  ["stalker", "big_ninja"],
+  ["thief", "big_tribal"],
+  ["dwarf", "big_orc"],           // Corrupted Dwarf King → orc rig
+  ["king", "big_mushroomking"],
+  ["archdruid", "blob_wizard"],
+  ["druid", "blob_wizard"],
+  ["dryad", "blob_wizard"],
+  ["fae", "blob_wizard"],
+  ["warden", "flying_dragon_evolved"],   // Solaris Warden = boss
+  ["guardian", "ancient_golem"],
+  ["sentinel", "ancient_golem"],
+  ["sentry", "ancient_golem"],
+  ["guard", "ancient_golem"],
+  // ── Aquatic ────────────────────────────────────────────────────────
+  ["mudfish", "blob_fish"],
+  ["fish", "blob_fish"],
+  ["crab", "blob_fish"],
+  ["squidle", "flying_squidle"],
+  ["squid", "flying_squidle"],
+  ["devourer", "flying_squidle"],
+  ["dweller", "flying_squidle"],   // Deep Dweller
 ];
+
+/** Per-name tint applied to a GLB mob's MeshToonMaterial color (multiplied with texture).
+ *  Keep values close to white so the underlying texture detail stays visible:
+ *  e.g. 0xccffcc for subtle green, 0xffcccc for sickly red. Pure 0xffffff = no tint.
+ *  First whole-word match wins (same matching rules as MOB_NAME_TO_ASSET). */
+const MOB_NAME_TO_TINT: [string, number][] = [
+  // ── Affliction / corruption (sickly) ───────────────────────────────
+  ["diseased", 0xb8d8a0],   // pale plague-green
+  ["plague",   0xb8d8a0],
+  ["venom",    0xa8e0a0],   // toxic green
+  ["toxic",    0xa8e0a0],
+  ["corrupted",0x8a78a8],   // bruised purple
+  ["rot",      0x8a78a8],
+  ["dark",     0x88728a],   // muted violet
+  ["shadow",   0x88728a],
+  ["void",     0x6a4878],
+  // ── Cold / ice / moon (cool blue/silver) ───────────────────────────
+  ["frost",    0xb8d8ff],
+  ["ice",      0xb8d8ff],
+  ["snow",     0xe0e8f0],
+  ["moon",     0xc8d0f0],
+  ["lunar",    0xc8d0f0],
+  ["silver",   0xd8e0e8],
+  ["lumen",    0xd0e8ff],
+  ["luminous", 0xd0e8ff],
+  ["azure",    0x90b8e0],
+  ["azurshard",0x6890c8],
+  ["crystal",  0xbcddf0],
+  ["prismatic",0xddccff],   // iridescent lean
+  ["aurora",   0xc0e0d8],
+  ["storm",    0xa8b0c8],
+  ["sky",      0xb0c8e0],
+  // ── Heat / fire / forge (warm red/orange) ─────────────────────────
+  ["fire",     0xff9966],
+  ["flame",    0xff9966],
+  ["molten",   0xff8855],
+  ["infernal", 0xff7755],
+  ["forgemaster", 0xff7755],
+  ["forge",    0xffaa77],
+  ["sun",      0xffd890],
+  ["solaris",  0xffd890],
+  ["solar",    0xffd890],
+  ["golden",   0xffe8a8],
+  ["harvest",  0xffd098],
+  ["amber",    0xffcc77],
+  // ── Nature: forest / bog / bramble (greens & browns) ──────────────
+  ["bramble",  0xb0c890],
+  ["thorn",    0xb0c890],
+  ["bog",      0x9ab088],
+  ["marsh",    0x9ab088],
+  ["mire",     0x9ab088],
+  ["peat",     0xa89070],
+  ["mud",      0xa88858],
+  ["dust",     0xc8b890],
+  ["emerald",  0x80c890],
+  ["forest",   0x9cc098],
+  ["wild",     0xb8c8a0],
+  ["fenland",  0x9ab088],
+  ["swamp",    0x9ab088],
+  // ── Floral / pastel ────────────────────────────────────────────────
+  ["bloom",    0xffc8d8],
+  ["petal",    0xffc8d8],
+  ["moonpetal",0xe8c8e0],
+  ["blossom",  0xffd0d8],
+  ["garden",   0xddeec8],
+  ["orchard",  0xe0d098],
+  ["nightbloom",0xc090c8],
+  // ── Stone / metal (grey) ───────────────────────────────────────────
+  ["iron",     0xa8a8b0],
+  ["stone",    0xb8b8b8],
+  ["rock",     0xb0a890],
+  ["rune",     0xa0a8c0],
+  ["mountain", 0xb0a898],
+  ["highland", 0xb8b098],
+  ["gemloch",  0xa8c8b8],
+  ["fels",     0x988868],
+  ["felsrock", 0x988868],
+  // ── Dire / hungry (slight darken) ──────────────────────────────────
+  ["dire",     0x886e60],
+  ["hungry",   0xb89880],
+  ["feral",    0x988068],
+  ["rogue",    0xa89870],
+  ["bandit",   0xb09880],
+  ["ranch",    0xc0a888],
+  // ── Boss-tier prismatic glow ───────────────────────────────────────
+  ["necromancer", 0xc098d8],
+  ["archdruid",   0xc0e0a8],
+  ["forgemaster", 0xff7755],   // dup ok (first match)
+  ["warden",      0xffe0a0],
+];
+
+/** Match a mob entity name to a color tint. Returns null if no tint applies. */
+function getTintForMob(entityName: string): number | null {
+  const lower = entityName.toLowerCase();
+  for (const [keyword, color] of MOB_NAME_TO_TINT) {
+    const re = new RegExp(`\\b${keyword}\\b`, "i");
+    if (re.test(lower)) return color;
+  }
+  return null;
+}
 
 export {
   TILE_TO_ASSET,
   MOB_NAME_TO_ASSET,
+  MOB_NAME_TO_TINT,
   TOWN_ASSET_DEFS,
   LIGHT_TREE_TILES,
   DARK_TREE_TILES,
@@ -320,6 +592,8 @@ export class EnvironmentAssets {
   private cache = new Map<string, THREE.Object3D>();
   /** Stores the Y offset needed to place each model's bottom on the ground */
   private groundOffsets = new Map<string, number>();
+  /** Per-asset animation clips, captured from gltf.animations at load time */
+  private animations = new Map<string, THREE.AnimationClip[]>();
   private loading = new Map<string, Promise<THREE.Object3D>>();
   private loader: GLTFLoader;
   private ready = false;
@@ -406,6 +680,59 @@ export class EnvironmentAssets {
   }
 
   /**
+   * Clone a mob asset for animation: preserves skeleton via SkeletonUtils.clone
+   * so each instance has its own bones and can be animated independently.
+   * Returns the cloned model (already scaled & ground-lifted) plus its clip map.
+   * For non-skinned assets (e.g. shadow_wolf which has 0 anims) returns null —
+   * caller should fall back to place().
+   */
+  placeAnimatedMob(assetName: string): { model: THREE.Object3D; clips: Map<string, THREE.AnimationClip> } | null {
+    const template = this.cache.get(assetName);
+    if (!template) return null;
+    const def = ASSET_DEFS[assetName];
+    if (!def) return null;
+    const sourceClips = this.animations.get(assetName);
+    if (!sourceClips || sourceClips.length === 0) return null;
+
+    const wrapper = new THREE.Group();
+    wrapper.name = `env_${assetName}`;
+    const cloned = SkeletonUtils.clone(template);
+    cloned.traverse((c) => {
+      if (c instanceof THREE.Mesh || c instanceof THREE.SkinnedMesh) {
+        c.castShadow = true;
+        c.receiveShadow = true;
+      }
+    });
+    wrapper.add(cloned);
+
+    const s = def.scale;
+    wrapper.scale.set(s, s, s);
+    const groundLift = (this.groundOffsets.get(assetName) ?? 0) * s;
+    const extraLift = def.yOffset * s;
+    wrapper.position.set(0, groundLift + extraLift, 0);
+
+    // Some source GLBs (Quaternius Easy Enemy Pack: frog/rat/snake/spider/wasp)
+    // were exported with sibling armatures' clips bundled in. Filter to only
+    // clips whose name starts with the matching `{Asset}Armature|` prefix so
+    // a spider doesn't play the frog attack. Assets without that prefix
+    // pattern (Big/Blob/Flying packs use plain "Idle", "Walk", …) pass
+    // through unchanged.
+    const armaturePrefix = `${assetName.toLowerCase()}armature`;
+    const hasArmaturePrefixed = sourceClips.some((c) => /^[A-Za-z]+Armature\|/.test(c.name));
+    const clips = new Map<string, THREE.AnimationClip>();
+    for (const clip of sourceClips) {
+      if (hasArmaturePrefixed && !clip.name.toLowerCase().startsWith(armaturePrefix)) continue;
+      clips.set(clip.name, clip);
+    }
+    return { model: wrapper, clips };
+  }
+
+  /** True if the asset has at least one animation clip (skinned mob). */
+  isAnimatedAsset(assetName: string): boolean {
+    return (this.animations.get(assetName)?.length ?? 0) > 0;
+  }
+
+  /**
    * Get the asset name for an overlay tile index.
    * Uses town assets when loaded, falls back to original env assets.
    * Returns undefined if the tile doesn't map to a GLB asset.
@@ -429,7 +756,7 @@ export class EnvironmentAssets {
     ix: number,
     iz: number,
     isTreeTile?: (gx: number, gz: number) => boolean,
-  ): { asset: string; jitterX: number; jitterZ: number; scaleMul: number } | null {
+  ): { asset: string; jitterX: number; jitterZ: number; scaleMul: number; rotY: number } | null {
     // Poisson-style thinning: only spawn a tree if THIS tile's hash is the
     // strict minimum across its 5x5 neighborhood of tree-tiles. Guarantees
     // ≥2 empty tiles between trees regardless of how dense the tree-tile
@@ -464,15 +791,66 @@ export class EnvironmentAssets {
     else if (r < 0.85) scaleMul = 0.65 + hash01(ix, iz, 6) * 0.45; // 70% normal   (0.65–1.10)
     else               scaleMul = 1.10 + hash01(ix, iz, 6) * 0.40; // 15% giants   (1.10–1.50)
 
+    const rotY = hash01(ix, iz, 7) * Math.PI * 2;
     const townName = pickFrom(townPool);
     if (townName && this.cache.has(townName)) {
-      return { asset: townName, jitterX, jitterZ, scaleMul };
+      return { asset: townName, jitterX, jitterZ, scaleMul, rotY };
     }
     const envName = pickFrom(envPool);
     if (envName && this.cache.has(envName)) {
-      return { asset: envName, jitterX, jitterZ, scaleMul };
+      return { asset: envName, jitterX, jitterZ, scaleMul, rotY };
     }
     return null;
+  }
+
+  /**
+   * Return the flat sub-mesh list for a cached asset. Each entry shares
+   * the GLB's geometry/material (no clone) and carries the sub-mesh's local
+   * TRS as a matrix — match the flattening place() does so InstancedMesh
+   * placements visually equal cloned placements.
+   */
+  getAssetSubMeshes(assetName: string): { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[]; localMatrix: THREE.Matrix4 }[] | null {
+    const template = this.cache.get(assetName);
+    if (!template) return null;
+    const subs: { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[]; localMatrix: THREE.Matrix4 }[] = [];
+    template.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const local = new THREE.Matrix4().compose(
+          child.position,
+          new THREE.Quaternion().setFromEuler(child.rotation),
+          child.scale,
+        );
+        subs.push({ geometry: child.geometry, material: child.material, localMatrix: local });
+      }
+    });
+    return subs;
+  }
+
+  /**
+   * Compute the wrapper transform that place() would apply for this asset.
+   * Writes into `out` and returns true on success. Used by InstancedMesh
+   * placement so each instance matrix = wrapperMatrix * subMesh.localMatrix.
+   */
+  getAssetWrapperMatrix(
+    assetName: string,
+    x: number,
+    y: number,
+    z: number,
+    extraScale: number,
+    rotY: number,
+    out: THREE.Matrix4,
+  ): boolean {
+    const def = ASSET_DEFS[assetName] ?? TOWN_ASSET_DEFS[assetName];
+    if (!def) return false;
+    const s = def.scale * extraScale;
+    const groundLift = (this.groundOffsets.get(assetName) ?? 0) * s;
+    const extraLift = def.yOffset * s;
+    out.compose(
+      new THREE.Vector3(x, y + groundLift + extraLift, z),
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY),
+      new THREE.Vector3(s, s, s),
+    );
+    return true;
   }
 
   /* ───── Town assets (Kenney Fantasy Town Kit) ───── */
@@ -533,13 +911,21 @@ export class EnvironmentAssets {
     return Object.keys(TOWN_ASSET_DEFS);
   }
 
-  /** Match a mob entity name to a GLB asset. Returns undefined if no match. */
+  /** Match a mob entity name to a GLB asset. Word-boundary match prevents false
+   *  positives like "Gorath" matching the "rat" keyword. Returns undefined if no match. */
   getAssetForMob(entityName: string): string | undefined {
     const lower = entityName.toLowerCase();
     for (const [keyword, asset] of MOB_NAME_TO_ASSET) {
-      if (lower.includes(keyword)) return asset;
+      const re = new RegExp(`\\b${keyword}\\b`, "i");
+      if (re.test(lower)) return asset;
     }
     return undefined;
+  }
+
+  /** Returns a per-name color tint (0xRRGGBB) to multiply against MeshToonMaterial.color,
+   *  e.g. "Diseased Wolf" → sickly green, "Frost Giant" → ice blue. Null = no tint. */
+  getTintForMob(entityName: string): number | null {
+    return getTintForMob(entityName);
   }
 
   private async loadAsset(name: string, file: string, base = MODEL_BASE): Promise<THREE.Object3D> {
@@ -579,7 +965,10 @@ export class EnvironmentAssets {
               c.material = toonMats.length === 1 ? toonMats[0] : toonMats;
             }
           });
-          console.log(`[EnvAssets] ${name}: ${meshCount} meshes (toon), bottomY=${bottomY.toFixed(3)}`);
+          if (gltf.animations && gltf.animations.length > 0) {
+            this.animations.set(name, gltf.animations);
+          }
+          console.log(`[EnvAssets] ${name}: ${meshCount} meshes (toon), ${gltf.animations?.length ?? 0} anims, bottomY=${bottomY.toFixed(3)}`);
           this.cache.set(name, root);
           this.loading.delete(name);
           resolve(root);

@@ -28,10 +28,12 @@ export class ActionBar {
   private render() {
     let html = "";
     for (const btn of this.buttons) {
-      html += `<button class="ab-btn" data-id="${btn.id}" title="${btn.label} (${btn.key})">`;
+      const keyHint = btn.key ? ` <kbd class="ab-tt-key">${btn.key}</kbd>` : "";
+      html += `<button class="ab-btn" data-id="${btn.id}">`;
       html += `<span class="ab-icon">${btn.icon}</span>`;
       html += `<span class="ab-key">${btn.key}</span>`;
       html += `<span class="ab-badge" data-id="${btn.id}" hidden></span>`;
+      html += `<span class="ab-tooltip">${btn.label}${keyHint}</span>`;
       html += `</button>`;
     }
     this.container.innerHTML = html;
@@ -93,6 +95,28 @@ export class ActionBar {
         gap: 4px;
         z-index: 18;
         pointer-events: auto;
+        max-width: calc(100vw - 16px);
+        flex-wrap: nowrap;
+        justify-content: flex-end;
+      }
+
+      /* Single-row layout on phones — buttons shrink so all icons stay
+         visible without wrapping. Sized so 8 buttons fit in 360px CSS. */
+      @media (max-width: 600px) {
+        #action-bar { gap: 3px; right: 8px; max-width: calc(100vw - 12px); }
+        .ab-btn { width: 38px !important; height: 38px !important; }
+        .ab-icon { font-size: 17px !important; }
+        .ab-key { display: none; }
+      }
+      @media (max-width: 480px) {
+        #action-bar { gap: 2px; right: 6px; max-width: calc(100vw - 8px); }
+        .ab-btn { width: 34px !important; height: 34px !important; border-radius: 5px; }
+        .ab-icon { font-size: 15px !important; }
+      }
+      @media (max-width: 380px) {
+        #action-bar { gap: 2px; right: 4px; max-width: calc(100vw - 4px); }
+        .ab-btn { width: 30px !important; height: 30px !important; border-radius: 4px; }
+        .ab-icon { font-size: 13px !important; }
       }
 
       .ab-btn {
@@ -160,6 +184,55 @@ export class ActionBar {
       @keyframes ab-pulse {
         0%   { box-shadow: 0 0 0 0 rgba(255, 80, 80, 0.75); }
         100% { box-shadow: 0 0 0 16px rgba(255, 80, 80, 0); }
+      }
+
+      .ab-tooltip {
+        position: absolute;
+        bottom: calc(100% + 10px);
+        left: 50%;
+        transform: translateX(-50%) translateY(4px);
+        background: rgba(8, 14, 24, 0.97);
+        border: 1px solid rgba(68, 255, 136, 0.28);
+        border-radius: 6px;
+        padding: 5px 9px;
+        white-space: nowrap;
+        font: 11px/1.4 monospace;
+        color: #c8d8e8;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.14s ease, transform 0.14s ease;
+        z-index: 19;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.55);
+      }
+      /* small arrow pointing down */
+      .ab-tooltip::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: rgba(68, 255, 136, 0.28);
+      }
+      .ab-btn:hover .ab-tooltip {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      /* hide on mobile — touch users can't hover */
+      @media (max-width: 600px) {
+        .ab-tooltip { display: none; }
+      }
+
+      .ab-tt-key {
+        display: inline-block;
+        background: rgba(68, 255, 136, 0.1);
+        border: 1px solid rgba(68, 255, 136, 0.3);
+        border-radius: 3px;
+        padding: 0 4px;
+        font: bold 9px/15px monospace;
+        color: rgba(68, 255, 136, 0.85);
+        margin-left: 5px;
+        vertical-align: middle;
       }
     `;
     document.head.appendChild(style);

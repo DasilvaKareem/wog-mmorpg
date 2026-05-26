@@ -229,9 +229,6 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedLevel = Math.max(1, Number(saved?.level ?? level ?? 1) || 1);
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
-    const resolvedMaxRunEnergy = Math.max(1, Number(saved?.maxRunEnergy ?? 100) || 100);
-    const resolvedRunEnergy = Math.max(0, Math.min(Number(saved?.runEnergy ?? resolvedMaxRunEnergy) || 0, resolvedMaxRunEnergy));
-    const resolvedRunModeEnabled = saved?.runModeEnabled ?? false;
     const resolvedCalling = (saved?.calling as "adventurer" | "farmer" | "merchant" | "craftsman" | undefined) ?? calling;
     // Backfill appearance for legacy characters that lack it
     const needsAppearance = type === "player" && !saved?.gender && !gender;
@@ -298,9 +295,6 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(resolvedOrigin != null && { origin: resolvedOrigin }),
       ...(derivedStats != null && { stats: derivedStats }),
       ...(type === "player" && {
-        runEnergy: resolvedRunEnergy,
-        maxRunEnergy: resolvedMaxRunEnergy,
-        runModeEnabled: resolvedRunModeEnabled,
         isRunning: false,
       }),
       kills: saved?.kills ?? 0,
@@ -382,9 +376,6 @@ export function registerSpawnOrders(server: FastifyInstance) {
         storyFlags: [],
         learnedTechniques: entity.learnedTechniques ?? [],
         professions: [],
-        runEnergy: resolvedRunEnergy,
-        maxRunEnergy: resolvedMaxRunEnergy,
-        runModeEnabled: resolvedRunModeEnabled,
       });
 
       // First-save spawn path can create a durable character row without passing

@@ -35,8 +35,14 @@ export class DesktopControls {
   /** Optional collision check — return false to block movement */
   collisionCheck: ((x: number, z: number) => boolean) | null = null;
 
-  // Ground plane for click-to-move raycasting
+  // Ground plane fallback for click-to-move raycasting. Used only if the
+  // ray misses the terrain mesh entirely (e.g. clicking on the sky).
   readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  /** Terrain meshes to raycast against. Set by main.ts via setTerrainGroup. */
+  private terrainGroup: THREE.Object3D | null = null;
+  /** Reusable raycaster to avoid per-click allocation. */
+  private clickRaycaster = new THREE.Raycaster();
 
   constructor(
     private camera: THREE.PerspectiveCamera,
@@ -57,6 +63,9 @@ export class DesktopControls {
     domElement.addEventListener("gestureend", this.onGesture, { passive: false });
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
+    // Clear held keys when an input/textarea gains focus so movement keys can't
+    // get stuck in the pressed state when the user clicks into a text field.
+    window.addEventListener("focusin", this.onFocusIn);
 
     this.updateCamera();
   }
@@ -168,9 +177,42 @@ export class DesktopControls {
     return raycaster.ray;
   }
 
-  /** Get world position where a screen click hits the ground plane */
+  /**
+   * Provide the scene group containing the loaded terrain meshes. Click-to-move
+   * uses it for proper raycasting against the displaced terrain — without it
+   * we fall back to a flat Y=0 plane, which mis-locates the click anywhere
+   * the terrain has been pushed up by the mountain biome profiles.
+   */
+  setTerrainGroup(group: THREE.Object3D | null) {
+    this.terrainGroup = group;
+  }
+
+  /**
+   * Get the world position where a screen click lands on the visible terrain.
+   * Raycasts against actual terrain meshes first; only falls back to the flat
+   * ground plane if the ray misses every mesh (e.g. clicking sky / fog).
+   */
   getGroundHit(screenX: number, screenY: number): THREE.Vector3 | null {
     const ray = this.getRay(screenX, screenY);
+
+    if (this.terrainGroup) {
+      this.clickRaycaster.ray.copy(ray);
+      const hits = this.clickRaycaster.intersectObject(this.terrainGroup, true);
+      // Walk hits front-to-back (Three.js returns them sorted by distance) and
+      // accept the first one whose mesh belongs to terrain ground geometry.
+      // Excludes border energy walls, horizon silhouettes, and any non-ground
+      // overlays that share the world group.
+      for (const h of hits) {
+        let n: THREE.Object3D | null = h.object;
+        while (n) {
+          const name = n.name ?? "";
+          if (name.startsWith("ground-")) return h.point.clone();
+          if (name === "borders" || name === "horizon-backdrop") break;
+          n = n.parent;
+        }
+      }
+    }
+
     const hit = new THREE.Vector3();
     if (ray.intersectPlane(this.groundPlane, hit)) return hit;
     return null;
@@ -223,7 +265,7 @@ export class DesktopControls {
     if (!this.inputEnabled) return;
     if (this.landingMode) return;
     e.preventDefault();
-    this.distance = Math.max(5, Math.min(50, this.distance + e.deltaY * 0.02));
+    this.distance = Math.max(5, Math.min(25, this.distance + e.deltaY * 0.02));
     this.updateCamera();
   };
 
@@ -246,6 +288,13 @@ export class DesktopControls {
     if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
 
     this.keys.delete(e.key.toLowerCase());
+  };
+
+  private onFocusIn = (e: FocusEvent) => {
+    const target = e.target as HTMLElement;
+    if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") {
+      this.keys.clear();
+    }
   };
 
   // ── Touch handlers (mobile orbit + pinch-zoom; tap passes through as click) ──
@@ -280,7 +329,7 @@ export class DesktopControls {
       const [a, b] = [e.touches[0], e.touches[1]];
       const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
       const ratio = this.pinchStartDist / Math.max(1, d);
-      this.distance = Math.max(5, Math.min(50, this.pinchStartDistance * ratio));
+      this.distance = Math.max(5, Math.min(25, this.pinchStartDistance * ratio));
       this.updateCamera();
       e.preventDefault();
       return;
@@ -342,5 +391,6 @@ export class DesktopControls {
     this.domElement.removeEventListener("gestureend", this.onGesture);
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("focusin", this.onFocusIn);
   }
 }

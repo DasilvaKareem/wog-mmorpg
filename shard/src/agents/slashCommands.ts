@@ -344,7 +344,7 @@ cmd({
     if (!args) {
       const config = await getAgentConfig(ctx.authWallet);
       return {
-        response: `Current focus: ${config?.focus ?? "unknown"} | Strategy: ${config?.strategy ?? "balanced"}\n\nUsage: /focus <activity> [zone]\nActivities: combat, questing, gathering, crafting, alchemy, cooking, enchanting, shopping, trading, traveling, learning, idle`,
+        response: `Current focus: ${config?.focus ?? "unknown"} | Strategy: ${config?.strategy ?? "balanced"}\n\nUsage: /focus <activity> [zone]\nActivities: combat, questing, gathering, crafting, alchemy, cooking, enchanting, shopping, trading, traveling, learning, idle, user`,
       };
     }
 
@@ -367,11 +367,13 @@ cmd({
       learn: "learning", learning: "learning", train: "learning",
       dungeon: "dungeon", dungeons: "dungeon", gate: "dungeon",
       idle: "idle", rest: "idle", stop: "idle", afk: "idle",
+      user: "user", manual: "user", control: "user", driver: "user", wait: "user",
+      party: "party", group: "party", team: "party",
     };
 
     const focus = VALID_FOCUSES[focusInput];
     if (!focus) {
-      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, skinning, enchanting, shopping, trading, traveling, learning, dungeon, idle` };
+      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, skinning, enchanting, shopping, trading, traveling, learning, dungeon, party, idle, user` };
     }
 
     const patch: Record<string, unknown> = { focus };
@@ -392,7 +394,12 @@ cmd({
 
     await patchAgentConfig(ctx.authWallet, patch);
     const runner = agentManager.getRunner(ctx.authWallet);
-    if (runner) await runner.clearScript();
+    if (runner) {
+      await runner.clearScript();
+      if (focus === "user" || focus === "idle") {
+        await runner.clearQueue();
+      }
+    }
 
     const zoneMsg = patch.targetZone ? ` → ${patch.targetZone}` : "";
     return { response: `Focus set to: ${focus}${zoneMsg}`, configChanged: true };

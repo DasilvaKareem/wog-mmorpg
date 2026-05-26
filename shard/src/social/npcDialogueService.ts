@@ -1,5 +1,8 @@
+import { Type, type Schema } from "@google/genai";
 import type { Entity } from "../world/zoneRuntime.js";
-import { getAvailableQuestsForPlayer, isQuestComplete, QUEST_CATALOG, type ActiveQuest, type Quest } from "./questSystem.js";
+import { getRedis } from "../redis.js";
+import { gemini } from "../agents/geminiClient.js";
+import { getAvailableQuestsForPlayer, isQuestComplete, npcMatchesQuestId, QUEST_CATALOG, type ActiveQuest, type Quest } from "./questSystem.js";
 import { getNpcPersona, type NpcPersona } from "./npcPersonas.js";
 import {
   validateNpcDialogueDraft,
@@ -45,14 +48,15 @@ export interface NpcDialogueResponse {
   };
 }
 
-const NPC_DIALOGUE_API_BASE_URL = process.env.NPC_DIALOGUE_API_BASE_URL?.trim() || "";
-const NPC_DIALOGUE_API_KEY = process.env.NPC_DIALOGUE_API_KEY?.trim() || "";
-const NPC_DIALOGUE_MODEL = process.env.NPC_DIALOGUE_MODEL?.trim() || "gpt-4.1-mini";
+const NPC_DIALOGUE_MODEL = process.env.NPC_DIALOGUE_MODEL?.trim() || "gemini-2.5-flash-lite";
 const NPC_DIALOGUE_TIMEOUT_MS = Number(process.env.NPC_DIALOGUE_TIMEOUT_MS ?? "12000");
-const NPC_DIALOGUE_TEMPERATURE = Number(
-  process.env.NPC_DIALOGUE_TEMPERATURE
-  ?? (NPC_DIALOGUE_MODEL.toLowerCase().includes("schematron") ? "0.2" : "0.6"),
+const NPC_DIALOGUE_TEMPERATURE = Number(process.env.NPC_DIALOGUE_TEMPERATURE ?? "0.6");
+const NPC_DIALOGUE_LLM_ENABLED = Boolean(
+  process.env.GOOGLE_CLOUD_PROJECT?.trim() || process.env.GEMINI_API_KEY?.trim(),
 );
+/** Force LLM on every turn (debug/eval). Default: skip LLM whenever the
+ * deterministic branch matched a confident keyword pattern. */
+const NPC_DIALOGUE_FORCE_LLM = process.env.NPC_DIALOGUE_FORCE_LLM === "1";
 const SCOUT_KAELA_NAME = "Scout Kaela";
 const SCOUT_KAELA_BRIEFED_FLAG = "tutorial:scout_kaela_briefed";
 const NPC_DIALOGUE_ALLOWED_INTENTS: NpcDialogueIntent[] = [
@@ -65,6 +69,129 @@ const NPC_DIALOGUE_ALLOWED_INTENTS: NpcDialogueIntent[] = [
   "redirect",
   "refuse",
 ];
+
+// ── Redis-backed conversation history + visit counter ────────────────
+// The client supplies recentHistory for back-compat, but a malicious client
+// could replay a fabricated history to coax the LLM. Server-owned history
+// keyed by (player wallet, npc entityId) is authoritative. History expires
+// after an hour of inactivity; expiry implicitly marks a new "session".
+
+const NPC_HISTORY_PREFIX = "npc:history";
+const NPC_VISITS_PREFIX = "npc:visits";
+const NPC_RL_MIN_PREFIX = "npc:rl:min";
+const NPC_RL_DAY_PREFIX = "npc:rl:day";
+const NPC_HISTORY_MAX_TURNS = 12;
+const NPC_HISTORY_TTL_SEC = 60 * 60;
+const NPC_RL_MIN_LIMIT = 20;
+const NPC_RL_DAY_LIMIT = 500;
+const NPC_VISITS_TTL_SEC = 60 * 60 * 24 * 30; // refresh on each visit
+
+function historyKey(wallet: string, npcEntityId: string): string {
+  return `${NPC_HISTORY_PREFIX}:${wallet.toLowerCase()}:${npcEntityId}`;
+}
+function visitsKey(wallet: string, npcName: string): string {
+  return `${NPC_VISITS_PREFIX}:${wallet.toLowerCase()}:${npcName}`;
+}
+
+async function loadServerHistory(wallet: string | undefined, npcEntityId: string): Promise<NpcDialogueHistoryEntry[]> {
+  if (!wallet) return [];
+  const redis = getRedis();
+  if (!redis) return [];
+  try {
+    const raw: string[] = await redis.lrange(historyKey(wallet, npcEntityId), 0, -1);
+    const out: NpcDialogueHistoryEntry[] = [];
+    for (const item of raw) {
+      try {
+        const parsed = JSON.parse(item);
+        if (parsed && (parsed.role === "player" || parsed.role === "npc") && typeof parsed.content === "string") {
+          out.push({ role: parsed.role, content: parsed.content });
+        }
+      } catch { /* skip malformed */ }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function appendServerHistory(
+  wallet: string | undefined,
+  npcEntityId: string,
+  entries: NpcDialogueHistoryEntry[],
+): Promise<void> {
+  if (!wallet || entries.length === 0) return;
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    const key = historyKey(wallet, npcEntityId);
+    const serialized = entries.map((e) => JSON.stringify({ role: e.role, content: e.content.slice(0, 220) }));
+    await redis.rpush(key, ...serialized);
+    await redis.ltrim(key, -NPC_HISTORY_MAX_TURNS, -1);
+    await redis.expire(key, NPC_HISTORY_TTL_SEC);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Bump the (player, npc) visit counter when Redis history is empty — that's
+ * our proxy for "new session". Returns the (possibly incremented) counter. */
+async function getOrBumpVisitCount(
+  wallet: string | undefined,
+  npcName: string,
+  serverHistoryWasEmpty: boolean,
+): Promise<number> {
+  if (!wallet) return 0;
+  const redis = getRedis();
+  if (!redis) return 0;
+  try {
+    const k = visitsKey(wallet, npcName);
+    let value: number;
+    if (serverHistoryWasEmpty) {
+      value = await redis.incr(k);
+    } else {
+      const raw = await redis.get(k);
+      value = raw ? Number(raw) || 0 : 0;
+    }
+    await redis.expire(k, NPC_VISITS_TTL_SEC);
+    return value;
+  } catch {
+    return 0;
+  }
+}
+
+/** Per-player rate limit: returns true if the call should proceed. */
+export async function checkNpcDialogueRateLimit(wallet: string | undefined): Promise<{ allowed: boolean; reason?: "minute" | "day" }> {
+  if (!wallet) return { allowed: true };
+  const redis = getRedis();
+  if (!redis) return { allowed: true };
+  try {
+    const minKey = `${NPC_RL_MIN_PREFIX}:${wallet.toLowerCase()}`;
+    const dayKey = `${NPC_RL_DAY_PREFIX}:${wallet.toLowerCase()}`;
+    const minCount = await redis.incr(minKey);
+    if (minCount === 1) await redis.expire(minKey, 60);
+    if (minCount > NPC_RL_MIN_LIMIT) return { allowed: false, reason: "minute" };
+    const dayCount = await redis.incr(dayKey);
+    if (dayCount === 1) await redis.expire(dayKey, 60 * 60 * 24);
+    if (dayCount > NPC_RL_DAY_LIMIT) return { allowed: false, reason: "day" };
+    return { allowed: true };
+  } catch {
+    return { allowed: true };
+  }
+}
+
+/** Deterministic fallback when the rate limit fires. The route handler can
+ * return this without ever touching the LLM. */
+export function buildRateLimitedReply(npc: Entity): NpcDialogueResponse {
+  const persona = getNpcPersona(npc);
+  return {
+    provider: "deterministic",
+    persona: { id: persona.id, role: persona.role, archetype: persona.archetype, tone: persona.tone },
+    reply: `${npc.name} is tied up — give them a moment.`,
+    intent: "redirect",
+    suggestedActions: [],
+    questContext: { availableQuestIds: [], activeQuestIds: [], completableQuestIds: [] },
+  };
+}
 
 function sanitizeHistory(history: NpcDialogueHistoryEntry[]): NpcDialogueHistoryEntry[] {
   return history
@@ -97,7 +224,7 @@ function buildQuestState(player: Entity, npc: Entity): QuestStateView {
   const storyFlags = player.storyFlags ?? [];
 
   const available = getAvailableQuestsForPlayer(
-    npc.name,
+    npc,
     completedQuestIds,
     activeQuestIds,
     storyFlags,
@@ -106,7 +233,7 @@ function buildQuestState(player: Entity, npc: Entity): QuestStateView {
   const active = (player.activeQuests ?? [])
     .map((entry: ActiveQuest) => {
       const quest = QUEST_CATALOG.find((candidate) => candidate.id === entry.questId);
-      if (!quest || quest.npcId !== npc.name) return null;
+      if (!quest || !npcMatchesQuestId(npc, quest.npcId)) return null;
       const required = quest.objective.count;
       const complete = isQuestComplete(quest, entry.progress);
       return { quest, progress: entry.progress, required, complete };
@@ -124,9 +251,14 @@ function buildQuestState(player: Entity, npc: Entity): QuestStateView {
 
 function defaultSuggestedActions(persona: NpcPersona, questState: QuestStateView): SuggestedNpcAction[] {
   if (questState.completable.length > 0) {
+    const top = questState.completable[0].quest;
     return [
-      { label: "Turn it in", prompt: `I'm ready to turn in ${questState.completable[0].quest.title}.` },
-      { label: "Ask reward", prompt: `What do I earn for ${questState.completable[0].quest.title}?` },
+      {
+        label: "Turn in",
+        prompt: `I'm ready to turn in ${top.title}.`,
+        action: { kind: "complete_quest", questId: top.id },
+      },
+      { label: "Ask reward", prompt: `What do I earn for ${top.title}?` },
     ];
   }
   if (questState.active.length > 0) {
@@ -136,9 +268,14 @@ function defaultSuggestedActions(persona: NpcPersona, questState: QuestStateView
     ];
   }
   if (questState.available.length > 0) {
+    const top = questState.available[0];
     return [
-      { label: "Hear the job", prompt: `Tell me about ${questState.available[0].title}.` },
-      { label: "What's urgent?", prompt: "What needs doing most right now?" },
+      {
+        label: "Accept",
+        prompt: `I'll take ${top.title}.`,
+        action: { kind: "accept_quest", questId: top.id },
+      },
+      { label: "Hear the job", prompt: `Tell me about ${top.title}.` },
     ];
   }
   return [
@@ -154,25 +291,92 @@ function pick<T>(arr: T[], seed: string): T {
   return arr[Math.abs(h) % arr.length];
 }
 
+/** One-line ambient flavor scoped to the NPC's role. Used by the idle and
+ * lore-fallback branches so a merchant doesn't deliver guard-captain lines. */
+function typeFlavor(npcType: string | undefined, pName: string, seed: string): string {
+  const pool = TYPE_FLAVOR[npcType ?? ""] ?? TYPE_FLAVOR.default;
+  return pick(pool, seed).replace(/\{name\}/g, pName);
+}
+
+const TYPE_FLAVOR: Record<string, string[]> = {
+  merchant: [
+    "Prices are firm today, {name}. Coin first, conversation second.",
+    "Browse if you've coin to spend. Otherwise the shelves are for paying eyes.",
+    "Word from the road: caravans are thinner this season. Stock won't last.",
+  ],
+  auctioneer: [
+    "The floor's quiet just now. Bring something worth bidding on and I'll wake the room.",
+    "Listings come and go. Check back when you've got coin to spend, {name}.",
+    "Hot lots move fast — keep an eye on the board.",
+  ],
+  "guild-registrar": [
+    "Founding a banner takes coin and conviction. Either bring both or come back later.",
+    "Charters cost gold, {name}. The vault remembers every deposit.",
+    "Proposals open daily. Officers vote, the chain enforces.",
+  ],
+  "arena-master": [
+    "Step onto the sand when you're ready to be tested. The crowd has no patience.",
+    "Bronze, Silver, Gold — pick your tier, {name}. Reputation is earned in blood.",
+    "Queues are open. Bring your strongest build, not your favorite.",
+  ],
+  "profession-trainer": [
+    "Skill is a craft, {name}. Bring materials and time, leave with mastery.",
+    "Every recipe begins with a question. What do you want to make?",
+    "Train hard. Practice harder. The materials don't lie.",
+  ],
+  "lore-npc": [
+    "There are old things here, {name}. Listen carefully and you'll hear them.",
+    "Stories outlast their tellers. Be patient and the land will speak.",
+    "Some truths are buried for a reason. Some aren't.",
+  ],
+  "quest-giver": [
+    "I keep a list of what needs doing. Ask, and I'll match it to you.",
+    "Idle hands don't pay in Geneva, {name}. Bring me intent.",
+    "Plenty of work passes through here. Most of it dangerous.",
+  ],
+  trainer: [
+    "Train your blade, your stance, your wits — all three or none.",
+    "Skill bends to discipline. Show me discipline.",
+  ],
+  default: [
+    "Geneva keeps moving whether we watch or not, {name}.",
+    "Stay sharp. The roads aren't gentle to the careless.",
+    "Whatever you need, ask plainly — I've no patience for riddles.",
+  ],
+};
+
+interface DeterministicResult {
+  draft: NpcDialogueDraft;
+  /** True when the deterministic branch matched a strong keyword pattern
+   * (greeting+quest, accept, directions, reward, turn-in, quest/help). When
+   * true, the LLM call is skipped — saves tokens on the 80%+ of NPC turns
+   * that don't need flavor. False for lore requests, off-script input, and
+   * the idle/no-quest fallback — those are where Gemini earns its keep. */
+  confident: boolean;
+}
+
 function buildDeterministicDraft(
   persona: NpcPersona,
   npc: Entity,
   player: Entity,
   message: string,
   questState: QuestStateView,
-): NpcDialogueDraft {
+): DeterministicResult {
   const text = message.trim().toLowerCase();
   const hasBriefing = (player.storyFlags ?? []).includes(SCOUT_KAELA_BRIEFED_FLAG);
   const pName = player.name ?? "adventurer";
 
   if (npc.name === SCOUT_KAELA_NAME && !hasBriefing) {
     return {
-      reply: "Before you chase glory, get the basics straight. Finish my briefing, then speak with Guard Captain Marcus to begin the village chain.",
-      intent: "tutorial",
-      suggestedActions: [
-        { label: "Finish briefing", prompt: "Give me the short version again." },
-        { label: "Find Marcus", prompt: "Where exactly do I find Guard Captain Marcus?" },
-      ],
+      confident: true,
+      draft: {
+        reply: "Before you chase glory, get the basics straight. Finish my briefing, then speak with Guard Captain Marcus to begin the village chain.",
+        intent: "tutorial",
+        suggestedActions: [
+          { label: "Finish briefing", prompt: "Give me the short version again." },
+          { label: "Find Marcus", prompt: "Where exactly do I find Guard Captain Marcus?" },
+        ],
+      },
     };
   }
 
@@ -185,13 +389,16 @@ function buildDeterministicDraft(
       `I can see it in your eyes, ${pName}. "${quest.title}" is done. Let's settle up.`,
     ];
     return {
-      reply: pick(replies, text),
-      intent: "quest_turn_in",
-      referencesQuestId: quest.id,
-      suggestedActions: [
-        { label: "Turn in quest", prompt: `I'm ready to turn in ${quest.title}.` },
-        { label: "Review reward", prompt: `Remind me what ${quest.title} pays.` },
-      ],
+      confident: true,
+      draft: {
+        reply: pick(replies, text),
+        intent: "quest_turn_in",
+        referencesQuestId: quest.id,
+        suggestedActions: [
+          { label: "Turn in quest", prompt: `I'm ready to turn in ${quest.title}.` },
+          { label: "Review reward", prompt: `Remind me what ${quest.title} pays.` },
+        ],
+      },
     };
   }
 
@@ -199,10 +406,13 @@ function buildDeterministicDraft(
   if (/\b(reward|pay|earn|gold|xp)\b/.test(text) && questState.active.length > 0) {
     const quest = questState.active[0].quest;
     return {
-      reply: `"${quest.title}" pays out when the work is done. Finish ${objectiveLabel(quest).toLowerCase()} and come back to me.`,
-      intent: "quest_progress",
-      referencesQuestId: quest.id,
-      suggestedActions: defaultSuggestedActions(persona, questState),
+      confident: true,
+      draft: {
+        reply: `"${quest.title}" pays out when the work is done. Finish ${objectiveLabel(quest).toLowerCase()} and come back to me.`,
+        intent: "quest_progress",
+        referencesQuestId: quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      },
     };
   }
 
@@ -211,19 +421,25 @@ function buildDeterministicDraft(
     if (questState.active.length > 0) {
       const quest = questState.active[0];
       return {
-        reply: `Stay focused on "${quest.quest.title}". Your next step: ${objectiveLabel(quest.quest)}. You're ${quest.progress}/${quest.required} through it.`,
-        intent: "quest_progress",
-        referencesQuestId: quest.quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: `Stay focused on "${quest.quest.title}". Your next step: ${objectiveLabel(quest.quest)}. You're ${quest.progress}/${quest.required} through it.`,
+          intent: "quest_progress",
+          referencesQuestId: quest.quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
     if (questState.available.length > 0) {
       const quest = questState.available[0];
       return {
-        reply: `If you're ready for work, start with "${quest.title}". ${quest.description}`,
-        intent: "offer_quest",
-        referencesQuestId: quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: `If you're ready for work, start with "${quest.title}". ${quest.description}`,
+          intent: "offer_quest",
+          referencesQuestId: quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
   }
@@ -238,10 +454,13 @@ function buildDeterministicDraft(
         `Glad to hear it. Head out and ${objectiveLabel(quest).toLowerCase()} for "${quest.title}". Report back when it's finished.`,
       ];
       return {
-        reply: pick(replies, text),
-        intent: "offer_quest",
-        referencesQuestId: quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: pick(replies, text),
+          intent: "offer_quest",
+          referencesQuestId: quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
     if (questState.active.length > 0) {
@@ -251,10 +470,13 @@ function buildDeterministicDraft(
         `I like the enthusiasm. You've got "${quest.quest.title}" in progress. ${objectiveLabel(quest.quest)} and you're ${quest.progress}/${quest.required} done.`,
       ];
       return {
-        reply: pick(replies, text),
-        intent: "quest_progress",
-        referencesQuestId: quest.quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: pick(replies, text),
+          intent: "quest_progress",
+          referencesQuestId: quest.quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
   }
@@ -269,10 +491,13 @@ function buildDeterministicDraft(
         `Good to see you, ${pName}. How's "${quest.quest.title}" going? ${quest.progress} of ${quest.required} so far.`,
       ];
       return {
-        reply: pick(replies, text),
-        intent: "quest_progress",
-        referencesQuestId: quest.quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: pick(replies, text),
+          intent: "quest_progress",
+          referencesQuestId: quest.quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
     if (questState.available.length > 0) {
@@ -283,19 +508,30 @@ function buildDeterministicDraft(
         `Welcome, ${pName}. If you're looking for purpose, I've got "${quest.title}" on the board.`,
       ];
       return {
-        reply: pick(replies, text),
-        intent: "offer_quest",
-        referencesQuestId: quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: pick(replies, text),
+          intent: "offer_quest",
+          referencesQuestId: quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
+    // Greeting an NPC with nothing to offer — pre-canned reply is fine,
+    // not worth a Gemini round-trip. Tint with NPC-type flavor so a merchant
+    // doesn't sound like a guard.
     return {
-      reply: pick([
-        `${pName}. Not much to report right now. Check back later — things change fast around here.`,
-        `Good to see you, ${pName}. No urgent work at the moment, but stay sharp.`,
-      ], text),
-      intent: "greeting",
-      suggestedActions: defaultSuggestedActions(persona, questState),
+      confident: true,
+      draft: {
+        reply: pick([
+          `${pName}. ${typeFlavor(npc.type, pName, text)}`,
+          `Good to see you, ${pName}. ${typeFlavor(npc.type, pName, `${text}.alt`)}`,
+          `${typeFlavor(npc.type, pName, text)} — what brings you by, ${pName}?`,
+          `Ah, ${pName}. Quiet shift today. ${typeFlavor(npc.type, pName, `${text}.q`)}`,
+        ], text),
+        intent: "greeting",
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      },
     };
   }
 
@@ -304,54 +540,80 @@ function buildDeterministicDraft(
     if (questState.active.length > 0) {
       const quest = questState.active[0];
       return {
-        reply: `You've already got "${quest.quest.title}" on your plate. ${objectiveLabel(quest.quest)} — ${quest.progress}/${quest.required} done. Focus on that first.`,
-        intent: "quest_progress",
-        referencesQuestId: quest.quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: `You've already got "${quest.quest.title}" on your plate. ${objectiveLabel(quest.quest)} — ${quest.progress}/${quest.required} done. Focus on that first.`,
+          intent: "quest_progress",
+          referencesQuestId: quest.quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
     if (questState.available.length > 0) {
       const quest = questState.available[0];
       return {
-        reply: `Matter of fact, I do have something. "${quest.title}" — ${quest.description} Think you can handle it?`,
-        intent: "offer_quest",
-        referencesQuestId: quest.id,
-        suggestedActions: defaultSuggestedActions(persona, questState),
+        confident: true,
+        draft: {
+          reply: `Matter of fact, I do have something. "${quest.title}" — ${quest.description} Think you can handle it?`,
+          intent: "offer_quest",
+          referencesQuestId: quest.id,
+          suggestedActions: defaultSuggestedActions(persona, questState),
+        },
       };
     }
   }
 
-  // ── Keyword: lore/story/tell me ──
+  // ── Keyword: lore/story/tell me — Gemini earns flavor here, but the
+  // fallback shouldn't feel like a placeholder if the LLM is down. ──
   if (/\b(lore|story|tell me|history|about|rumor|rumour|news)\b/.test(text)) {
     const loreReplies = [
       `${npc.name} leans in. "This land has its secrets, ${pName}. Keep your eyes open and your blade sharp."`,
       `"Plenty of history in these walls. But history won't save you — skill will."`,
       `"Word travels fast here. If something's brewing, you'll know soon enough."`,
+      `"${typeFlavor(npc.type, pName, `${text}.lore`)}" ${npc.name} doesn't elaborate.`,
+      `"The old maps are wrong in three places I know of, ${pName}. Travel anyway."`,
+      `"Every zone tells you something — if you stop long enough to listen."`,
     ];
     return {
-      reply: pick(loreReplies, text),
-      intent: "lore",
-      suggestedActions: defaultSuggestedActions(persona, questState),
+      confident: false,
+      draft: {
+        reply: pick(loreReplies, text),
+        intent: "lore",
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      },
     };
   }
 
-  // ── Fallback: active quest ──
+  // ── Fallback: active quest (no keyword match, just restating) — let Gemini add flavor ──
   if (questState.active.length > 0) {
     const quest = questState.active[0];
-    const replies = [
-      `"${quest.quest.title}" — you're ${quest.progress}/${quest.required}. ${objectiveLabel(quest.quest)} and report back, ${pName}.`,
-      `Still working on "${quest.quest.title}"? You need ${quest.required - quest.progress} more. Get to it.`,
-      `Focus, ${pName}. "${quest.quest.title}" needs ${objectiveLabel(quest.quest).toLowerCase()}. You're ${quest.progress}/${quest.required} through.`,
-    ];
+    const ratio = quest.progress / Math.max(quest.required, 1);
+    const remaining = quest.required - quest.progress;
+    const nearDone = ratio >= 0.75 && remaining > 0;
+    const replies = nearDone
+      ? [
+          `Almost there on "${quest.quest.title}", ${pName} — just ${remaining} more. Don't slack now.`,
+          `"${quest.quest.title}" is yours to close out. ${remaining} left. Finish it.`,
+          `You're on the home stretch with "${quest.quest.title}". ${remaining} more and we settle up.`,
+        ]
+      : [
+          `"${quest.quest.title}" — you're ${quest.progress}/${quest.required}. ${objectiveLabel(quest.quest)} and report back, ${pName}.`,
+          `Still working on "${quest.quest.title}"? You need ${remaining} more. Get to it.`,
+          `Focus, ${pName}. "${quest.quest.title}" needs ${objectiveLabel(quest.quest).toLowerCase()}. You're ${quest.progress}/${quest.required} through.`,
+          `"${quest.quest.title}" is on your slate. ${remaining} to go before we talk reward.`,
+        ];
     return {
-      reply: pick(replies, text),
-      intent: "quest_progress",
-      referencesQuestId: quest.quest.id,
-      suggestedActions: defaultSuggestedActions(persona, questState),
+      confident: false,
+      draft: {
+        reply: pick(replies, text),
+        intent: "quest_progress",
+        referencesQuestId: quest.quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      },
     };
   }
 
-  // ── Fallback: available quest ──
+  // ── Fallback: available quest (no keyword match) — let Gemini personalize the pitch ──
   if (questState.available.length > 0) {
     const quest = questState.available[0];
     const replies = [
@@ -360,23 +622,33 @@ function buildDeterministicDraft(
       `There's a problem that needs solving — "${quest.title}". ${quest.description} Interested, ${pName}?`,
     ];
     return {
-      reply: pick(replies, text),
-      intent: "offer_quest",
-      referencesQuestId: quest.id,
-      suggestedActions: defaultSuggestedActions(persona, questState),
+      confident: false,
+      draft: {
+        reply: pick(replies, text),
+        intent: "offer_quest",
+        referencesQuestId: quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      },
     };
   }
 
-  // ── No quests at all ──
+  // ── No quests at all — Gemini does the small talk, but a decent
+  // deterministic fallback keeps things bearable if the LLM is off. ──
   const idleReplies = [
     `${npc.name} nods. "Nothing pressing right now, ${pName}. But stick around — things change."`,
     `"You've done good work. I'll send word if something comes up, ${pName}."`,
     `"No tasks at the moment. Rest up — you've earned it."`,
+    `"${typeFlavor(npc.type, pName, `${text}.idle`)}"`,
+    `${npc.name} glances past you. "Quiet day. Check the other zones — work moves around."`,
+    `"Not much for you here today, ${pName}. The board will fill again soon."`,
   ];
   return {
-    reply: pick(idleReplies, text),
-    intent: npc.name === SCOUT_KAELA_NAME ? "tutorial" : "greeting",
-    suggestedActions: defaultSuggestedActions(persona, questState),
+    confident: false,
+    draft: {
+      reply: pick(idleReplies, text),
+      intent: npc.name === SCOUT_KAELA_NAME ? "tutorial" : "greeting",
+      suggestedActions: defaultSuggestedActions(persona, questState),
+    },
   };
 }
 
@@ -392,6 +664,7 @@ function buildSystemPrompt(persona: NpcPersona): string {
     "referencesQuestId must be a quest id string or null.",
     "suggestedActions must be an array of up to 3 objects with label and prompt.",
     "If unsure, choose the safest grounded intent and keep the reply brief.",
+    "If player.visitCount > 1, acknowledge that you've spoken before in a brief, in-character way.",
     'Example JSON: {"reply":"The meadow is not safe after dusk.","intent":"redirect","referencesQuestId":null,"suggestedActions":[{"label":"Ask about work","prompt":"What needs doing right now?"}]}',
     `Speech rules: ${persona.speechStyle.join(" ")}`,
     `Priorities: ${persona.priorities.join(" ")}`,
@@ -400,89 +673,55 @@ function buildSystemPrompt(persona: NpcPersona): string {
   ].join("\n");
 }
 
-function extractJsonObject(raw: string): string {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]+?)```/i);
-  if (fenced?.[1]) return fenced[1].trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+const NPC_DIALOGUE_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    reply: { type: Type.STRING },
+    intent: { type: Type.STRING, enum: [...NPC_DIALOGUE_ALLOWED_INTENTS] },
+    referencesQuestId: { type: Type.STRING, nullable: true },
+    suggestedActions: {
+      type: Type.ARRAY,
+      maxItems: "3",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          label: { type: Type.STRING },
+          prompt: { type: Type.STRING },
+        },
+        required: ["label", "prompt"],
+      },
+    },
+  },
+  required: ["reply", "intent", "suggestedActions"],
+  propertyOrdering: ["reply", "intent", "referencesQuestId", "suggestedActions"],
+};
 
-  const firstBrace = trimmed.indexOf("{");
-  if (firstBrace === -1) return trimmed;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = firstBrace; i < trimmed.length; i += 1) {
-    const char = trimmed[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return trimmed.slice(firstBrace, i + 1);
-      }
-    }
-  }
-
-  return trimmed;
-}
-
-async function callCompatibleNpcModel(payload: {
+async function callGeminiNpcModel(payload: {
   persona: NpcPersona;
   prompt: string;
 }): Promise<NpcDialogueDraft | null> {
-  if (!NPC_DIALOGUE_API_BASE_URL) return null;
+  if (!NPC_DIALOGUE_LLM_ENABLED) return null;
 
-  const endpoint = `${NPC_DIALOGUE_API_BASE_URL.replace(/\/$/, "")}/chat/completions`;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (NPC_DIALOGUE_API_KEY) {
-    headers.Authorization = `Bearer ${NPC_DIALOGUE_API_KEY}`;
-  }
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    signal: AbortSignal.timeout(Math.max(2_000, NPC_DIALOGUE_TIMEOUT_MS)),
-    body: JSON.stringify({
-      model: NPC_DIALOGUE_MODEL,
+  const result = await gemini.models.generateContent({
+    model: NPC_DIALOGUE_MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: `${buildSystemPrompt(payload.persona)}\n\n${payload.prompt}` }],
+      },
+    ],
+    config: {
       temperature: NPC_DIALOGUE_TEMPERATURE,
-      max_tokens: 220,
-      messages: [
-        { role: "system", content: buildSystemPrompt(payload.persona) },
-        { role: "user", content: payload.prompt },
-      ],
-    }),
+      maxOutputTokens: 256,
+      responseMimeType: "application/json",
+      responseSchema: NPC_DIALOGUE_RESPONSE_SCHEMA,
+      abortSignal: AbortSignal.timeout(Math.max(2_000, NPC_DIALOGUE_TIMEOUT_MS)),
+    },
   });
 
-  if (!response.ok) {
-    throw new Error(`npc dialogue provider ${response.status}`);
-  }
-
-  const data = await response.json();
-  const rawContent = data?.choices?.[0]?.message?.content;
-  const content = Array.isArray(rawContent)
-    ? rawContent.map((part: any) => part?.text ?? part?.content ?? "").join("\n").trim()
-    : String(rawContent ?? "").trim();
-
-  if (!content) return null;
-
-  const jsonText = extractJsonObject(content);
-  return JSON.parse(jsonText) as NpcDialogueDraft;
+  const text = result.text?.trim();
+  if (!text) return null;
+  return JSON.parse(text) as NpcDialogueDraft;
 }
 
 function buildModelPrompt(
@@ -492,6 +731,7 @@ function buildModelPrompt(
   message: string,
   history: NpcDialogueHistoryEntry[],
   questState: QuestStateView,
+  visitCount: number,
 ): string {
   return JSON.stringify({
     npc: {
@@ -511,6 +751,7 @@ function buildModelPrompt(
       origin: player.origin ?? null,
       classId: player.classId ?? null,
       storyFlags: player.storyFlags ?? [],
+      visitCount,
     },
     playerMessage: message,
     recentHistory: history,
@@ -546,22 +787,33 @@ function buildModelPrompt(
 export async function generateNpcDialogueResponse(
   context: NpcDialogueContext,
 ): Promise<NpcDialogueResponse> {
-  const history = sanitizeHistory(context.recentHistory);
+  const wallet = context.player.walletAddress;
+  // Server-owned history is authoritative; the client-supplied history is
+  // only used as a cold-start fallback when Redis has nothing yet.
+  const serverHistory = await loadServerHistory(wallet, context.npc.id);
+  const history = sanitizeHistory(serverHistory.length > 0 ? serverHistory : context.recentHistory);
+  const visitCount = await getOrBumpVisitCount(wallet, context.npc.name, serverHistory.length === 0);
   const persona = getNpcPersona(context.npc);
   const questState = buildQuestState(context.player, context.npc);
 
-  let draft = buildDeterministicDraft(
+  const deterministic = buildDeterministicDraft(
     persona,
     context.npc,
     context.player,
     context.message,
     questState,
   );
+  let draft = deterministic.draft;
   let provider: "deterministic" | "llm" = "deterministic";
 
-  if (NPC_DIALOGUE_API_BASE_URL) {
+  // Only burn Gemini tokens when the deterministic branch wasn't confident —
+  // i.e. lore/flavor requests, off-script player input, or idle small talk.
+  // Greetings, accept/turn-in, directions, reward, quest/help with an active
+  // or available quest already have crisp pre-written replies.
+  const shouldCallLlm = NPC_DIALOGUE_LLM_ENABLED && (NPC_DIALOGUE_FORCE_LLM || !deterministic.confident);
+  if (shouldCallLlm) {
     try {
-      const llmDraft = await callCompatibleNpcModel({
+      const llmDraft = await callGeminiNpcModel({
         persona,
         prompt: buildModelPrompt(
           persona,
@@ -570,6 +822,7 @@ export async function generateNpcDialogueResponse(
           context.message,
           history,
           questState,
+          visitCount,
         ),
       });
       if (llmDraft?.reply) {
@@ -588,6 +841,12 @@ export async function generateNpcDialogueResponse(
     completableQuestIds: questState.completable.map((entry) => entry.quest.id),
     isTutorialNpc: context.npc.name === SCOUT_KAELA_NAME,
   });
+
+  // Persist this turn so subsequent calls see authoritative history.
+  await appendServerHistory(wallet, context.npc.id, [
+    { role: "player", content: context.message },
+    { role: "npc", content: validated.reply },
+  ]);
 
   return {
     provider,

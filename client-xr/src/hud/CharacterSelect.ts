@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { fetchCharacters, fetchClasses, fetchRaces, createCharacter, deployAgent } from "../api.js";
 import { getAuthToken } from "../auth.js";
+import { trackXRCharacterSelected, trackXRCharacterCreated } from "../analytics.js";
 import type { CharacterAssets, CharacterInstance } from "../scene/CharacterAssets.js";
 import { AvatarAssets } from "../scene/AvatarAssets.js";
 import { getGradientMap } from "../scene/ToonPipeline.js";
@@ -17,6 +18,7 @@ export interface CharacterReadyDetail {
 interface CharacterSelectOptions {
   onCharacterReady: (detail: CharacterReadyDetail) => void;
   onBack: () => void;
+  onLogout?: () => void;
   charAssets: CharacterAssets;
 }
 
@@ -92,6 +94,7 @@ export class CharacterSelect {
         <button type="button" class="cs-btn cs-btn-ghost cs-header-back" data-action="back">Back</button>
         <span class="cs-kicker">World of Geneva XR</span>
         <h1>Select Character</h1>
+        <button type="button" class="cs-btn cs-btn-ghost cs-header-logout" data-action="logout">Log Out</button>
       </div>
       <div class="cs-preview-wrap">
         <button type="button" class="cs-arrow cs-arrow-left" data-action="prev">&lsaquo;</button>
@@ -122,6 +125,11 @@ export class CharacterSelect {
       } else {
         this.options.onBack();
       }
+    });
+
+    // Log out
+    this.panel.querySelector("[data-action='logout']")!.addEventListener("click", () => {
+      this.options.onLogout?.();
     });
 
     this.root.style.display = "none";
@@ -243,7 +251,7 @@ export class CharacterSelect {
     }
     this.previewCharacter = null;
 
-    if (!this.charAssets.isReady()) return;
+    if (!this.charAssets.isPlayerClassesReady()) return;
 
     const classId = char.properties.class ?? "warrior";
     const raceId = char.properties.race ?? "human";
@@ -296,7 +304,7 @@ export class CharacterSelect {
     }
     this.previewCharacter = null;
 
-    if (!this.charAssets.isReady() || !this.selectedClass) return;
+    if (!this.charAssets.isPlayerClassesReady() || !this.selectedClass) return;
 
     const instance = this.charAssets.buildCharacter({
       wogClass: this.selectedClass,
@@ -337,6 +345,10 @@ export class CharacterSelect {
       this.startPreviewLoop();
     });
 
+    // Kick off the player-class GLB preload in parallel with API calls so the
+    // 3D preview can show up as soon as both finish.
+    const classModelsPromise = this.charAssets.waitForPlayerClasses();
+
     const token = await getAuthToken(walletAddress);
     if (!token) {
       this.setStatus("Authentication failed. Go back and sign in again.");
@@ -354,6 +366,11 @@ export class CharacterSelect {
     this.liveEntity = charData?.liveEntity ?? null;
     this.deployedCharacterName = charData?.deployedCharacterName ?? null;
     this.characters = charData?.characters ?? [];
+
+    if (!this.charAssets.isPlayerClassesReady()) {
+      this.setStatus("Loading character models...");
+      await classModelsPromise;
+    }
 
     if (this.characters.length === 0) {
       this.showView("create");
@@ -582,15 +599,36 @@ export class CharacterSelect {
 
   // ── Actions ────────────────────────────────────────────────────────
 
+  private flashError(el: HTMLElement) {
+    el.classList.remove("cs-error-flash");
+    void el.offsetWidth; // force reflow to restart animation
+    el.classList.add("cs-error-flash");
+    setTimeout(() => el.classList.remove("cs-error-flash"), 1000);
+  }
+
   private async handleCreate() {
     const nameInput = this.createContainer.querySelector("input[name='charName']") as HTMLInputElement;
     const name = nameInput.value.trim();
     if (!name || name.length < 2) {
       this.setStatus("Name must be at least 2 characters.");
+      const field = nameInput.closest(".cs-field") as HTMLElement ?? nameInput;
+      this.flashError(field);
+      field.scrollIntoView({ behavior: "smooth", block: "center" });
+      nameInput.focus();
       return;
     }
-    if (!this.selectedClass || !this.selectedRace) {
-      this.setStatus("Select a class and race.");
+    if (!this.selectedClass) {
+      this.setStatus("Select a class.");
+      const picker = this.createContainer.querySelector("[data-picker='class']") as HTMLElement;
+      this.flashError(picker);
+      picker.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (!this.selectedRace) {
+      this.setStatus("Select a race.");
+      const picker = this.createContainer.querySelector("[data-picker='race']") as HTMLElement;
+      this.flashError(picker);
+      picker.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
 
@@ -628,6 +666,13 @@ export class CharacterSelect {
         throw new Error(deploy.error || "Deploy failed.");
       }
 
+      trackXRCharacterCreated({
+        walletAddress: this.walletAddress,
+        name: minted.name || name,
+        classId: minted.properties.class ?? this.selectedClass,
+        raceId: minted.properties.race ?? this.selectedRace,
+      });
+
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
         entityId: deploy.entityId,
@@ -654,6 +699,14 @@ export class CharacterSelect {
       if (!deploy.ok || !deploy.entityId) {
         throw new Error(deploy.error || "Deploy failed.");
       }
+
+      trackXRCharacterSelected({
+        walletAddress: this.walletAddress,
+        name: char.name,
+        classId: char.properties.class ?? "unknown",
+        raceId: char.properties.race ?? "unknown",
+        isReconnect: false,
+      });
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
@@ -682,6 +735,14 @@ export class CharacterSelect {
       if (!deploy.ok || !deploy.entityId) {
         throw new Error(deploy.error || "Reconnect failed.");
       }
+
+      trackXRCharacterSelected({
+        walletAddress: this.walletAddress,
+        name: char.name,
+        classId: char.properties.class ?? "unknown",
+        raceId: char.properties.race ?? "unknown",
+        isReconnect: true,
+      });
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
@@ -854,6 +915,19 @@ export class CharacterSelect {
         position: absolute;
         top: 0;
         left: 0;
+      }
+
+      .cs-header-logout {
+        position: absolute;
+        top: 0;
+        right: 0;
+        color: #efc97f;
+        opacity: 0.7;
+      }
+
+      .cs-header-logout:hover {
+        opacity: 1;
+        color: #ff8a8a;
       }
 
       .cs-kicker {
@@ -1174,6 +1248,20 @@ export class CharacterSelect {
         font: 600 11px/1.35 "Courier New", monospace;
         letter-spacing: 0.08em;
         text-transform: uppercase;
+      }
+
+      @keyframes cs-shake {
+        0%, 100% { transform: translateX(0); }
+        20%       { transform: translateX(-5px); }
+        40%       { transform: translateX(5px); }
+        60%       { transform: translateX(-3px); }
+        80%       { transform: translateX(3px); }
+      }
+
+      .cs-error-flash {
+        animation: cs-shake 0.35s ease;
+        border-color: rgba(255, 90, 70, 0.7) !important;
+        box-shadow: 0 0 0 3px rgba(255, 90, 70, 0.18) !important;
       }
 
       @media (max-width: 768px) {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getEntity, getOrCreateZone, type Order, type Entity } from "../world/zoneRuntime.js";
+import { getEntity, getOrCreateZone, getWorldTick, type Order, type Entity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import {
@@ -14,20 +14,19 @@ import {
 interface CommandBody {
   zoneId: string;
   entityId: string;
-  action: "move" | "attack" | "attack-nearest" | "travel" | "set-run";
+  action: "move" | "attack" | "attack-nearest" | "travel";
   x?: number;
   y?: number;
   targetId?: string;
   targetZone?: string;
   mobName?: string;
-  runEnabled?: boolean;
 }
 
 export function registerCommands(server: FastifyInstance) {
   server.post<{ Body: CommandBody }>("/command", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, entityId, action, x, y, targetId, targetZone, mobName, runEnabled } = request.body;
+    const { zoneId, entityId, action, x, y, targetId, targetZone, mobName } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     const entity = getEntity(entityId);
@@ -68,7 +67,8 @@ export function registerCommands(server: FastifyInstance) {
         reply.code(400);
         return { error: "move requires x and y" };
       }
-      order = { action: "move", x, y };
+      order = { action: "move", x, y, userIssued: true };
+      entity.userEngagedAt = undefined; // explicit move breaks engagement
     } else if (action === "attack") {
       if (!targetId) {
         reply.code(400);
@@ -78,7 +78,8 @@ export function registerCommands(server: FastifyInstance) {
         reply.code(404);
         return { error: "Target entity not found" };
       }
-      order = { action: "attack", targetId };
+      order = { action: "attack", targetId, userIssued: true };
+      entity.userEngagedAt = { targetId, tick: getWorldTick() };
     } else if (action === "attack-nearest") {
       // Find nearest mob (optionally filtered by name)
       const regionId = entity.region;
@@ -108,7 +109,8 @@ export function registerCommands(server: FastifyInstance) {
         return { error: mobName ? `No "${mobName}" found nearby` : "No mobs found nearby" };
       }
 
-      order = { action: "attack", targetId: nearestMob.id };
+      order = { action: "attack", targetId: nearestMob.id, userIssued: true };
+      entity.userEngagedAt = { targetId: nearestMob.id, tick: getWorldTick() };
     } else if (action === "travel") {
       if (!targetZone) {
         reply.code(400);
@@ -123,19 +125,9 @@ export function registerCommands(server: FastifyInstance) {
       }
 
       // Set move order toward the target region center (world-space)
-      order = { action: "move", x: center.x, y: center.z };
+      order = { action: "move", x: center.x, y: center.z, userIssued: true };
       entity.travelTargetZone = targetZone;
-    } else if (action === "set-run") {
-      if (entity.type !== "player") {
-        reply.code(400);
-        return { error: "set-run requires a player entity" };
-      }
-      entity.runModeEnabled = typeof runEnabled === "boolean" ? runEnabled : !entity.runModeEnabled;
-      entity.maxRunEnergy = Math.max(1, entity.maxRunEnergy ?? 100);
-      entity.runEnergy = Math.max(0, Math.min(entity.runEnergy ?? entity.maxRunEnergy, entity.maxRunEnergy));
-      if (!entity.runModeEnabled) {
-        entity.isRunning = false;
-      }
+      entity.userEngagedAt = undefined; // traveling cancels engagement
     } else {
       reply.code(400);
       return { error: `Unknown action: ${action}` };
@@ -162,9 +154,6 @@ export function registerCommands(server: FastifyInstance) {
         level: entity.level,
         xp: entity.xp,
         region: entity.region,
-        runEnergy: entity.runEnergy,
-        maxRunEnergy: entity.maxRunEnergy,
-        runModeEnabled: entity.runModeEnabled,
         isRunning: entity.isRunning,
       },
       questProgress: questProgress.length > 0 ? questProgress : undefined,

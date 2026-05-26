@@ -53,5 +53,21 @@ gcloud storage objects update "$BUCKET/$PREFIX/manifest.json" --cache-control="n
 # Hashed assets — cache aggressively (Vite adds content hashes)
 gsutil -m setmeta -r -h "Cache-Control:public, max-age=31536000, immutable" "$BUCKET/$PREFIX/assets/" 2>/dev/null || true
 
+# SPA fallback: copy index.html to every single-segment React route so deep
+# links like /app/pricing return 200. The Classic External LB doesn't support
+# customErrorResponsePolicy, so we materialize the fallback in the bucket.
+# Routes are auto-extracted from App.tsx — any new <Route path="/foo"> is
+# picked up on the next deploy.
+echo "==> Materializing SPA route fallbacks..."
+ROUTES=$(grep -oE '<Route path="/[a-zA-Z0-9_-]+"' src/App.tsx \
+  | sed -E 's|<Route path="/([a-zA-Z0-9_-]+)"|\1|' \
+  | sort -u)
+for route in $ROUTES; do
+  gcloud storage cp "$BUCKET/$PREFIX/index.html" "$BUCKET/$PREFIX/$route" \
+    --cache-control="no-cache, no-store" >/dev/null 2>&1 \
+    && echo "    /$PREFIX/$route" \
+    || echo "    /$PREFIX/$route (failed)"
+done
+
 echo "==> Done!"
 echo "    https://app.worldofgeneva.com/"

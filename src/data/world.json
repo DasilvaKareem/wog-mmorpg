@@ -29,7 +29,8 @@
     "copperfield-meadow",
     "silkwood-grove",
     "emberglow-estate",
-    "starfall-ranch"
+    "starfall-ranch",
+    "westmarch-ridge"
   ],
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
@@ -106,7 +107,8 @@
     "copperfield-meadow": { "x": 0, "z": 1280 },
     "silkwood-grove": { "x": 1280, "z": 1280 },
     "emberglow-estate": { "x": 1920, "z": 1280 },
-    "starfall-ranch": { "x": 2560, "z": 1280 }
+    "starfall-ranch": { "x": 2560, "z": 1280 },
+    "westmarch-ridge": { "x": -640, "z": 0 }
   },
   "continents": [
     {

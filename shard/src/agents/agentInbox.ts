@@ -14,6 +14,8 @@ import {
   appendInboxHistory,
   countInboxMessages,
   countNewInboxMessages,
+  deleteAllInboxHistory,
+  deleteAllInboxMessages,
   listInboxHistory,
   listInboxMessages,
   upsertInboxMessage,
@@ -24,8 +26,15 @@ import { isPostgresConfigured } from "../db/postgres.js";
 
 export type InboxMessageType =
   | "direct"           // free-form agent-to-agent message
-  | "trade-request"    // "I want to buy/sell X"
+  | "trade-request"    // "I want to buy/sell X" (notification only)
+  | "trade-offer"      // actionable targeted P2P trade offer carrying { tradeId, askPrice, ... }
+  | "trade-result"     // outcome notification (accepted / declined / expired) for the SELLER
+  | "match-found"      // your PvP queue just paired — carries { battleId, format, team, arenaName }
+  | "duel-request"     // someone challenged you to a 1v1; carries { challengeId, challengerName, format, expiresAtMs }
+  | "duel-result"      // your duel was accepted/declined/expired
   | "party-invite"     // "Join my party"
+  | "quest-approval"   // friend-sent quest pending accept/deny
+  | "friend-request"   // incoming friend request pending accept/decline
   | "broadcast"        // zone-wide announcement
   | "system";          // game event notification (level-up, death, quest complete)
 
@@ -125,12 +134,15 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
     const id = `pg-${ts}-${++memIdCounter}`;
     logEntry.id = id;
     await upsertInboxMessage(to, logEntry);
-    void appendToHistory(to, logEntry);
 
     const redis = getRedis();
     if (!redis) {
+      // No Redis — append history here (only path available).
+      void appendToHistory(to, logEntry);
       return id;
     }
+    // Redis is available — let the Redis block append history so we use
+    // the real stream ID and avoid a double-write to agent_inbox_history.
   }
 
   if (redis) {
@@ -143,7 +155,8 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
         ...Object.entries(fields).flat(),
       );
       logEntry.id = id;
-      // Persist to permanent history log (Redis LIST, capped)
+      // Single history append — Postgres block intentionally skips this
+      // when Redis is available to prevent duplicate rows.
       appendToHistory(to, logEntry);
       return id;
     } catch (err: any) {
@@ -166,6 +179,19 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
   memInbox.set(key, list);
   appendToHistory(to, logEntry);
   return id;
+}
+
+/**
+ * Send an inbox message to a specific character's inbox (keyed by its
+ * custodial wallet). Each character has its own inbox — messages about that
+ * character's auctions, crafts, etc. belong to that character only, not the
+ * owner wallet (which may have many characters).
+ */
+export async function sendInboxToCustodialOwner(
+  custodialWallet: string,
+  params: Omit<SendMessageParams, "to">,
+): Promise<string> {
+  return sendInboxMessage({ ...params, to: custodialWallet });
 }
 
 /**
@@ -339,10 +365,12 @@ export async function countInbox(wallet: string): Promise<number> {
  * Count messages received since a given stream ID (for "new message" badge).
  */
 export async function countNewMessages(wallet: string, since: string): Promise<number> {
+  // Same rule as getMessageHistory: when Postgres is configured, trust its
+  // count — including zero. Falling through on 0 would double-count any
+  // messages Redis still has after Postgres ack/read flips them off.
   if (isPostgresConfigured()) {
     const sinceTs = Number(since.split("-")[0] ?? "0");
-    const count = await countNewInboxMessages(wallet, sinceTs);
-    if (count > 0) return count;
+    return await countNewInboxMessages(wallet, sinceTs);
   }
   const redis = getRedis();
   const key = inboxKey(wallet);
@@ -357,9 +385,7 @@ export async function countNewMessages(wallet: string, since: string): Promise<n
       console.warn(`[inbox] Redis XRANGE count failed: ${err.message}`);
     }
   } else {
-    if (!isPostgresConfigured()) {
-      assertRedisAvailable("countNewMessages");
-    }
+    assertRedisAvailable("countNewMessages");
   }
 
   const list = memInbox.get(wallet.toLowerCase()) ?? [];
@@ -406,9 +432,12 @@ export async function getMessageHistory(
   limit = 100,
   offset = 0,
 ): Promise<{ messages: InboxMessage[]; total: number; unread: number }> {
+  // Postgres is the source of truth for read-state. When configured, always
+  // return its result — an empty inbox is indistinguishable from a silently
+  // failed write, and falling through to Redis would resurrect "read"
+  // messages as unread (Redis LIST has no read_at column).
   if (isPostgresConfigured()) {
-    const history = await listInboxHistory(wallet, limit, offset);
-    if (history.total > 0) return history;
+    return await listInboxHistory(wallet, limit, offset);
   }
   const redis = getRedis();
   const key = historyKey(wallet);
@@ -416,21 +445,17 @@ export async function getMessageHistory(
   if (redis) {
     try {
       const total: number = await redis.llen(key);
-      // Read newest-last: use negative offsets for pagination from the end
       const start = offset;
       const end = offset + limit - 1;
       const raw: string[] = await redis.lrange(key, start, end);
       const messages = raw.map((s: string) => JSON.parse(s) as InboxMessage);
-      // Redis-only fallback has no read-state column; treat all as unread.
       return { messages, total, unread: total };
     } catch (err: any) {
       if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] History read failed: ${err.message}`);
     }
   } else {
-    if (!isPostgresConfigured()) {
-      assertRedisAvailable("getMessageHistory");
-    }
+    assertRedisAvailable("getMessageHistory");
   }
 
   const list = memHistory.get(wallet.toLowerCase()) ?? [];
@@ -439,6 +464,39 @@ export async function getMessageHistory(
 
 /** Re-export store helpers so routes can mark history messages read. */
 export { markHistoryRead, markAllHistoryRead } from "../db/agentInboxStore.js";
+
+/**
+ * Wipe every message for a wallet across all backends — Postgres history +
+ * Postgres inbox + Redis history LIST + Redis inbox Stream + in-memory maps.
+ * Returns counts per backend so callers can show what was actually cleared.
+ */
+export async function clearAllMessages(wallet: string): Promise<{
+  pgHistory: number;
+  pgInbox: number;
+  redisKeysDeleted: number;
+}> {
+  const lower = wallet.toLowerCase();
+  let pgHistory = 0;
+  let pgInbox = 0;
+  if (isPostgresConfigured()) {
+    [pgHistory, pgInbox] = await Promise.all([
+      deleteAllInboxHistory(wallet),
+      deleteAllInboxMessages(wallet),
+    ]);
+  }
+  let redisKeysDeleted = 0;
+  const redis = getRedis();
+  if (redis) {
+    try {
+      redisKeysDeleted = await redis.del(historyKey(wallet), inboxKey(wallet));
+    } catch (err: any) {
+      console.warn(`[inbox] Redis clear failed: ${err.message}`);
+    }
+  }
+  memHistory.delete(lower);
+  memInbox.delete(lower);
+  return { pgHistory, pgInbox, redisKeysDeleted };
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -485,7 +543,7 @@ export async function sendSystemNotification(
   try {
     await sendInboxMessage({
       from: "system",
-      fromName: "World of Geneva",
+      fromName: characterName,
       to: wallet,
       type: "system",
       body,

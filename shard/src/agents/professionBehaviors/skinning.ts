@@ -69,7 +69,20 @@ async function ensureSkinningKnife(ctx: AgentContext, me: any): Promise<boolean>
 export async function doSkinning(ctx: AgentContext): Promise<ActionResult> {
   try {
     const learned = await ctx.learnProfession("skinning");
-    if (!learned) return actionProgressed("Working toward skinning access");
+    if (!learned) {
+      const failure = ctx.getLastLearnFailure("skinning");
+      if (failure?.category === "strategic") {
+        // Unrecoverable: insufficient gold, wrong class, etc. Surface this to
+        // the circuit breaker so the supervisor rotates focus to combat / gold
+        // grinding instead of pinning the agent on skinning forever.
+        return actionBlocked(`Skinning learn blocked: ${failure.reason}`, {
+          failureKey: "skinning:learn-blocked",
+          endpoint: "/professions/learn",
+          category: "strategic",
+        });
+      }
+      return actionProgressed("Working toward skinning access");
+    }
 
     const zs = await ctx.getZoneState();
     if (!zs) return actionIdle("Zone state unavailable");

@@ -231,14 +231,21 @@ function biomeBaseTile(biome: string, noise: number): number {
   }
 }
 
-/** Get the elevation profile for a biome (0-30 range, client scales to world Y) */
+/** Get the elevation profile for a biome (0-MAX_ELEVATION range, client scales to world Y) */
 function getElevProfile(biome: string): { noiseScale: number; maxElev: number; baseElev: number } {
   if (biome === "village" || biome === "farmland") return { noiseScale: 0.035, maxElev: 8, baseElev: 0 };
   if (biome === "forest") return { noiseScale: 0.045, maxElev: 26, baseElev: 6 };
+  if (biome === "plains") return { noiseScale: 0.025, maxElev: 14, baseElev: 2 };
+  if (biome === "glade") return { noiseScale: 0.04, maxElev: 16, baseElev: 4 };
+  if (biome === "lake") return { noiseScale: 0.03, maxElev: 40, baseElev: 0 };
+  if (biome === "citadel") return { noiseScale: 0.04, maxElev: 90, baseElev: 30 };
+  if (biome === "mountain") return { noiseScale: 0.055, maxElev: 200, baseElev: 50 };
+  if (biome === "chasm") return { noiseScale: 0.05, maxElev: 180, baseElev: 60 };
   return { noiseScale: 0.03, maxElev: 18, baseElev: 0 }; // grassland
 }
 
-const MAX_ELEVATION = 30;
+/** Hard ceiling for any elevation cell. Server-side units; client applies ELEV_SCALE=0.12. */
+const MAX_ELEVATION = 255;
 
 /**
  * Find the nearest adjacent zone with a different biome and the distance to
@@ -329,6 +336,285 @@ export function generateAllMaps(): void {
       console.error(`[mapGenerator] Failed to generate map for ${data.id}:`, err);
     }
   }
+
+  // Final pass: smooth elevation across zone seams so high-contrast neighbors
+  // (mountain↔village, citadel↔plains) blend into believable foothills instead
+  // of sheer cliffs. Operates on every zone after its initial generation so
+  // it can sample neighboring zones' final elevations from mapCache.
+  crossZoneEdgeSmooth();
+
+  // After terrain converges, lift each water region to sit just below its
+  // local shore. Otherwise lakes/ponds in zones whose surrounds got pulled
+  // upward by mountain neighbors look like deep pits with cliffs into the
+  // water.
+  pinWaterToLocalShore();
+
+  // Force the very-edge cells of every adjacent zone pair to share identical
+  // elevation. The client's per-zone mesh corner sampler can otherwise pick
+  // slightly different Y values on each side of a seam — fog leaks through
+  // the resulting hairline gap and reads as a blue "river" along the boundary.
+  snapAdjacentZoneEdges();
+}
+
+// ── Cross-zone edge smoothing ───────────────────────────────────────
+
+/**
+ * After every zone's elevation is computed, smooth a strip of tiles near
+ * each edge using a kernel that reaches across to the neighboring zone's
+ * cached elevation array. Per-zone smoothing during generation pulls edge
+ * tiles toward each zone's interior independently, which produces matching
+ * mid-point values at the seam but introduces a kink right at the boundary
+ * once zones interact visually — this pass repairs that.
+ *
+ * Water tiles are preserved at their forced elevation (0) so the lake/pond
+ * surface stays flat.
+ */
+function crossZoneEdgeSmooth(): void {
+  /** Find which zone owns a given world tile coord, returning its cached map. */
+  const sampleAt = (wtx: number, wtz: number): number | null => {
+    for (const z of worldBlendInfos) {
+      if (wtx < z.minWtx || wtx >= z.maxWtx || wtz < z.minWtz || wtz >= z.maxWtz) continue;
+      const map = mapCache.get(z.id);
+      if (!map) return null;
+      const lx = wtx - z.minWtx;
+      const lz = wtz - z.minWtz;
+      return map.elevation[lz * map.width + lx] ?? null;
+    }
+    return null;
+  };
+
+  const isWaterTile = (t: number): boolean =>
+    t === 16 /* WATER_STILL */ || t === 19 || t === 20 || t === 21 || t === 22 || t === 23;
+
+  /** Maximum distance from edge to smooth. Tiles further in keep their interior detail. */
+  const STRIP = 16;
+  /** Maximum kernel radius — applied at the very edge, scaled down inward. */
+  const KERNEL_MAX = 6;
+  /** Number of smoothing passes. More passes = stronger seam convergence at the cost of strip detail. */
+  const PASSES = 3;
+
+  for (let pass = 0; pass < PASSES; pass++) {
+    // Snapshot every zone's elevation first so this pass reads consistent
+    // values across zones (otherwise zones smoothed earlier in the loop
+    // would feed already-smoothed values to zones smoothed later).
+    const snapshot = new Map<string, number[]>();
+    for (const [id, map] of mapCache) snapshot.set(id, map.elevation.slice());
+    const sampleSnap = (wtx: number, wtz: number): number | null => {
+      for (const z of worldBlendInfos) {
+        if (wtx < z.minWtx || wtx >= z.maxWtx || wtz < z.minWtz || wtz >= z.maxWtz) continue;
+        const snap = snapshot.get(z.id);
+        const map = mapCache.get(z.id);
+        if (!snap || !map) return null;
+        const lx = wtx - z.minWtx;
+        const lz = wtz - z.minWtz;
+        return snap[lz * map.width + lx] ?? null;
+      }
+      return null;
+    };
+
+    for (const blendInfo of worldBlendInfos) {
+      const map = mapCache.get(blendInfo.id);
+      if (!map) continue;
+      const w = map.width;
+      const h = map.height;
+
+      for (let tz = 0; tz < h; tz++) {
+        for (let tx = 0; tx < w; tx++) {
+          const minDist = Math.min(tx, w - 1 - tx, tz, h - 1 - tz);
+          if (minDist >= STRIP) continue;
+
+          // Distance-weighted kernel: huge blur at the very edge, gentle
+          // touch by the time we're STRIP tiles in. Lets the seam fully
+          // converge across zones while preserving interior shape.
+          const t = minDist / STRIP; // 0 at edge, 1 at strip boundary
+          const kernel = Math.max(1, Math.round(KERNEL_MAX * (1 - t)));
+
+          let sum = 0;
+          let weight = 0;
+          for (let dz = -kernel; dz <= kernel; dz++) {
+            for (let dx = -kernel; dx <= kernel; dx++) {
+              const wtx = blendInfo.minWtx + tx + dx;
+              const wtz = blendInfo.minWtz + tz + dz;
+              const val = sampleSnap(wtx, wtz);
+              if (val === null) continue;
+              const r = Math.max(Math.abs(dx), Math.abs(dz));
+              const k = kernel + 1 - r;
+              sum += val * k;
+              weight += k;
+            }
+          }
+          if (weight === 0) continue;
+          const smoothed = sum / weight;
+
+          // Keep water tiles pinned at 0.
+          if (isWaterTile(map.ground[tz * w + tx])) {
+            map.elevation[tz * w + tx] = 0;
+          } else {
+            map.elevation[tz * w + tx] = Math.round(smoothed);
+          }
+        }
+      }
+    }
+  }
+  console.log(`[mapGenerator] Cross-zone edge smoothing complete (${PASSES} passes × ${worldBlendInfos.length} zones)`);
+}
+
+// ── Local water level pinning ───────────────────────────────────────
+
+/**
+ * Walk each zone, flood-fill every connected water region, and set the
+ * region's elevation to sit just below the lowest adjacent shore.
+ *
+ * Why: water tiles are forced to 0 during initial elevation generation.
+ * After cross-zone smoothing pulls a zone's perimeter upward (e.g. the
+ * lake-lumina edges that border the citadel and chasm biomes), water at
+ * absolute zero ends up far below the surrounding land — the lake reads
+ * as a sheer-walled pit. Pinning to local shore makes water naturally
+ * track whatever elevation its banks settle to.
+ */
+function pinWaterToLocalShore(): void {
+  const isWaterTile = (t: number): boolean =>
+    t === 16 /* WATER_STILL */ || t === 19 || t === 20 || t === 21 || t === 22 || t === 23;
+
+  for (const [, map] of mapCache) {
+    const w = map.width;
+    const h = map.height;
+    const visited = new Uint8Array(w * h);
+
+    for (let startIdx = 0; startIdx < w * h; startIdx++) {
+      if (visited[startIdx]) continue;
+      if (!isWaterTile(map.ground[startIdx])) {
+        visited[startIdx] = 1;
+        continue;
+      }
+
+      // Flood-fill the connected water region (4-neighbour adjacency).
+      const region: number[] = [];
+      const stack = [startIdx];
+      while (stack.length > 0) {
+        const idx = stack.pop()!;
+        if (visited[idx]) continue;
+        if (!isWaterTile(map.ground[idx])) continue;
+        visited[idx] = 1;
+        region.push(idx);
+        const tx = idx % w;
+        const tz = (idx / w) | 0;
+        if (tx > 0) stack.push(idx - 1);
+        if (tx < w - 1) stack.push(idx + 1);
+        if (tz > 0) stack.push(idx - w);
+        if (tz < h - 1) stack.push(idx + w);
+      }
+
+      // Collect every unique adjacent shore-tile elevation (8-neighbour).
+      const seenShore = new Uint8Array(w * h);
+      const shoreElevs: number[] = [];
+      for (const ridx of region) {
+        const tx = ridx % w;
+        const tz = (ridx / w) | 0;
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dz === 0) continue;
+            const nx = tx + dx;
+            const nz = tz + dz;
+            if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+            const nidx = nz * w + nx;
+            if (isWaterTile(map.ground[nidx])) continue;
+            if (seenShore[nidx]) continue;
+            seenShore[nidx] = 1;
+            shoreElevs.push(map.elevation[nidx]);
+          }
+        }
+      }
+
+      // Water surface = (lowest adjacent shore) - 1. Physically a body of
+      // water can't sit above its lowest bank — otherwise it spills. The -1
+      // ensures the surface is visibly recessed even on flat banks.
+      let surface = 0;
+      if (shoreElevs.length > 0) {
+        let minShore = Infinity;
+        for (const e of shoreElevs) if (e < minShore) minShore = e;
+        surface = Math.max(0, minShore - 1);
+      }
+
+      for (const ridx of region) map.elevation[ridx] = surface;
+    }
+  }
+  console.log(`[mapGenerator] Pinned water surfaces to local shore level`);
+}
+
+// ── Edge-snap (zone seam crack fix) ───────────────────────────────────
+
+/**
+ * For every cell along a zone edge that abuts another zone, set both that
+ * cell and its mirror in the neighbor zone to the average of their two
+ * elevations. Makes the client's per-zone corner-height sampler return
+ * identical world-Y on both sides of the seam, closing the hairline mesh
+ * crack that otherwise lets fog show through as a blue "river".
+ *
+ * Water tiles are skipped — pinWaterToLocalShore already set them and we
+ * don't want averaging to drift their surfaces.
+ */
+function snapAdjacentZoneEdges(): void {
+  const isWaterTile = (t: number): boolean =>
+    t === 16 /* WATER_STILL */ || t === 19 || t === 20 || t === 21 || t === 22 || t === 23;
+
+  interface Sample { map: GeneratedMap; lx: number; lz: number; isWater: boolean; }
+  const sampleAt = (wtx: number, wtz: number): Sample | null => {
+    for (const z of worldBlendInfos) {
+      if (wtx < z.minWtx || wtx >= z.maxWtx || wtz < z.minWtz || wtz >= z.maxWtz) continue;
+      const map = mapCache.get(z.id);
+      if (!map) return null;
+      const lx = wtx - z.minWtx;
+      const lz = wtz - z.minWtz;
+      const idx = lz * map.width + lx;
+      return { map, lx, lz, isWater: isWaterTile(map.ground[idx]) };
+    }
+    return null;
+  };
+
+  const snap = (mine: Sample, other: Sample): void => {
+    if (mine.isWater || other.isWater) return;
+    const w1 = mine.map.width;
+    const w2 = other.map.width;
+    const idx1 = mine.lz * w1 + mine.lx;
+    const idx2 = other.lz * w2 + other.lx;
+    const avg = Math.round((mine.map.elevation[idx1] + other.map.elevation[idx2]) / 2);
+    mine.map.elevation[idx1] = avg;
+    other.map.elevation[idx2] = avg;
+  };
+
+  for (const z of worldBlendInfos) {
+    const map = mapCache.get(z.id);
+    if (!map) continue;
+    const w = map.width;
+    const h = map.height;
+
+    // West edge (lx=0) ↔ neighbor at wtx = z.minWtx - 1
+    for (let lz = 0; lz < h; lz++) {
+      const mine = sampleAt(z.minWtx, z.minWtz + lz);
+      const other = sampleAt(z.minWtx - 1, z.minWtz + lz);
+      if (mine && other) snap(mine, other);
+    }
+    // East edge (lx=w-1) ↔ neighbor at wtx = z.minWtx + w
+    for (let lz = 0; lz < h; lz++) {
+      const mine = sampleAt(z.minWtx + w - 1, z.minWtz + lz);
+      const other = sampleAt(z.minWtx + w, z.minWtz + lz);
+      if (mine && other) snap(mine, other);
+    }
+    // North edge (lz=0)
+    for (let lx = 0; lx < w; lx++) {
+      const mine = sampleAt(z.minWtx + lx, z.minWtz);
+      const other = sampleAt(z.minWtx + lx, z.minWtz - 1);
+      if (mine && other) snap(mine, other);
+    }
+    // South edge (lz=h-1)
+    for (let lx = 0; lx < w; lx++) {
+      const mine = sampleAt(z.minWtx + lx, z.minWtz + h - 1);
+      const other = sampleAt(z.minWtx + lx, z.minWtz + h);
+      if (mine && other) snap(mine, other);
+    }
+  }
+  console.log(`[mapGenerator] Snapped adjacent-zone edge cells to matching elevation`);
 }
 
 // ── Main generator ───────────────────────────────────────────────────
@@ -432,7 +718,15 @@ function generateMap(zone: ZoneData): GeneratedMap {
 function detectBiome(zone: ZoneData): string {
   if (zone.biome) return zone.biome;
   const name = zone.name.toLowerCase();
-  if (name.includes("forest") || name.includes("dark")) return "forest";
+  // Order matters: more specific names first. Names like "Felsrock Citadel" and
+  // "Viridian Range" must match "citadel"/"range" before generic substrings.
+  if (name.includes("chasm")) return "chasm";
+  if (name.includes("citadel")) return "citadel";
+  if (name.includes("range") || name.includes("mountain") || name.includes("ridge")) return "mountain";
+  if (name.includes("lake")) return "lake";
+  if (name.includes("glade")) return "glade";
+  if (name.includes("plains") || name.includes("auroral")) return "plains";
+  if (name.includes("forest") || name.includes("woods") || name.includes("dark")) return "forest";
   if (name.includes("village") || name.includes("square")) return "village";
   return "grassland";
 }
@@ -1083,6 +1377,51 @@ function valueNoise2D(tx: number, tz: number, seed: number, scale: number): numb
   return value / totalAmp;
 }
 
+/**
+ * Ridge noise: same fBm structure as valueNoise2D, but each octave folds
+ * `1 - |2n - 1|` so the noise peaks at sharp lines instead of round bumps.
+ * Used for mountain and chasm biomes — produces ridges/spines rather than hills.
+ */
+function ridgeNoise2D(tx: number, tz: number, seed: number, scale: number): number {
+  let value = 0;
+  let amplitude = 1;
+  let totalAmp = 0;
+  const persistence = 0.5;
+  const lacunarity = 2.1;
+
+  for (let octave = 0; octave < 5; octave++) {
+    const freq = scale * Math.pow(lacunarity, octave);
+    const sx = tx * freq;
+    const sz = tz * freq;
+
+    const ix = Math.floor(sx);
+    const iz = Math.floor(sz);
+    const fx = sx - ix;
+    const fz = sz - iz;
+
+    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+    const uz = fz * fz * fz * (fz * (fz * 6 - 15) + 10);
+
+    const n00 = seededNoise2D(ix, iz, seed + octave * 1000);
+    const n10 = seededNoise2D(ix + 1, iz, seed + octave * 1000);
+    const n01 = seededNoise2D(ix, iz + 1, seed + octave * 1000);
+    const n11 = seededNoise2D(ix + 1, iz + 1, seed + octave * 1000);
+
+    const nx0 = n00 + (n10 - n00) * ux;
+    const nx1 = n01 + (n11 - n01) * ux;
+    const n = nx0 + (nx1 - nx0) * uz;
+
+    // Ridge fold: 0..1 noise → peak at 0.5, troughs at 0/1
+    const ridged = 1 - Math.abs(2 * n - 1);
+    // Square it to sharpen the spine
+    value += ridged * ridged * amplitude;
+    totalAmp += amplitude;
+    amplitude *= persistence;
+  }
+
+  return value / totalAmp;
+}
+
 /** 2D seeded noise — deterministic hash for grid position */
 function seededNoise2D(ix: number, iz: number, seed: number): number {
   let h = (ix * 374761393 + iz * 668265263 + seed * 1274126177) | 0;
@@ -1095,9 +1434,23 @@ function seededNoise2D(ix: number, iz: number, seed: number): number {
  * Generate elevation map for a zone. Uses world-space 5-octave fBm with
  * biome-blended profiles for seamless cross-zone terrain.
  *
- * Elevation values: 0 to MAX_ELEVATION (30).
- * Client-XR multiplies by 0.12 → 0 to 3.6 world Y units.
+ * Elevation values: 0 to MAX_ELEVATION (255).
+ * Client-XR multiplies by ELEV_SCALE=0.12 → up to ~30 world Y units for mountain peaks;
+ * gentle biomes (village/grassland) stay in the original 0..3 range.
  */
+function biomeTerrainNoise(
+  biome: string, wtx: number, wtz: number, seed: number, scale: number,
+): number {
+  // Mountain and chasm get a ridge-dominant hybrid for sharp spines instead of
+  // round bumps. Everything else uses the original smooth fBm.
+  if (biome === "mountain" || biome === "chasm") {
+    const r = ridgeNoise2D(wtx, wtz, seed, scale);
+    const v = valueNoise2D(wtx, wtz, seed + 13579, scale);
+    return r * 0.6 + v * 0.4;
+  }
+  return valueNoise2D(wtx, wtz, seed, scale);
+}
+
 function generateElevation(
   ground: number[],
   w: number,
@@ -1121,7 +1474,7 @@ function generateElevation(
       const wtx = worldOffTx + tx;
       const wtz = worldOffTz + tz;
 
-      const n = valueNoise2D(wtx, wtz, worldSeed, profile.noiseScale);
+      const n = biomeTerrainNoise(biome, wtx, wtz, worldSeed, profile.noiseScale);
       let elev = Math.round(n * profile.maxElev);
       elev = Math.min(elev, profile.maxElev);
       elev = Math.max(elev, 0);
@@ -1131,7 +1484,7 @@ function generateElevation(
       const adj = findAdjacentBlend(wtx, wtz, zone.id);
       if (adj && adj.distance < BLEND_TILES) {
         const adjProfile = getElevProfile(adj.biome);
-        const adjN = valueNoise2D(wtx, wtz, worldSeed, adjProfile.noiseScale);
+        const adjN = biomeTerrainNoise(adj.biome, wtx, wtz, worldSeed, adjProfile.noiseScale);
         let adjElev = Math.round(adjN * adjProfile.maxElev);
         adjElev = Math.min(adjElev, adjProfile.maxElev);
         adjElev = Math.max(adjElev, 0);
@@ -1175,26 +1528,48 @@ function generateElevation(
     }
   }
 
-  // Flatten POI areas with smooth falloff at edges
+  // Flatten POI areas with smooth falloff at edges. Most POIs use the average
+  // surrounding elevation (so villages and shrines sit naturally on the local
+  // ground). In dramatic biomes, mountain peaks / citadel plateaus take MAX
+  // and chasm landmarks take MIN — turns the named POIs into the visual
+  // anchors the zone is designed around.
+  const pickPolicy = (poi: PoiDef): "avg" | "max" | "min" => {
+    const tags = poi.tags ?? [];
+    // Portals always sit at the LOWEST nearby elevation so the entry tile is
+    // walkable from the adjacent zone without a cliff.
+    if (poi.type === "portal") return "min";
+    if (biome === "mountain" && (tags.includes("scenic") || tags.includes("boss-area"))) return "max";
+    if (biome === "citadel" && (tags.includes("safe-zone") || tags.includes("boss-area"))) return "max";
+    if (biome === "chasm" && (tags.includes("sacred") || tags.includes("boss-area"))) return "min";
+    return "avg";
+  };
+
   for (const poi of pois) {
     const cx = Math.floor(poi.position.x / TILE_SIZE);
     const cy = Math.floor(poi.position.z / TILE_SIZE);
     const r = Math.ceil(poi.radius / TILE_SIZE) + 2;
+    const policy = pickPolicy(poi);
 
-    // Find average elevation around POI center
+    // Sample elevation in a small window around POI center for avg/max/min
     let totalElev = 0;
     let count = 0;
+    let maxE = 0;
+    let minE = MAX_ELEVATION;
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         const tx = cx + dx;
         const tz = cy + dy;
         if (tx >= 0 && tx < w && tz >= 0 && tz < h) {
-          totalElev += elevation[tz * w + tx];
+          const e = elevation[tz * w + tx];
+          totalElev += e;
           count++;
+          if (e > maxE) maxE = e;
+          if (e < minE) minE = e;
         }
       }
     }
     const avgElev = count > 0 ? Math.round(totalElev / count) : 0;
+    const targetElev = policy === "max" ? maxE : policy === "min" ? minE : avgElev;
 
     // Flatten inner area, smooth blend at outer ring
     for (let dy = -r - 2; dy <= r + 2; dy++) {
@@ -1206,13 +1581,52 @@ function generateElevation(
         if (dist > r + 2) continue;
         const idx = tz * w + tx;
         if (dist <= r) {
-          elevation[idx] = avgElev;
+          elevation[idx] = targetElev;
         } else {
           // Smooth blend in the 2-tile outer ring
           const blend = (dist - r) / 2;
-          elevation[idx] = Math.round(avgElev * (1 - blend) + elevation[idx] * blend);
+          elevation[idx] = Math.round(targetElev * (1 - blend) + elevation[idx] * blend);
         }
       }
+    }
+  }
+
+  // Chasm biome: drive elevation to 0 along the road network and slope nearby
+  // tiles down to it, so the road carved by drawRoad reads as a true rift
+  // floor with walls rising on either side.
+  if (biome === "chasm") {
+    const CARVE_RADIUS = 4;
+    const isRoadTile = (i: number): boolean => {
+      const t = ground[i];
+      return t === TILE.DIRT_PLAIN || t === TILE.DIRT_H
+        || t === TILE.DIRT_V || t === TILE.DIRT_CROSS;
+    };
+    const carveTarget = new Array(w * h).fill(-1);
+    for (let tz = 0; tz < h; tz++) {
+      for (let tx = 0; tx < w; tx++) {
+        // Find nearest road tile within CARVE_RADIUS
+        let nearest = Infinity;
+        for (let dz = -CARVE_RADIUS; dz <= CARVE_RADIUS && nearest > 0; dz++) {
+          for (let dx = -CARVE_RADIUS; dx <= CARVE_RADIUS; dx++) {
+            const nx = tx + dx;
+            const nz = tz + dz;
+            if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+            if (!isRoadTile(nz * w + nx)) continue;
+            const d = Math.sqrt(dx * dx + dz * dz);
+            if (d < nearest) nearest = d;
+          }
+        }
+        if (nearest >= CARVE_RADIUS) continue;
+        // Linear ramp: floor (0) at the road, blending up to existing
+        // elevation at CARVE_RADIUS away.
+        const t = nearest / CARVE_RADIUS; // 0..1
+        const idx = tz * w + tx;
+        const existing = elevation[idx];
+        carveTarget[idx] = Math.round(existing * t); // 0 at center, existing at edge
+      }
+    }
+    for (let i = 0; i < w * h; i++) {
+      if (carveTarget[i] >= 0) elevation[i] = carveTarget[i];
     }
   }
 

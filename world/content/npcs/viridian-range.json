@@ -80,6 +80,13 @@
       "hp": 999
     },
     {
+      "type": "quest-giver",
+      "name": "Highland Herbalist Maren",
+      "x": 400,
+      "y": 260,
+      "hp": 999
+    },
+    {
       "type": "merchant",
       "name": "Mountain Provisioner Hilda",
       "x": 170,

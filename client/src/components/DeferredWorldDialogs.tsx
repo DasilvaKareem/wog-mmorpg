@@ -8,6 +8,7 @@ import { InspectDialog } from "@/components/InspectDialog";
 import { NpcInfoDialog } from "@/components/NpcInfoDialog";
 import { NpcDialogueOverlay } from "@/components/NpcDialogueOverlay";
 import { InventoryDialog } from "@/components/InventoryDialog";
+import { TradingRulesDialog } from "@/components/TradingRulesDialog";
 
 export function DeferredWorldDialogs(): React.ReactElement {
   return (
@@ -19,6 +20,7 @@ export function DeferredWorldDialogs(): React.ReactElement {
       <NpcInfoDialog />
       <NpcDialogueOverlay />
       <InventoryDialog />
+      <TradingRulesDialog />
       <ArenaHUD />
     </>
   );

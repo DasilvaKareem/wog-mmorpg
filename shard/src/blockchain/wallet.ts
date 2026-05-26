@@ -32,7 +32,10 @@ let treasuryAddressCache: string | null = null;
 let treasurySeededMem = false;
 let treasuryInitPromise: Promise<string> | null = null;
 
-const WELCOME_COPPER = 200;
+// Sized to cover the dungeon-bootstrap pipeline for fresh agents:
+//   mining 50c + herbalism 50c + alchemy 75c + Stone Pickaxe 30c + Basic Sickle 25c
+//   = 230c minimum.
+const WELCOME_COPPER = 300;
 const TREASURY_SEED_GOLD = "100000";
 const TREASURY_ADDRESS_KEY = "wallet:welcome-treasury:address";
 const TREASURY_SEEDED_KEY = "wallet:welcome-treasury:seeded";

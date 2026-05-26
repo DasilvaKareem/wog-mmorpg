@@ -98,6 +98,62 @@
       "hp": 999
     },
     {
+      "type": "quest-giver",
+      "name": "Herbalist Brynn",
+      "x": 420,
+      "y": 140,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Prospector Sven",
+      "x": 160,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Tracker Brenna",
+      "x": 260,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Journeyman Smith Ward",
+      "x": 360,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Field Alchemist Pell",
+      "x": 460,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Camp Cook Rolo",
+      "x": 160,
+      "y": 300,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Tanner Breck",
+      "x": 260,
+      "y": 300,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Gemhunter Orsa",
+      "x": 360,
+      "y": 300,
+      "hp": 999
+    },
+    {
       "type": "mob",
       "name": "Forest Bear",
       "x": 70,

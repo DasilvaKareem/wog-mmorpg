@@ -1,4 +1,4 @@
-export type OreType = "stone" | "coal" | "tin" | "copper" | "silver" | "gold";
+export type OreType = "stone" | "coal" | "tin" | "copper" | "silver" | "gold" | "arcane-crystal";
 
 export interface OreProperties {
   label: string;
@@ -64,5 +64,14 @@ export const ORE_CATALOG: Record<OreType, OreProperties> = {
     respawnTicks: 300,
     requiredPickaxeTier: 4,
     requiredSkillLevel: 75,
+  },
+  "arcane-crystal": {
+    label: "Arcane Crystal Vein",
+    rarity: "epic",
+    maxCharges: 1,
+    tokenId: 121n,
+    respawnTicks: 360,
+    requiredPickaxeTier: 4,
+    requiredSkillLevel: 100,
   },
 };

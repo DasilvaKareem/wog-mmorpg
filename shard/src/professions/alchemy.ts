@@ -272,7 +272,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 22n, quantity: 2 }, // 2x Coal Ore
     ],
     copperCost: 15,
-    requiredSkillLevel: 10,
+    requiredSkillLevel: 1, // entry-level — agents bootstrap E-keys without alchemy grind
     brewingTime: 40,
   },
   {
@@ -719,7 +719,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
         : isMid
           ? PROFESSION_XP.BREW_TIER2
           : PROFESSION_XP.BREW_TIER3;
-      const profXpResult = awardProfessionXp(entity, zoneId, brewXp, "alchemy", outputItem?.name);
+      const profXpResult = awardProfessionXp(entity, zoneId, brewXp, "alchemy");
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
@@ -806,7 +806,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       return { error: "Invalid wallet address" };
     }
 
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

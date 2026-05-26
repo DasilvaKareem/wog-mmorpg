@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Entity, ElevationProvider, VisibleIntent } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
+import type { EffectsManager } from "./EffectsManager.js";
 import { resolveCanonicalArmorPieceId } from "./ArmorSystem.js";
 import { getGradientMap, NO_OUTLINE_LAYER } from "./ToonPipeline.js";
-import { playSoundEffect } from "../sfx.js";
+import { playSoundEffect, type SoundEffectId } from "../sfx.js"; // SoundEffectId used in GATHER_SFX
+import { playerSession } from "../state/PlayerSession.js";
 
 // ── Appearance color maps (matched to actual server values) ─────────
 
@@ -287,386 +288,13 @@ function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?
   });
 }
 
-function addArmorPieces(
-  group: THREE.Group, ent: Entity, cls: { sx: number; sy: number; sz: number; color: number },
-  leftArm?: THREE.Group, rightArm?: THREE.Group, leftLeg?: THREE.Mesh, rightLeg?: THREE.Mesh,
-  rig?: HumanoidRigLike | null, bodyMesh?: THREE.Mesh | null,
-  opts?: { recolorBase?: boolean },
-) {
-  const eq = ent.equipment;
-  if (!eq) return;
-  const recolorBase = opts?.recolorBase ?? true;
-  if (ent.type === "player" && Object.keys(eq).length > 0) {
-    console.log("[Armor][Procedural]", ent.name, Object.fromEntries(
-      Object.entries(eq).map(([slot, item]) => [slot, { name: item?.name, xrVisualId: item?.xrVisualId ?? null, quality: item?.quality }])
-    ));
-  }
-
-  // ── Helm — attach to head bone so it follows head animation ──
-  if (eq.helm) {
-    const mt = inferArmorMaterial(eq.helm.name ?? "");
-    const mat = makeArmorMat(mt, eq.helm.quality);
-    const helmTarget = rig?.head ?? group;
-
-    if (mt === "plate") {
-      // Full plate helm: dome + nasal + crest (relative to head bone center)
-      const dome = new THREE.Mesh(helmDomeGeo, mat);
-      dome.position.y = 0.08; helmTarget.add(dome);
-      const nasal = new THREE.Mesh(helmNasalGeo, mat);
-      nasal.position.set(0, -0.02, 0.2); helmTarget.add(nasal);
-      const crest = new THREE.Mesh(helmCrestGeo, mat);
-      crest.position.set(0, 0.22, 0); helmTarget.add(crest);
-    } else if (mt === "chain") {
-      // Chain coif
-      const coif = new THREE.Mesh(helmCoifGeo, mat);
-      coif.position.y = 0.06; helmTarget.add(coif);
-      const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.12, 8), mat);
-      drape.position.y = -0.12; helmTarget.add(drape);
-    } else {
-      // Leather cap: low-profile skullcap + brim
-      const cap = new THREE.Mesh(helmCapGeo, mat);
-      cap.position.y = 0.1; helmTarget.add(cap);
-      const brim = new THREE.Mesh(helmBrimGeo, mat);
-      brim.position.y = 0.04; helmTarget.add(brim);
-    }
-  }
-
-  // ── Chest — recolor body mesh to armor color + add small detail accents ──
-  if (eq.chest) {
-    const mt = inferArmorMaterial(eq.chest.name ?? "");
-    const armorMat = makeArmorMat(mt, eq.chest.quality);
-    const chestTarget = rig?.chest ?? group;
-    const chestOffY = rig ? 0 : 0.8;
-
-    // Recolor body mesh directly — no transparent overlay
-    if (recolorBase && bodyMesh) {
-      const bm = bodyMesh.material as THREE.MeshToonMaterial;
-      bm.color.copy(armorMat.color);
-      if (bm.emissive && armorMat.emissive) {
-        bm.emissive.copy(armorMat.emissive);
-        bm.emissiveIntensity = armorMat.emissiveIntensity;
-      }
-    }
-
-    // Small accent details per armor type (not full overlays)
-    if (mt === "plate") {
-      const cuirass = new THREE.Mesh(chestPlateGeo, armorMat);
-      cuirass.position.set(0, chestOffY, 0.06);
-      cuirass.scale.set(0.92 * cls.sx, 0.9, 0.7 * cls.sz);
-      chestTarget.add(cuirass);
-      // Belt ridges
-      for (const ry of [-0.1, 0.05]) {
-        const ridge = new THREE.Mesh(new THREE.TorusGeometry(0.28 * cls.sx, 0.018, 4, 10), armorMat);
-        ridge.position.y = chestOffY + ry; ridge.rotation.x = Math.PI / 2;
-        chestTarget.add(ridge);
-      }
-    } else if (mt === "chain") {
-      const hauberk = new THREE.Mesh(chestVestGeo, armorMat);
-      hauberk.position.set(0, chestOffY - 0.02, 0.05);
-      hauberk.scale.set(0.94 * cls.sx, 0.96, 0.72 * cls.sz);
-      chestTarget.add(hauberk);
-      // Collar ring
-      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.02, 4, 8), armorMat);
-      collar.position.y = chestOffY + 0.25; collar.rotation.x = Math.PI / 2;
-      chestTarget.add(collar);
-    } else {
-      const vest = new THREE.Mesh(chestVestGeo, armorMat);
-      vest.position.set(0, chestOffY - 0.02, 0.05);
-      vest.scale.set(0.9 * cls.sx, 0.92, 0.68 * cls.sz);
-      chestTarget.add(vest);
-      // Leather stitching line
-      const stitchMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x554422 });
-      const stitch = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.3, 0.01), stitchMat);
-      stitch.position.set(0, chestOffY, 0.27 * cls.sz); chestTarget.add(stitch);
-    }
-  }
-
-  // ── Shoulders — attach to arm groups so they swing with arms ──
-  if (eq.shoulders) {
-    const mt = inferArmorMaterial(eq.shoulders.name ?? "");
-    const mat = makeArmorMat(mt, eq.shoulders.quality);
-    const arms = [leftArm, rightArm];
-
-    for (let i = 0; i < 2; i++) {
-      const arm = arms[i];
-      if (mt === "plate") {
-        const pad = new THREE.Mesh(pauldronPlatGeo, mat);
-        pad.scale.set(1, 0.8, 1);
-        const rim = new THREE.Mesh(pauldronRimGeo, mat);
-        rim.rotation.x = Math.PI / 2;
-        if (arm) { pad.position.set(0, 0.05, 0); arm.add(pad); rim.position.set(0, -0.02, 0); arm.add(rim); }
-        else { const dx = i === 0 ? -0.33 : 0.33; pad.position.set(dx, 1.2, 0); group.add(pad); rim.position.set(dx, 1.14, 0); group.add(rim); }
-      } else if (mt === "chain") {
-        const pad = new THREE.Mesh(pauldronPlatGeo, mat);
-        pad.scale.set(0.8, 0.7, 0.8);
-        if (arm) { pad.position.set(0, 0.03, 0); arm.add(pad); }
-        else { pad.position.set((i === 0 ? -0.3 : 0.3), 1.18, 0); group.add(pad); }
-      } else {
-        const pad = new THREE.Mesh(pauldronPadGeo, mat);
-        if (arm) { pad.position.set(0, 0.02, 0); arm.add(pad); }
-        else { const dx = i === 0 ? -1 : 1; pad.position.set(dx * 0.28, 1.18, 0); pad.rotation.z = dx * 0.4; group.add(pad); }
-      }
-    }
-  }
-
-  // ── Legs — recolor thigh+shin meshes to armor color ──
-  if (eq.legs) {
-    const mt = inferArmorMaterial(eq.legs.name ?? "");
-    const legMat = makeArmorMat(mt, eq.legs.quality);
-    // Recolor all leg meshes on hip and knee bones
-    if (rig) {
-      for (const bone of [rig.lHip, rig.rHip, rig.lKnee, rig.rKnee]) {
-        if (recolorBase) {
-          bone.traverse((child) => {
-            if (child instanceof THREE.Mesh && child.material) {
-              const m = child.material as THREE.MeshToonMaterial;
-              m.color.copy(legMat.color);
-              if (m.emissive && legMat.emissive) {
-                m.emissive.copy(legMat.emissive);
-                m.emissiveIntensity = legMat.emissiveIntensity;
-              }
-            }
-          });
-        }
-      }
-      // Plate: add knee cap accents
-      if (mt === "plate") {
-        const kneeMat = makeArmorMat(mt, eq.legs.quality);
-        for (const kneeBone of [rig.lKnee, rig.rKnee]) {
-          const greave = new THREE.Mesh(greaveGeo, kneeMat);
-          greave.position.set(0, -0.12, 0.04);
-          greave.scale.set(0.9, 1, 0.8);
-          kneeBone.add(greave);
-          const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), kneeMat);
-          kneeCap.position.set(0, 0.02, 0.06);
-          kneeBone.add(kneeCap);
-        }
-      } else {
-        for (const kneeBone of [rig.lKnee, rig.rKnee]) {
-          const leggings = new THREE.Mesh(leatherPantsGeo, legMat);
-          leggings.position.set(0, -0.12, 0.03);
-          leggings.scale.set(0.82, 1, 0.76);
-          kneeBone.add(leggings);
-        }
-      }
-    } else {
-      // Fallback: recolor leg mesh refs directly
-      for (const leg of [leftLeg, rightLeg]) {
-        if (leg?.material) {
-          (leg.material as THREE.MeshToonMaterial).color.copy(legMat.color);
-        }
-      }
-    }
-  }
-
-  // ── Boots — chunky fantasy boots that replace default footwear ──
-  if (eq.boots) {
-    const mt = inferArmorMaterial(eq.boots.name ?? "");
-    const mat = makeArmorMat(mt, eq.boots.quality);
-    const darkMat = makeArmorMat(mt, eq.boots.quality);
-    darkMat.color.multiplyScalar(0.7); // darker sole
-    if (rig) {
-      // Hide default boot meshes on foot bones
-      for (const footBone of [rig.lFoot, rig.rFoot]) {
-        footBone.children.forEach(c => { if (c instanceof THREE.Mesh) c.visible = false; });
-      }
-      for (let i = 0; i < 2; i++) {
-        const kneeBone = i === 0 ? rig.lKnee : rig.rKnee;
-        const footBone = i === 0 ? rig.lFoot : rig.rFoot;
-        if (mt === "plate") {
-          // Armored stomper: boot body on knee + sole on foot
-          const boot = new THREE.Mesh(bootPlateGeo, mat);
-          boot.position.set(0, -0.28, 0.04); boot.userData.equipSlot = "bootPlate"; kneeBone.add(boot);
-          const sole = new THREE.Mesh(bootPlateSoleGeo, darkMat);
-          sole.position.set(0, -0.05, 0.04); sole.userData.equipSlot = "bootPlate"; footBone.add(sole);
-          const cuff = new THREE.Mesh(bootCuffGeo, mat);
-          cuff.position.set(0, -0.18, 0.03); cuff.userData.equipSlot = "bootPlate"; kneeBone.add(cuff);
-          // Toe cap
-          const toeCap = new THREE.Mesh(toeGeo, mat);
-          toeCap.scale.set(1.3, 0.9, 1.2);
-          toeCap.position.set(0, -0.03, 0.14); toeCap.userData.equipSlot = "bootPlate"; footBone.add(toeCap);
-        } else if (mt === "chain") {
-          const boot = new THREE.Mesh(bootLeatherGeo, mat);
-          boot.position.set(0, -0.22, 0.02); boot.userData.equipSlot = "bootChain"; kneeBone.add(boot);
-          const sole = new THREE.Mesh(bootLeatherSoleGeo, darkMat);
-          sole.position.set(0, -0.04, 0.03); sole.userData.equipSlot = "bootChain"; footBone.add(sole);
-          const cuff = new THREE.Mesh(bootCuffGeo, mat);
-          cuff.position.set(0, -0.14, 0.02); cuff.userData.equipSlot = "bootChain"; kneeBone.add(cuff);
-        } else {
-          // Leather — rounded adventure boots
-          const boot = new THREE.Mesh(bootLeatherGeo, mat);
-          boot.position.set(0, -0.22, 0.02); boot.userData.equipSlot = "bootLeather"; kneeBone.add(boot);
-          const sole = new THREE.Mesh(bootLeatherSoleGeo, darkMat);
-          sole.position.set(0, -0.04, 0.03); sole.userData.equipSlot = "bootLeather"; footBone.add(sole);
-          const toe = new THREE.Mesh(toeGeo, mat);
-          toe.position.set(0, -0.02, 0.12); toe.userData.equipSlot = "bootLeather"; footBone.add(toe);
-        }
-      }
-    } else {
-      // Fallback: absolute position
-      for (const dx of [-0.16, 0.16]) {
-        const boot = new THREE.Mesh(bootPlateGeo, mat);
-        boot.position.set(dx, 0.06, 0.02); group.add(boot);
-      }
-    }
-  }
-
-  // ── Gloves — child of arm groups so they swing with arms ──
-  if (eq.gloves) {
-    const mt = inferArmorMaterial(eq.gloves.name ?? "");
-    const mat = makeArmorMat(mt, eq.gloves.quality);
-    const armRefs = [leftArm, rightArm];
-    for (let i = 0; i < 2; i++) {
-      const arm = armRefs[i];
-      const dx = i === 0 ? -1 : 1;
-      if (mt === "plate") {
-        const gaunt = new THREE.Mesh(gauntletGeo, mat);
-        const cuff = new THREE.Mesh(gauntletCuffGeo, mat);
-        if (arm) { gaunt.position.set(0, -0.28, 0); arm.add(gaunt); cuff.position.set(0, -0.06, 0); arm.add(cuff); }
-        else { gaunt.position.set(dx * 0.38, 0.62, 0); group.add(gaunt); cuff.position.set(dx * 0.38, 0.7, 0); group.add(cuff); }
-      } else {
-        const glove = new THREE.Mesh(gloveLeatherGeo, mat);
-        if (arm) { glove.position.set(0, -0.26, 0); arm.add(glove); }
-        else { glove.position.set(dx * 0.38, 0.62, 0); group.add(glove); }
-      }
-    }
-  }
-
-  // ── Belt — always anchored to hip bone (top of hip = natural waistline) ──
-  if (eq.belt) {
-    const mt = inferArmorMaterial(eq.belt.name ?? "");
-    const mat = makeArmorMat(mt, eq.belt.quality);
-
-    // Belt sits at top of hip bone — fixed Y offset relative to hip
-    const beltTarget = rig?.hip ?? group;
-    const beltY = rig ? 0.12 : 0.52; // just above hip joint where waist meets torso
-    const beltRadius = 0.18 * cls.sx;
-    if (mt === "plate") {
-      const ring = new THREE.Mesh(beltGeo, mat);
-      ring.position.y = beltY; ring.rotation.x = Math.PI / 2;
-      ring.scale.set(cls.sx, cls.sz, 1); ring.userData.equipSlot = "beltPlate"; beltTarget.add(ring);
-      const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-      buckle.position.set(0, beltY, beltRadius + 0.03); buckle.userData.equipSlot = "beltPlate"; beltTarget.add(buckle);
-    } else {
-      const ring = new THREE.Mesh(beltThinGeo, mat);
-      ring.position.y = beltY; ring.rotation.x = Math.PI / 2;
-      ring.scale.set(cls.sx, cls.sz, 1); ring.userData.equipSlot = "beltLeather"; beltTarget.add(ring);
-      if (mt === "leather") {
-        const pouchMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x6B5533 });
-        for (const side of [-1, 1]) {
-          const pouch = new THREE.Mesh(beltPouchGeo, pouchMat);
-          pouch.position.set(side * beltRadius, beltY - 0.04, 0.05); beltTarget.add(pouch);
-        }
-      }
-      const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-      buckle.position.set(0, beltY, beltRadius + 0.02); beltTarget.add(buckle);
-    }
-  }
-}
-
-function buildWeaponMesh(weaponType: WeaponType, metalColor: number, emissiveColor: number): THREE.Group {
-  const g = new THREE.Group();
-  const metalMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: metalColor, emissive: emissiveColor, emissiveIntensity: emissiveColor ? 0.3 : 0 });
-  const handleMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x664422 });
-  const accentMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: metalColor, emissive: emissiveColor, emissiveIntensity: emissiveColor ? 0.5 : 0 });
-
-  switch (weaponType) {
-    case "sword": {
-      const blade = new THREE.Mesh(swordBladeGeo, metalMat);
-      blade.position.y = 0.32; blade.castShadow = true; g.add(blade);
-      // Taper the blade tip by scaling top verts isn't trivial with box — use a subtle rotation
-      const guard = new THREE.Mesh(swordGuardGeo, accentMat);
-      guard.position.y = 0.04; g.add(guard);
-      const handle = new THREE.Mesh(swordHandleGeo, handleMat);
-      handle.position.y = -0.07; g.add(handle);
-      const pommel = new THREE.Mesh(swordPommelGeo, accentMat);
-      pommel.position.y = -0.17; g.add(pommel);
-      break;
-    }
-    case "axe": {
-      const handle = new THREE.Mesh(axeHandleGeo, handleMat);
-      handle.castShadow = true; g.add(handle);
-      const head = new THREE.Mesh(axeHeadGeo, metalMat);
-      head.position.set(0.02, 0.22, 0); head.castShadow = true; g.add(head);
-      break;
-    }
-    case "staff": {
-      const pole = new THREE.Mesh(staffPoleGeo, handleMat);
-      pole.castShadow = true; g.add(pole);
-      const orb = new THREE.Mesh(staffOrbGeo, accentMat);
-      orb.position.y = 0.52; g.add(orb);
-      // Small ring below orb
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.045, 0.01, 6, 10),
-        metalMat,
-      );
-      ring.position.y = 0.44; ring.rotation.x = Math.PI / 2; g.add(ring);
-      break;
-    }
-    case "bow": {
-      const limb = new THREE.Mesh(bowLimbGeo, handleMat);
-      limb.rotation.z = Math.PI / 2; limb.position.y = 0.05;
-      limb.castShadow = true; g.add(limb);
-      const string = new THREE.Mesh(bowStringGeo, new THREE.MeshBasicMaterial({ color: 0xccccaa }));
-      string.position.set(-0.18, 0.05, 0); g.add(string);
-      // Arrow nocked
-      const arrowShaft = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.008, 0.008, 0.45, 4),
-        new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x886644 }),
-      );
-      arrowShaft.position.set(-0.16, 0.05, 0); arrowShaft.rotation.z = Math.PI / 2; g.add(arrowShaft);
-      const arrowHead = new THREE.Mesh(
-        new THREE.ConeGeometry(0.02, 0.06, 4),
-        metalMat,
-      );
-      arrowHead.position.set(-0.4, 0.05, 0); arrowHead.rotation.z = -Math.PI / 2; g.add(arrowHead);
-      break;
-    }
-    case "dagger": {
-      const blade = new THREE.Mesh(daggerBladeGeo, metalMat);
-      blade.position.y = 0.18; blade.castShadow = true; g.add(blade);
-      const guard = new THREE.Mesh(swordGuardGeo, accentMat);
-      guard.position.y = 0.03; guard.scale.set(1, 1, 0.6); g.add(guard);
-      const handle = new THREE.Mesh(daggerHandleGeo, handleMat);
-      handle.position.y = -0.04; g.add(handle);
-      break;
-    }
-    case "mace": {
-      const handle = new THREE.Mesh(maceHandleGeo, handleMat);
-      handle.castShadow = true; g.add(handle);
-      const head = new THREE.Mesh(maceHeadGeo, metalMat);
-      head.position.y = 0.3; head.castShadow = true; g.add(head);
-      break;
-    }
-    case "pickaxe": {
-      const handle = new THREE.Mesh(pickHandleGeo, handleMat);
-      handle.castShadow = true; g.add(handle);
-      // Point
-      const point = new THREE.Mesh(pickHeadGeo, metalMat);
-      point.position.set(0.12, 0.25, 0); point.rotation.z = -Math.PI / 2;
-      point.castShadow = true; g.add(point);
-      // Back flat
-      const back = new THREE.Mesh(pickBackGeo, metalMat);
-      back.position.set(-0.06, 0.25, 0); g.add(back);
-      break;
-    }
-    case "sickle": {
-      const handle = new THREE.Mesh(sickleHandleGeo, handleMat);
-      handle.castShadow = true; g.add(handle);
-      const blade = new THREE.Mesh(sickleBladeGeo, metalMat);
-      blade.position.set(0, 0.2, 0); blade.rotation.z = -Math.PI * 0.3;
-      blade.castShadow = true; g.add(blade);
-      break;
-    }
-  }
-
-  return g;
-}
 
 export const CLASS_COLORS: Record<string, number> = {
   warrior: 0xcc3333, paladin: 0xe6c830, mage: 0x3366dd, cleric: 0xeeeeff,
   ranger: 0x33aa44, rogue: 0x8833bb, warlock: 0x33bb66, monk: 0xe69628,
 };
+
+const RESOURCE_NODE_TYPES = new Set(["ore-node", "flower-node", "nectar-node", "crop-node"]);
 
 const ENTITY_STYLE: Record<string, { color: number; style: "humanoid" | "object" | "resource" | "mob" }> = {
   player: { color: 0x44ddff, style: "humanoid" },
@@ -722,14 +350,6 @@ const hairBunGeo = new THREE.SphereGeometry(0.10, 6, 5);              // hair bu
 const hairBunBaseGeo = new THREE.CylinderGeometry(0.08, 0.06, 0.06, 6); // bun base wrap
 const hairPigtailGeo = new THREE.CapsuleGeometry(0.05, 0.25, 3, 5);  // pigtail strand
 const hairSideSweptGeo = new THREE.SphereGeometry(0.23, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.55); // asymmetric cap
-const shieldGeo = new THREE.BoxGeometry(0.04, 0.35, 0.25);
-const towerShieldGeo = new THREE.BoxGeometry(0.05, 0.46, 0.30);
-const bulwarkShieldGeo = new THREE.CylinderGeometry(0.18, 0.16, 0.05, 7);
-const capeGeo = new THREE.PlaneGeometry(0.7, 0.85, 1, 4);
-const capeClaspGeo = new THREE.BoxGeometry(0.18, 0.035, 0.03);
-const amuletChainGeo = new THREE.TorusGeometry(0.11, 0.009, 4, 12, Math.PI);
-const amuletGemGeo = new THREE.OctahedronGeometry(0.045, 0);
-const equipRingGeo = new THREE.TorusGeometry(0.022, 0.006, 4, 10);
 const mobBodyGeo = new THREE.CapsuleGeometry(0.28, 0.35, 4, 8);
 const mobWaistGeo = new THREE.CylinderGeometry(0.16, 0.20, 0.20, 8);
 const npcBodyGeo = new THREE.CapsuleGeometry(0.21, 0.32, 4, 8);
@@ -904,7 +524,9 @@ interface SpeechBubble {
 
 // ── Floating combat text (stylized) ─────────────────────────────────
 
-type FloatingKind = "damage" | "crit" | "heal" | "xp" | "dodge" | "block" | "miss" | "levelup";
+type FloatingKind =
+  | "damage" | "crit" | "heal" | "xp" | "dodge" | "block" | "miss" | "levelup"
+  | "craft-common" | "craft-uncommon" | "craft-rare" | "craft-epic" | "craft-fail";
 
 interface FloatingStyle {
   fontPx: number;
@@ -926,6 +548,12 @@ const FLOATING_STYLES: Record<FloatingKind, FloatingStyle> = {
   block:   { fontPx: 64,  topHex: "#ffffff", midHex: "#ddd6a8", bottomHex: "#9d9250", strokeHex: "#1a1608", glowHex: "#d8c48a", scaleX: 2.0, scaleY: 1.2 },
   miss:    { fontPx: 60,  topHex: "#ffffff", midHex: "#dddddd", bottomHex: "#888888", strokeHex: "#111111", glowHex: "#ffffff", scaleX: 1.8, scaleY: 1.1 },
   levelup: { fontPx: 104, topHex: "#ffffff", midHex: "#fff0a0", bottomHex: "#ffaa22", strokeHex: "#3c1a00", glowHex: "#ffcc44", scaleX: 3.6, scaleY: 1.6 },
+  // Craft outcomes — colored by rarity tier
+  "craft-common":   { fontPx: 64, topHex: "#ffffff", midHex: "#dddddd", bottomHex: "#888888", strokeHex: "#111111", glowHex: "#cccccc", scaleX: 2.2, scaleY: 1.2 },
+  "craft-uncommon": { fontPx: 72, topHex: "#f0ffe6", midHex: "#7fee9a", bottomHex: "#1f9c3e", strokeHex: "#04200d", glowHex: "#3ddc84", scaleX: 2.4, scaleY: 1.3 },
+  "craft-rare":     { fontPx: 88, topHex: "#e8f3ff", midHex: "#7fb8ff", bottomHex: "#1d63d8", strokeHex: "#031628", glowHex: "#4a9eff", scaleX: 2.7, scaleY: 1.4 },
+  "craft-epic":     { fontPx: 104,topHex: "#fff0ff", midHex: "#d089ff", bottomHex: "#7a1ed8", strokeHex: "#1a0028", glowHex: "#bb44ff", scaleX: 3.2, scaleY: 1.6 },
+  "craft-fail":     { fontPx: 80, topHex: "#fff0f0", midHex: "#ff6a6a", bottomHex: "#a00000", strokeHex: "#200000", glowHex: "#ff4444", scaleX: 2.5, scaleY: 1.3 },
 };
 
 function makeFloatingNumber(text: string, kind: FloatingKind): THREE.Sprite {
@@ -1025,6 +653,7 @@ const GATHER_ACTION: Record<string, Action> = {
   mining: "mine",
   herbalism: "forage",
   skinning: "skin",
+  farming: "forage",
 };
 
 /** Map professional craftType → Action */
@@ -1068,6 +697,27 @@ function locomotionAction(
   const threshold = inLocomotion ? LOCOMOTION_STOP_THRESHOLD : LOCOMOTION_START_THRESHOLD;
   if (movingSmooth <= threshold) return "idle";
   return entity.isRunning ? "run" : "walk";
+}
+
+function subtypeLabel(equipSlot: string | undefined, category: string | undefined): string {
+  switch (equipSlot) {
+    case "weapon": return "Weapon";
+    case "shield": return "Shield";
+    case "helm": return "Helm";
+    case "chest": return "Chest";
+    case "legs": return "Legs";
+    case "boots": return "Boots";
+    case "shoulders": return "Shoulders";
+    case "gloves": return "Gauntlets";
+    case "belt": return "Belt";
+    case "cape": return "Cape";
+    case "ring": return "Ring";
+    case "amulet": return "Amulet";
+  }
+  if (category === "weapon") return "Weapon";
+  if (category === "armor") return "Armor";
+  if (category === "consumable") return "Brew";
+  return "Item";
 }
 
 interface FloatingText {
@@ -1145,6 +795,13 @@ interface EntityObject {
   combatAnimHold: number;
   /** When the current one-shot animation started (performance.now ms), 0 if looping */
   oneShotStart: number;
+  /**
+   * performance.now() timestamp of the last basic-attack windup event seen
+   * for this entity. The server emits `attack-windup` ~250ms before the
+   * matching `combat` damage event; we use this to suppress restarting the
+   * swing animation when the damage event arrives.
+   */
+  lastBasicAttackWindupMs: number;
   /** Queued melee animation waiting for entity to be in visual range */
   pendingMelee: {
     action: Action;
@@ -1153,11 +810,14 @@ interface EntityObject {
     queuedAt: number;
     techniqueId?: string;
     animStyle?: string;
+    critical?: boolean;
   } | null;
   lifeState: EntityLifeState;
   lifeToken: number;
   /** Timestamp when death animation started — prevents premature respawn */
   dyingSince: number;
+  /** Name/level label sprite above entity */
+  nameLabel: THREE.Sprite | null;
   /** Floating quest indicator sprite above NPC */
   questIndicator: THREE.Sprite | null;
   /** Red ground ring shown while the entity is actively attacking (WoW-style combat indicator) */
@@ -1174,8 +834,15 @@ export class EntityManager {
   private speechBubbles: SpeechBubble[] = [];
   private elevationProvider: ElevationProvider | null = null;
   private envAssets: EnvironmentAssets | null = null;
-  /** ID of the local player's entity — used to gate XP-gain floating text */
+  private effects: EffectsManager | null = null;
+  /** ID of the local player's entity — used to gate XP-gain floating text. Auto-healed from wallet match in sync(). */
   private ownEntityId: string | null = null;
+  /** Wallet address (lowercased) is the durable identity. entityId changes on relogin (shard issues new id), wallet does not. */
+  private ownWallet: string | null = null;
+  /** Grace window: if own-player drops from snapshot, keep rendering for this long before deleting. Lets brief network/zone-edge glitches not look like a crash. */
+  private static readonly OWN_REMOVAL_GRACE_MS = 3000;
+  /** Timestamp own-player first went missing from a snapshot (null = currently present). */
+  private ownMissingSinceMs: number | null = null;
 
   /** True if the local player is the victim or attacker — used to gate SFX so we don't hear every entity in the zone. */
   private isLocalAudible(victimId?: string | null, attackerId?: string | null): boolean {
@@ -1214,9 +881,18 @@ export class EntityManager {
     this.elevationProvider = ep;
   }
 
+  setEffectsManager(mgr: EffectsManager) {
+    this.effects = mgr;
+  }
+
   /** Tell the manager which entity is the local player (for XP-gain text, etc.) */
   setOwnEntityId(id: string | null) {
     this.ownEntityId = id;
+  }
+
+  /** Durable identity. Once set, sync() will auto-heal ownEntityId when the wallet matches a different id (relogin). */
+  setOwnWallet(wallet: string | null) {
+    this.ownWallet = wallet ? wallet.toLowerCase() : null;
   }
 
   /**
@@ -1279,6 +955,20 @@ export class EntityManager {
       }
     }
 
+    // Locate own-player by wallet (durable) — heals entityId across relogin where
+    // the server issues a new id (shard/src/world/spawnOrders.ts:273) but the
+    // wallet is unchanged.
+    let ownInSnapshot: { id: string; ent: Entity } | null = null;
+    if (this.ownWallet) {
+      for (const [id, ent] of Object.entries(entities)) {
+        if (ent.walletAddress && ent.walletAddress.toLowerCase() === this.ownWallet) {
+          ownInSnapshot = { id, ent };
+          if (this.ownEntityId !== id) this.ownEntityId = id;
+          break;
+        }
+      }
+    }
+
     for (const [id, ent] of Object.entries(entities)) {
       seen.add(id);
       const existing = this.entities.get(id);
@@ -1293,7 +983,7 @@ export class EntityManager {
         if (
           info.style === "humanoid" &&
           !existing.hasGlbModel &&
-          this.charAssets?.isReady()
+          this.charAssets?.isPlayerClassesReady()
         ) {
           const replacement = this.createEntity(ent);
           this.refreshCombatFacing(replacement, preferredIntentBySource.get(id), entities);
@@ -1388,10 +1078,14 @@ export class EntityManager {
         }
 
         existing.prevHp = ent.hp;
+        if (existing.nameLabel && ent.level && ent.level !== existing.entity.level) {
+          this.updateNameLabel(existing, ent);
+        }
         existing.entity = ent;
         this.refreshCombatFacing(existing, preferredIntentBySource.get(id), entities);
 
         this.updateHpBar(existing, ent);
+        if (RESOURCE_NODE_TYPES.has(ent.type)) this.updateResourceNodeDepletion(existing, ent);
       } else {
         const obj = this.createEntity(ent);
         this.refreshCombatFacing(obj, preferredIntentBySource.get(id), entities);
@@ -1400,10 +1094,42 @@ export class EntityManager {
       }
     }
 
+    const now = Date.now();
     for (const [id, obj] of this.entities) {
-      if (!seen.has(id)) {
+      if (seen.has(id)) continue;
+      // Protect own-player from silent deletion. Grace window lets brief snapshot
+      // gaps (zone-edge race, transient SSE/poll miss) not look like a crash.
+      const isOwn = this.ownWallet
+        ? (obj.entity.walletAddress?.toLowerCase() === this.ownWallet || id === this.ownEntityId)
+        : id === this.ownEntityId;
+      if (isOwn) {
+        if (this.ownMissingSinceMs == null) this.ownMissingSinceMs = now;
+        if (now - this.ownMissingSinceMs < EntityManager.OWN_REMOVAL_GRACE_MS) {
+          // Stay in scene, frozen at last position. Camera will hold via REACQUIRING state.
+          continue;
+        }
+        // Grace expired — actually evict and mark session lost.
         this.group.remove(obj.group);
         this.entities.delete(id);
+        if (this.ownEntityId === id) this.ownEntityId = null;
+        playerSession.markLost();
+        continue;
+      }
+      this.group.remove(obj.group);
+      this.entities.delete(id);
+    }
+
+    // Drive PlayerSession state from snapshot presence.
+    if (this.ownWallet) {
+      if (ownInSnapshot) {
+        this.ownMissingSinceMs = null;
+        playerSession.markPresent(ownInSnapshot.id, ownInSnapshot.ent.zoneId ?? playerSession.zoneId ?? "");
+      } else if (this.ownEntityId && this.entities.has(this.ownEntityId)) {
+        // Still rendering own-player from a prior snapshot (within grace).
+        playerSession.markMissing();
+      } else {
+        // No own-player rendered at all — fully missing.
+        playerSession.markMissing();
       }
     }
   }
@@ -1663,6 +1389,28 @@ export class EntityManager {
     }
   }
 
+  /**
+   * Render a speech bubble above an entity locally — no server roundtrip,
+   * no broadcast to other clients. Used for private agent replies so only the
+   * player who initiated the chat sees their character speak.
+   */
+  showLocalSpeechBubble(entityId: string, text: string) {
+    const obj = this.entities.get(entityId);
+    if (!obj) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.removeSpeechBubble(entityId);
+    const sprite = makeSpeechBubble(trimmed);
+    sprite.position.y = 2.5;
+    obj.group.add(sprite);
+    this.speechBubbles.push({
+      sprite,
+      entityId,
+      elapsed: 0,
+      duration: Math.min(4 + trimmed.length * 0.05, 8),
+    });
+  }
+
   private forEachEntityMaterial(obj: EntityObject, fn: (mat: THREE.Material) => void) {
     obj.group.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
@@ -1673,10 +1421,44 @@ export class EntityManager {
     });
   }
 
+  private updateResourceNodeDepletion(obj: EntityObject, ent: Entity) {
+    const depleted =
+      ent.depletedAtTick != null ||
+      ((ent.charges ?? 1) <= 0 && (ent.maxCharges ?? 0) > 0);
+    const originalColor = ENTITY_STYLE[ent.type]?.color ?? 0x999999;
+    this.forEachEntityMaterial(obj, (mat) => {
+      if (depleted) {
+        mat.opacity = 0.3;
+        mat.transparent = true;
+        if ("color" in mat) (mat as THREE.MeshToonMaterial).color.setHex(0x777777);
+      } else {
+        mat.opacity = 1.0;
+        mat.transparent = false;
+        if ("color" in mat) (mat as THREE.MeshToonMaterial).color.setHex(originalColor);
+      }
+    });
+  }
+
   private snapToPosition(obj: EntityObject, x: number, z: number) {
     const baseY = this.elevationProvider?.getElevationAt(x, z) ?? obj.group.position.y;
     const yOffset = obj.hasGlbModel ? 0.15 : 0;
     obj.group.position.set(x, baseY + yOffset, z);
+  }
+
+  private updateNameLabel(obj: EntityObject, ent: Entity) {
+    if (!obj.nameLabel) return;
+    const labelColor = ent.type === "player" ? "#44ddff" : ent.type === "mob" ? "#ff6666" : ent.type === "boss" ? "#cc66ff" : "#ffcc44";
+    const labelText = ent.level ? `${ent.name} [Lv${ent.level}]` : ent.name;
+    const oldY = obj.nameLabel.position.y;
+    const oldScale = obj.nameLabel.scale.clone();
+    const newSprite = makeLabel(labelText, labelColor);
+    newSprite.position.y = oldY;
+    newSprite.scale.copy(oldScale);
+    obj.group.remove(obj.nameLabel);
+    (obj.nameLabel.material as THREE.SpriteMaterial).map?.dispose();
+    (obj.nameLabel.material as THREE.SpriteMaterial).dispose();
+    obj.group.add(newSprite);
+    obj.nameLabel = newSprite;
   }
 
   private updateHpBar(obj: EntityObject, ent: Entity) {
@@ -1786,9 +1568,9 @@ export class EntityManager {
    * Resolve the clip to use for an Action, applying GLB or procedural fallback.
    * Single source of truth — called by playAction.
    */
-  private getClipForAction(obj: EntityObject, action: Action): THREE.AnimationClip | null {
+  private getClipForAction(obj: EntityObject, action: Action, critical?: boolean): THREE.AnimationClip | null {
     if (obj.hasGlbModel) return getClipFromMap(obj.actionMap, action, obj.entity.name);
-    return getProceduralClip(action);
+    return getProceduralClip(action, critical);
   }
 
   /**
@@ -1802,9 +1584,10 @@ export class EntityManager {
     action: Action,
     techniqueId?: string,
     animStyle?: string,
+    critical?: boolean,
   ): THREE.AnimationClip | null {
     if (!obj.hasGlbModel || obj.glbClipMap.size === 0) return null;
-    return resolveTechniqueClip(obj.glbClipMap, action, techniqueId, animStyle);
+    return resolveTechniqueClip(obj.glbClipMap, action, techniqueId, animStyle, critical);
   }
 
   // ── Animation playback helpers ──────────────────────────────────────
@@ -2410,13 +2193,56 @@ export class EntityManager {
       // ── Profession: gather/craft ──
       if (ev.type === "loot" && ev.entityId && ev.data?.gatherType) {
         const obj = this.entities.get(ev.entityId);
-        const action = GATHER_ACTION[ev.data.gatherType as string] ?? "gather";
+        const gatherType = ev.data.gatherType as string;
+        const action = GATHER_ACTION[gatherType] ?? "gather";
         if (obj && obj.currentAction !== action) this.playOneShot(obj, action);
+        // VFX at node position (fallback to gatherer position)
+        if (this.effects && obj) {
+          const nodeId = ev.data?.nodeId as string | undefined;
+          const nodeObj = nodeId ? this.entities.get(nodeId) : undefined;
+          const vfxPos = nodeObj ? nodeObj.group.position.clone() : obj.group.position.clone();
+          this.effects.spawnGatherEffect(vfxPos, gatherType);
+        }
+        // SFX — reuse existing sounds until dedicated gather audio is added
+        const GATHER_SFX: Record<string, SoundEffectId> = {
+          mining: "combat_melee_hit", herbalism: "ui_item_pickup", skinning: "combat_defend",
+          farming: "ui_item_pickup",
+        };
+        const sfxId = GATHER_SFX[gatherType];
+        if (sfxId) playSoundEffect(sfxId);
       }
       if (ev.type === "loot" && ev.entityId && ev.data?.craftType) {
         const obj = this.entities.get(ev.entityId);
         const action = CRAFT_ACTION[ev.data.craftType as string] ?? "craft";
         if (obj && obj.currentAction !== action) this.playOneShot(obj, action);
+
+        if (obj) {
+          if (ev.data.craftFailed) {
+            this.spawnFloating(obj, "CRAFT FAILED", "craft-fail", {
+              startY: 2.3, riseAmount: 2.0, lifetime: 1.6,
+            });
+          } else {
+            const quality = (ev.data.quality as string | undefined) ?? "common";
+            const itemName = (ev.data.itemName as string | undefined) ?? "Item";
+            const kind: FloatingKind =
+              quality === "epic" ? "craft-epic" :
+              quality === "rare" ? "craft-rare" :
+              quality === "uncommon" ? "craft-uncommon" :
+              "craft-common";
+            const subType = subtypeLabel(
+              ev.data.equipSlot as string | undefined,
+              ev.data.category as string | undefined,
+            );
+            const tierLabel = quality.charAt(0).toUpperCase() + quality.slice(1);
+            const ornament = quality === "epic" ? "✦ " : "";
+            this.spawnFloating(obj, `${ornament}${tierLabel} ${subType}${ornament ? " ✦" : ""}`, kind, {
+              startY: 2.5, riseAmount: 2.0, lifetime: 2.0,
+            });
+            this.spawnFloating(obj, itemName, "xp", {
+              startY: 2.1, riseAmount: 1.6, lifetime: 1.8, offsetX: 0,
+            });
+          }
+        }
       }
 
       // ── Chat: speech bubble ──
@@ -2434,16 +2260,43 @@ export class EntityManager {
         }
       }
 
-      // ── Combat: basic attack landed (PRIMARY animation driver) ──
-      if (ev.type === "combat" && ev.entityId) {
+      // ── Attack windup: basic-attack telegraph fires ~250ms before damage.
+      // Start the swing animation now so it lands visually around the same
+      // moment the matching `combat` event applies HP delta.
+      if (ev.type === "attack-windup" && ev.entityId) {
         const obj = this.entities.get(ev.entityId);
         if (obj && obj.lifeState === "alive" && (obj.rig || obj.hasGlbModel)) {
           const animStyle = ev.data?.animStyle as string | undefined;
           const action = resolveAction(obj.entity, "basic-attack", undefined, animStyle);
           const isMelee = animStyle !== "projectile";
-          animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"} → ${action}`);
+          obj.lastBasicAttackWindupMs = performance.now();
+          animLogFor(obj.entity.name, `attack-windup style=${animStyle ?? "?"} → ${action}`);
           this.faceTarget(obj, ev.targetId);
           this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle);
+        }
+      }
+
+      // ── Combat: basic attack landed (PRIMARY animation driver) ──
+      if (ev.type === "combat" && ev.entityId) {
+        const obj = this.entities.get(ev.entityId);
+        if (obj && obj.lifeState === "alive" && (obj.rig || obj.hasGlbModel)) {
+          const animStyle = ev.data?.animStyle as string | undefined;
+          const critical = ev.data?.critical === true;
+          // If a windup just played for this entity, the swing animation is
+          // already in flight — don't restart it (would visually stutter back
+          // to frame 0). 600ms window covers a 1-tick windup plus client poll
+          // jitter. Crits still re-trigger so the heavy clip can take over.
+          const sinceWindupMs = performance.now() - obj.lastBasicAttackWindupMs;
+          const skipAnim = obj.lastBasicAttackWindupMs > 0 && sinceWindupMs < 600 && !critical;
+          if (!skipAnim) {
+            const action = resolveAction(obj.entity, "basic-attack", undefined, animStyle);
+            const isMelee = animStyle !== "projectile";
+            animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"}${critical ? " CRIT" : ""} → ${action}`);
+            this.faceTarget(obj, ev.targetId);
+            this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle, critical);
+          } else {
+            animLogFor(obj.entity.name, `combat damage landed (anim already playing from windup ${sinceWindupMs.toFixed(0)}ms ago)`);
+          }
         } else if (obj && isAnimDebugFor(obj.entity.name)) {
           animWarn(`${obj.entity.name}: combat event skipped (life=${obj.lifeState} rig=${!!obj.rig} glb=${obj.hasGlbModel})`);
         }
@@ -2463,10 +2316,11 @@ export class EntityManager {
         if (!obj || obj.lifeState !== "alive") continue;
         const techniqueId = ev.data?.techniqueId as string | undefined;
         const animStyle = ev.data?.animStyle as string | undefined;
+        const critical = ev.data?.critical === true;
         const isMelee = animStyle === "melee";
         const action = resolveAction(obj.entity, "technique", techniqueId, animStyle);
         this.faceTarget(obj, ev.targetId);
-        this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, techniqueId, animStyle);
+        this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, techniqueId, animStyle, critical);
       }
 
       // ── Technique windup: casting started ──
@@ -2525,6 +2379,7 @@ export class EntityManager {
     isMelee = true,
     techniqueId?: string,
     animStyle?: string,
+    critical?: boolean,
   ) {
     if (!(obj.rig || obj.hasGlbModel)) {
       if (isAnimDebugFor(obj.entity.name)) animWarn(`${obj.entity.name}: no rig (skipped ${action})`);
@@ -2539,7 +2394,7 @@ export class EntityManager {
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist > MELEE_ANIM_RANGE) {
           animLogFor(obj.entity.name, `QUEUED ${action} (dist=${dist.toFixed(1)} > ${MELEE_ANIM_RANGE})`);
-          obj.pendingMelee = { action, targetId, holdOverride, queuedAt: performance.now(), techniqueId, animStyle };
+          obj.pendingMelee = { action, targetId, holdOverride, queuedAt: performance.now(), techniqueId, animStyle, critical };
           return;
         }
       }
@@ -2547,33 +2402,33 @@ export class EntityManager {
 
     obj.pendingMelee = null;
 
-    // Tier 2 (techniqueId override) → Tier 1 (animStyle variant) → default action clip.
+    // Tier 3 (critical) → Tier 2 (techniqueId override) → Tier 1 (animStyle variant) → default action clip.
     // Resolved here so the hold timer matches the actual clip we're about to play.
-    const variantClip = this.getVariantClip(obj, action, techniqueId, animStyle);
-    const clip = variantClip ?? this.getClipForAction(obj, action);
+    const variantClip = this.getVariantClip(obj, action, techniqueId, animStyle, critical);
+    const clip = variantClip ?? this.getClipForAction(obj, action, critical);
     const clipDuration = clip?.duration ?? 0.6;
     obj.combatAnimHold = holdOverride ?? clipDuration;
 
     if (variantClip && isAnimDebugFor(obj.entity.name)) {
       animLogFor(
         obj.entity.name,
-        `variant clip for ${action} (${techniqueId ?? "?"}, ${animStyle ?? "?"}) → ${variantClip.name}`,
+        `variant clip for ${action} (${techniqueId ?? "?"}, ${animStyle ?? "?"}${critical ? ", CRIT" : ""}) → ${variantClip.name}`,
       );
     }
 
-    this.playOneShot(obj, action, undefined, variantClip ?? undefined);
+    this.playOneShot(obj, action, undefined, variantClip ?? clip ?? undefined);
     if (obj.hasGlbModel && isMelee) obj.glbAttackTimer = 0.35;
   }
 
   /** Flush pending melee animations once entity is visually in range */
   private flushPendingMelee(obj: EntityObject) {
     if (!obj.pendingMelee) return;
-    const { action, targetId, holdOverride, queuedAt, techniqueId, animStyle } = obj.pendingMelee;
+    const { action, targetId, holdOverride, queuedAt, techniqueId, animStyle, critical } = obj.pendingMelee;
 
     const elapsed = performance.now() - queuedAt;
     if (elapsed > 1000) {
       obj.pendingMelee = null;
-      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle);
+      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle, critical);
       return;
     }
 
@@ -2587,7 +2442,7 @@ export class EntityManager {
     const dz = targetObj.group.position.z - obj.group.position.z;
     if (Math.sqrt(dx * dx + dz * dz) <= MELEE_ANIM_RANGE) {
       obj.pendingMelee = null;
-      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle);
+      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle, critical);
     }
   }
 
@@ -2623,15 +2478,18 @@ export class EntityManager {
           hasGlbCharacter = true;
           actionMap = buildGlbActionMap(glbChar.clips);
           glbClipMap = glbChar.clips;
-          if (isAnimDebugFor(ent.name)) {
-            animLogOnce(
-              `${ent.name} GLB loaded: ${glbChar.clips.size} clips `
-              + `[${Array.from(glbChar.clips.keys()).join(", ")}]`,
-            );
-            animLogOnce(
-              `${ent.name} action map: ${Array.from(actionMap).map(([a, c]) => `${a}=${c.name}`).join(" | ") || "EMPTY"}`,
-            );
-          }
+          // Unconditional once-per-entity dump so we can see exactly which
+          // animation clips this character GLB exposes. Use this list to
+          // decide which clips to route per-technique in AnimationResolver.
+          const clipNames = Array.from(glbChar.clips.keys());
+          console.log(
+            `[GLB Clips] ${ent.name} (${ent.classId ?? "?"}): ${clipNames.length} clips →`,
+            clipNames,
+          );
+          console.log(
+            `[GLB Clips] ${ent.name} action map:`,
+            Object.fromEntries(Array.from(actionMap).map(([a, c]) => [a, c.name])),
+          );
           auditGlbActionMap(
             actionMap,
             Array.from(glbChar.clips.keys()),
@@ -2665,6 +2523,11 @@ export class EntityManager {
         leftArm = result.leftArm;
         rightArm = result.rightArm;
         rig = result.rig;
+        if (result.mixer && result.glbClips) {
+          mixer = result.mixer;
+          glbClipMap = result.glbClips;
+          actionMap = buildGlbActionMap(result.glbClips);
+        }
         break;
       }
       case "resource":
@@ -2683,6 +2546,7 @@ export class EntityManager {
     // HP bar + label
     let hpBarFg: THREE.Mesh | null = null;
     let hpBarBg: THREE.Mesh | null = null;
+    let entityNameLabel: THREE.Sprite | null = null;
     if (info.style === "humanoid" || info.style === "mob") {
       const labelY = info.style === "mob" && ent.type === "boss" ? 2.35 : 1.95;
 
@@ -2703,14 +2567,14 @@ export class EntityManager {
 
       const labelColor = ent.type === "player" ? "#44ddff" : ent.type === "mob" ? "#ff6666" : ent.type === "boss" ? "#cc66ff" : "#ffcc44";
       const labelText = ent.level ? `${ent.name} [Lv${ent.level}]` : ent.name;
-      const label = makeLabel(labelText, labelColor);
-      label.position.y = labelY + 0.3;
-      group.add(label);
+      entityNameLabel = makeLabel(labelText, labelColor);
+      entityNameLabel.position.y = labelY + 0.3;
+      group.add(entityNameLabel);
     } else if (ent.type !== "corpse") {
-      const label = makeLabel(ent.name, "#aaaaaa");
-      label.position.y = 1.2;
-      label.scale.set(1.5, 0.4, 1);
-      group.add(label);
+      entityNameLabel = makeLabel(ent.name, "#aaaaaa");
+      entityNameLabel.position.y = 1.2;
+      entityNameLabel.scale.set(1.5, 0.4, 1);
+      group.add(entityNameLabel);
     }
 
     const obj: EntityObject = {
@@ -2727,10 +2591,12 @@ export class EntityManager {
       glbAttackTimer: 0,
       combatAnimHold: 0,
       oneShotStart: 0,
+      lastBasicAttackWindupMs: 0,
       pendingMelee: null,
       lifeState: ent.hp > 0 ? "alive" : "dead-hidden",
       lifeToken: 0,
       dyingSince: 0,
+      nameLabel: entityNameLabel,
       questIndicator: null,
       combatRing: null,
       combatRingAlpha: 0,
@@ -2739,6 +2605,10 @@ export class EntityManager {
 
     if (ent.hp <= 0) {
       obj.group.visible = false;
+    }
+
+    if (RESOURCE_NODE_TYPES.has(ent.type)) {
+      this.updateResourceNodeDepletion(obj, ent);
     }
 
     return obj;
@@ -3078,8 +2948,10 @@ export class EntityManager {
       console.warn(`[GLB] charAssets not set for ${ent.name}`);
       return null;
     }
-    if (!this.charAssets.isReady()) {
-      console.warn(`[GLB] charAssets not ready for ${ent.name}`);
+    // Players only need the player-class tier; NPCs may be loading on demand
+    // (their buildCharacter call returns null until cached, triggering a
+    // background fetch). Procedural fallback is fine in the gap.
+    if (!this.charAssets.isPlayerClassesReady()) {
       return null;
     }
 
@@ -3108,56 +2980,6 @@ export class EntityManager {
 
     console.log(`[GLB] ✓ Built ${ent.name} — meshes:`, char.group.children.length, "clips:", char.clips.size);
     group.add(char.group);
-    if (ent.type === "player" && ent.equipment) {
-      console.log("[Armor][GLB]", ent.name, Object.fromEntries(
-        Object.entries(ent.equipment).map(([slot, item]) => [slot, { name: item?.name, xrVisualId: item?.xrVisualId ?? null, quality: item?.quality }])
-      ));
-    }
-
-    // Equip armor pieces from entity equipment data
-    console.log(`[GLB] Armor system: exists=${!!this.armorSystem} ready=${this.armorSystem?.isReady()} equipment=${JSON.stringify(ent.equipment)}`);
-    if (this.armorSystem?.isReady() && ent.equipment) {
-      const donorEquipment: Record<string, { name?: string; quality?: string; xrVisualId?: string | null }> = {};
-      for (const slot of ["chest", "legs", "helm", "belt"] as const) {
-        const item = ent.equipment[slot];
-        if (item) donorEquipment[slot] = item;
-      }
-      // Find the skeleton from the character's SkinnedMesh
-      if (char.skinnedMesh?.skeleton) {
-        const skeleton = char.skinnedMesh.skeleton;
-        const rootBone = skeleton.bones[0];
-        if (Object.keys(donorEquipment).length > 0) {
-          console.log(`[GLB][ArmorDebug] ${ent.name}`, this.armorSystem.resolveEquipmentDebug(donorEquipment));
-        }
-        const armorGroup = this.armorSystem.equipFromEntityData(
-          donorEquipment,
-          skeleton,
-          rootBone,
-        );
-        console.log(`[GLB][ArmorDebug] ${ent.name} createdMeshes=${armorGroup.children.length}`);
-        if (armorGroup.children.length > 0) {
-          console.log(`[GLB] ⚔ Equipped ${armorGroup.children.length} armor pieces on ${ent.name}`);
-          this.hideBaseOutfitForEquipment(char, donorEquipment);
-          char.group.add(armorGroup);
-        }
-      }
-    }
-
-    // Attach weapon to right hand bone
-    if (ent.equipment) {
-      const weaponData = (ent.equipment as Record<string, EquipmentEntry>).weapon;
-      if (weaponData?.name) {
-        const fistR = char.bones["Fist.R"] ?? char.bones["FistR"];
-        if (fistR) {
-          this.attachWeaponGlb(fistR, weaponData.name, ent.name);
-        }
-      }
-      const eqAll = ent.equipment as Record<string, EquipmentEntry>;
-      if (eqAll.shoulders) this.attachGlbShoulders(char, eqAll.shoulders);
-      if (eqAll.boots) this.attachGlbBoots(char, eqAll.boots);
-      if (eqAll.gloves) this.attachGlbGloves(char, eqAll.gloves);
-      this.attachGlbAccessoryEquipment(char, eqAll, ent.name);
-    }
 
     // Start idle animation
     const idleClip = char.clips.get("Idle");
@@ -3167,491 +2989,6 @@ export class EntityManager {
     }
 
     return char;
-  }
-
-  private hideBaseOutfitForEquipment(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    equipment: Record<string, { name?: string; quality?: string; xrVisualId?: string | null }>,
-  ): void {
-    // Only hide the hair under a helm — shirt/pants/belt stay visible so that
-    // gaps in extracted armor geometry (e.g. knight_plate extracts only the
-    // "Armor" material, leaving holes where "Detail"/"Armor_Dark" were) show
-    // the base outfit instead of the environment.
-    const hideHair = !!resolveCanonicalArmorPieceId(equipment.helm);
-    if (!hideHair) return;
-
-    char.group.traverse((obj) => {
-      if (!(obj instanceof THREE.SkinnedMesh)) return;
-      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const material of materials) {
-        const name = material.name ?? "";
-        if (!name) continue;
-        if (materialNameMatchesAny(name, ["hair"])) {
-          hideMaterialForEquipment(material);
-        }
-      }
-    });
-  }
-
-  private attachProceduralArmorToGlbCharacter(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    ent: Entity,
-    cls: { sx: number; sy: number; sz: number; color: number },
-  ): void {
-    const eq = ent.equipment;
-    if (!eq) return;
-
-    if (eq.helm) this.attachGlbHelm(char, eq.helm);
-    if (eq.chest) this.attachGlbChestArmor(char, eq.chest, cls);
-    if (eq.shoulders) this.attachGlbShoulders(char, eq.shoulders);
-    if (eq.legs) this.attachGlbLegArmor(char, eq.legs);
-    if (eq.belt) this.attachGlbBelt(char, eq.belt, cls);
-    if (eq.gloves) this.attachGlbGloves(char, eq.gloves);
-    if (eq.boots) this.attachGlbBoots(char, eq.boots);
-  }
-
-  private attachGlbHelm(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    item?: EquipmentEntry,
-  ): void {
-    if (!item) return;
-    const head = char.bones["Head"];
-    if (!head) return;
-    const mt = inferArmorMaterial(equipmentVisualKey(item));
-    const mat = makeArmorMat(mt, item.quality);
-
-    if (mt === "plate") {
-      const dome = new THREE.Mesh(helmDomeGeo, mat);
-      dome.position.set(0, 0.10, 0.01);
-      dome.scale.set(1.02, 1.0, 1.02);
-      dome.userData.equipSlot = "helmPlate";
-      head.add(dome);
-
-      const nasal = new THREE.Mesh(helmNasalGeo, mat);
-      nasal.position.set(0, -0.02, 0.20);
-      nasal.userData.equipSlot = "helmPlate";
-      head.add(nasal);
-    } else if (mt === "chain") {
-      const coif = new THREE.Mesh(helmCoifGeo, mat);
-      coif.position.set(0, 0.08, 0.0);
-      coif.userData.equipSlot = "helmChain";
-      head.add(coif);
-    } else {
-      const cap = new THREE.Mesh(helmCapGeo, mat);
-      cap.position.set(0, 0.10, 0.0);
-      cap.userData.equipSlot = "helmLeather";
-      head.add(cap);
-    }
-  }
-
-  private attachGlbChestArmor(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    item?: EquipmentEntry,
-    cls?: { sx: number; sy: number; sz: number; color: number },
-  ): void {
-    if (!item) return;
-    const torso = char.bones["Torso"] ?? char.bones["Body_1"] ?? char.bones["Abdomen"];
-    if (!torso) return;
-    const mt = inferArmorMaterial(equipmentVisualKey(item));
-    const mat = makeArmorMat(mt, item.quality);
-    const sx = cls?.sx ?? 1;
-    const sz = cls?.sz ?? 1;
-
-    if (mt === "plate") {
-      const cuirass = new THREE.Mesh(chestPlateGeo, mat);
-      cuirass.position.set(0, -0.14, 0.16);
-      cuirass.scale.set(0.96 * sx, 0.88, 0.82 * sz);
-      cuirass.userData.equipSlot = "chestPlate";
-      torso.add(cuirass);
-
-      for (const y of [-0.22, -0.08]) {
-        const ridge = new THREE.Mesh(new THREE.TorusGeometry(0.24 * sx, 0.016, 4, 10), mat);
-        ridge.position.set(0, y, 0.12);
-        ridge.rotation.x = Math.PI / 2;
-        ridge.userData.equipSlot = "chestPlate";
-        torso.add(ridge);
-      }
-    } else {
-      const vest = new THREE.Mesh(chestVestGeo, mat);
-      vest.position.set(0, -0.14, 0.14);
-      vest.scale.set(0.94 * sx, 0.9, 0.8 * sz);
-      vest.userData.equipSlot = mt === "chain" ? "chestChain" : "chestLeather";
-      torso.add(vest);
-
-      if (mt === "chain") {
-        const collar = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.018, 4, 8), mat);
-        collar.position.set(0, 0.06, 0.09);
-        collar.rotation.x = Math.PI / 2;
-        collar.userData.equipSlot = "chestChain";
-        torso.add(collar);
-      }
-    }
-  }
-
-  private attachGlbShoulders(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    item?: EquipmentEntry,
-  ): void {
-    if (!item) return;
-    const mt = inferArmorMaterial(equipmentVisualKey(item));
-    const mat = makeArmorMat(mt, item.quality);
-    const shoulders = [
-      { bone: char.bones["Shoulder.L"] ?? char.bones["ShoulderL"], side: -1 },
-      { bone: char.bones["Shoulder.R"] ?? char.bones["ShoulderR"], side: 1 },
-    ];
-
-    for (const { bone, side } of shoulders) {
-      if (!bone) continue;
-      if (mt === "plate") {
-        const pad = new THREE.Mesh(pauldronPlatGeo, mat);
-        pad.position.set(side * 0.020, 0.290, -0.010);
-        pad.rotation.set(0.208, 0.0, 0.0);
-        pad.scale.set(2.0, 1.5, 2.0);
-        pad.userData.equipSlot = "shoulderPlate";
-        bone.add(pad);
-      } else {
-        const pad = new THREE.Mesh(mt === "chain" ? pauldronPlatGeo : pauldronPadGeo, mat);
-        pad.position.set(side * 0.07, 0.00, 0.08);
-        pad.rotation.set(0.12, 0.0, side * 0.35);
-        const scale = mt === "chain" ? 1.6 : 1.7;
-        pad.scale.set(scale, scale * 0.85, scale);
-        pad.userData.equipSlot = mt === "chain" ? "shoulderChain" : "shoulderLeather";
-        bone.add(pad);
-      }
-    }
-  }
-
-  private attachGlbLegArmor(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    item?: EquipmentEntry,
-  ): void {
-    if (!item) return;
-    const mt = inferArmorMaterial(equipmentVisualKey(item));
-    const mat = makeArmorMat(mt, item.quality);
-    const shins = [char.bones["LowerLegL"], char.bones["LowerLegR"]];
-
-    for (const shin of shins) {
-      if (!shin) continue;
-      if (mt === "plate") {
-        const greave = new THREE.Mesh(greaveGeo, mat);
-        greave.position.set(0, -0.18, 0.10);
-        greave.scale.set(0.92, 1.08, 0.88);
-        greave.userData.equipSlot = "legPlate";
-        shin.add(greave);
-
-        const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), mat);
-        kneeCap.position.set(0, 0.01, 0.10);
-        kneeCap.userData.equipSlot = "legPlate";
-        shin.add(kneeCap);
-      } else {
-        const leggings = new THREE.Mesh(leatherPantsGeo, mat);
-        leggings.position.set(0, -0.18, 0.08);
-        leggings.scale.set(0.86, 1.08, 0.82);
-        leggings.userData.equipSlot = mt === "chain" ? "legChain" : "legLeather";
-        shin.add(leggings);
-      }
-    }
-  }
-
-  private attachGlbBelt(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    item?: EquipmentEntry,
-    cls?: { sx: number; sy: number; sz: number; color: number },
-  ): void {
-    if (!item) return;
-    const hips = char.bones["Hips"];
-    if (!hips) return;
-    const mt = inferArmorMaterial(equipmentVisualKey(item));
-    const mat = makeArmorMat(mt, item.quality);
-    const sx = cls?.sx ?? 1;
-    const sz = cls?.sz ?? 1;
-    const radius = 0.18 * sx;
-
-    const ring = new THREE.Mesh(mt === "plate" ? beltGeo : beltThinGeo, mat);
-    ring.position.set(0, 0.16, 0.02);
-    ring.rotation.x = Math.PI / 2;
-    ring.scale.set(0.95 * sx, 0.88 * sz, 1);
-    ring.userData.equipSlot = mt === "plate" ? "beltPlate" : "beltLeather";
-    hips.add(ring);
-
-    const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-    buckle.position.set(0, 0.16, radius + 0.04);
-    buckle.userData.equipSlot = mt === "plate" ? "beltPlate" : "beltLeather";
-    hips.add(buckle);
-  }
-
-  private attachGlbAccessoryEquipment(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    equipment: Record<string, EquipmentEntry>,
-    entityName: string,
-  ): void {
-    this.attachGlbShield(char, equipment.shield ?? equipment.offhand, entityName);
-    this.attachGlbCape(char, equipment.cape);
-    this.attachGlbAmulet(char, equipment.amulet);
-    this.attachGlbRing(char, equipment.ring);
-  }
-
-  private attachGlbBoots(char: import("./CharacterAssets.js").CharacterInstance, item?: EquipmentEntry): void {
-    if (!item) return;
-    const mt = inferArmorMaterial(equipmentVisualKey(item));
-    const mat = makeArmorMat(mt, item.quality);
-    const darkMat = makeArmorMat(mt, item.quality);
-    darkMat.color.multiplyScalar(0.7);
-    const lowerLegs = [
-      char.bones["LowerLeg.L"] ?? char.bones["LowerLegL"],
-      char.bones["LowerLeg.R"] ?? char.bones["LowerLegR"],
-    ];
-    const feet = [
-      char.bones["Foot.L"] ?? char.bones["FootL"],
-      char.bones["Foot.R"] ?? char.bones["FootR"],
-    ];
-    for (let i = 0; i < 2; i++) {
-      const shin = lowerLegs[i];
-      const foot = feet[i];
-      if (!shin || !foot) continue;
-      if (mt === "plate") {
-        const boot = new THREE.Mesh(bootPlateGeo, mat);
-        boot.position.set(-0.010, 0.100, -0.020);
-        boot.rotation.set(-1.392, 0.058, 0.000);
-        boot.userData.equipSlot = "bootPlate";
-        shin.add(boot);
-        const sole = new THREE.Mesh(bootPlateSoleGeo, darkMat);
-        sole.position.set(0, -0.01, 0.09);
-        sole.userData.equipSlot = "bootPlate";
-        foot.add(sole);
-        const toe = new THREE.Mesh(toeGeo, mat);
-        toe.scale.set(1.2, 0.9, 1.25);
-        toe.position.set(0, 0.02, 0.18);
-        toe.userData.equipSlot = "bootPlate";
-        foot.add(toe);
-      } else {
-        const boot = new THREE.Mesh(bootLeatherGeo, mat);
-        boot.position.set(0, -0.12, 0.07);
-        boot.userData.equipSlot = "bootLeather";
-        shin.add(boot);
-        const sole = new THREE.Mesh(bootLeatherSoleGeo, darkMat);
-        sole.position.set(0, 0.0, 0.08);
-        sole.userData.equipSlot = "bootLeather";
-        foot.add(sole);
-        const toe = new THREE.Mesh(toeGeo, mat);
-        toe.position.set(0, 0.02, 0.15);
-        toe.userData.equipSlot = "bootLeather";
-        foot.add(toe);
-      }
-    }
-  }
-
-  private attachGlbGloves(char: import("./CharacterAssets.js").CharacterInstance, item?: EquipmentEntry): void {
-    if (!item) return;
-    const mt = inferArmorMaterial(equipmentVisualKey(item));
-    const mat = makeArmorMat(mt, item.quality);
-    const upperArms = [
-      char.bones["UpperArm.L"] ?? char.bones["UpperArmL"],
-      char.bones["UpperArm.R"] ?? char.bones["UpperArmR"],
-    ];
-    const forearms = [
-      char.bones["LowerArm.L"] ?? char.bones["LowerArmL"],
-      char.bones["LowerArm.R"] ?? char.bones["LowerArmR"],
-    ];
-    const plateSleeveGeo = new THREE.CylinderGeometry(0.13, 0.11, 0.55, 12);
-    const plateForearmGeo = new THREE.CylinderGeometry(0.13, 0.15, 0.55, 12);
-    const leatherSleeveGeo = new THREE.CylinderGeometry(0.11, 0.09, 0.52, 10);
-    for (let i = 0; i < 2; i++) {
-      const upper = upperArms[i];
-      const forearm = forearms[i];
-      if (mt === "plate") {
-        if (upper) {
-          const sleeve = new THREE.Mesh(plateSleeveGeo, mat);
-          sleeve.position.set(-0.010, 0.390, 0.090);
-          sleeve.rotation.set(-0.092, -2.092, -0.092);
-          sleeve.userData.equipSlot = "glovePlate";
-          upper.add(sleeve);
-        }
-        if (forearm) {
-          const gauntlet = new THREE.Mesh(plateForearmGeo, mat);
-          gauntlet.position.set(-0.010, 0.390, 0.090);
-          gauntlet.rotation.set(-0.092, -2.092, -0.092);
-          gauntlet.userData.equipSlot = "glovePlate";
-          forearm.add(gauntlet);
-        }
-      } else {
-        if (upper) {
-          const sleeve = new THREE.Mesh(leatherSleeveGeo, mat);
-          sleeve.position.set(-0.010, 0.370, 0.080);
-          sleeve.rotation.set(-0.092, -2.092, -0.092);
-          sleeve.userData.equipSlot = "gloveLeather";
-          upper.add(sleeve);
-        }
-        if (forearm) {
-          const glove = new THREE.Mesh(leatherSleeveGeo, mat);
-          glove.position.set(-0.010, 0.370, 0.080);
-          glove.rotation.set(-0.092, -2.092, -0.092);
-          glove.userData.equipSlot = "gloveLeather";
-          forearm.add(glove);
-        }
-      }
-    }
-  }
-
-  private attachGlbShield(
-    char: import("./CharacterAssets.js").CharacterInstance,
-    item: EquipmentEntry | undefined,
-    entityName: string,
-  ): void {
-    if (!item) return;
-    const hand = char.bones["Fist.L"] ?? char.bones["FistL"];
-    if (!hand) return;
-    const quality = item.quality ?? "common";
-    const color = QUALITY_COLORS[quality] ?? 0x888888;
-    const style = inferShieldStyle(item);
-    const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
-    let shield: THREE.Mesh;
-    if (style === "tower") {
-      shield = new THREE.Mesh(towerShieldGeo, mat);
-      shield.position.set(-0.02, 0.14, 0.04);
-      shield.rotation.set(0.45, 0.05, 0.0);
-    } else if (style === "bulwark") {
-      shield = new THREE.Mesh(bulwarkShieldGeo, mat);
-      shield.position.set(-0.02, 0.08, 0.02);
-      shield.rotation.set(Math.PI / 2, 0.15, 0.0);
-    } else {
-      shield = new THREE.Mesh(shieldGeo, mat);
-      shield.position.set(-0.03, 0.08, 0.04);
-      shield.rotation.set(0.56, 0.1, style === "kite" ? -0.08 : 0.0);
-    }
-    shield.userData.equipSlot = "shield";
-    hand.add(shield);
-    console.log(`[GLB] 🛡 Attached ${style} shield to ${entityName}`);
-  }
-
-  private attachGlbCape(char: import("./CharacterAssets.js").CharacterInstance, item?: EquipmentEntry): void {
-    if (!item) return;
-    const torso = char.bones["Torso"] ?? char.bones["Body_1"] ?? char.bones["Neck"];
-    if (!torso) return;
-    const style = inferCapeStyle(item);
-    const quality = item.quality ?? "common";
-    const baseColor =
-      style === "archmage" ? 0x3c58c7 :
-      style === "dragonscale" ? 0x6b4f39 :
-      style === "shadow" ? 0x2a2138 :
-      0x6b5a44;
-    const capeMat = makeArmorMat("leather", quality, { transparent: true, opacity: 0.92 });
-    capeMat.color.setHex(baseColor);
-    capeMat.side = THREE.DoubleSide;
-    const cape = new THREE.Mesh(capeGeo, capeMat);
-    cape.position.set(0, -0.38, -0.14);
-    cape.rotation.set(0.15, 0, 0);
-    torso.add(cape);
-
-    const claspMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x8c7139 });
-    const clasp = new THREE.Mesh(capeClaspGeo, claspMat);
-    clasp.position.set(0, -0.02, -0.03);
-    torso.add(clasp);
-  }
-
-  private attachGlbAmulet(char: import("./CharacterAssets.js").CharacterInstance, item?: EquipmentEntry): void {
-    if (!item) return;
-    const neck = char.bones["Neck"] ?? char.bones["Torso"];
-    if (!neck) return;
-    const chainMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0xcab27c });
-    const chain = new THREE.Mesh(amuletChainGeo, chainMat);
-    chain.position.set(0, -0.05, 0.09);
-    chain.rotation.x = Math.PI;
-    neck.add(chain);
-
-    const gemMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: gemColorForItem(item) });
-    const gem = new THREE.Mesh(amuletGemGeo, gemMat);
-    gem.position.set(0, -0.16, 0.11);
-    neck.add(gem);
-  }
-
-  private attachGlbRing(char: import("./CharacterAssets.js").CharacterInstance, item?: EquipmentEntry): void {
-    if (!item) return;
-    const hand = char.bones["Fist.R"] ?? char.bones["FistR"];
-    if (!hand) return;
-    const ringMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0xd5bc62 });
-    const ring = new THREE.Mesh(equipRingGeo, ringMat);
-    ring.position.set(0.03, 0.02, 0.02);
-    ring.rotation.set(0, Math.PI / 2, 0);
-    hand.add(ring);
-
-    const gemMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: gemColorForItem(item) });
-    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.012, 4, 4), gemMat);
-    gem.position.set(0.03, 0.04, 0.02);
-    hand.add(gem);
-  }
-
-  /** Weapon GLB loader (shared) */
-  private static weaponLoader: GLTFLoader | null = null;
-  private static weaponCache: THREE.Object3D | null = null;
-  private static weaponLoading: Promise<void> | null = null;
-  /** All placed weapon meshes — for live tuner updates */
-  static weaponInstances: THREE.Object3D[] = [];
-
-  private static getWeaponLoader(): GLTFLoader {
-    if (!EntityManager.weaponLoader) {
-      EntityManager.weaponLoader = new GLTFLoader();
-    }
-    return EntityManager.weaponLoader;
-  }
-
-  /** Load sword.glb once, clone for each entity */
-  private attachWeaponGlb(bone: THREE.Bone, itemName: string, entityName: string): void {
-    const WEAPON_URL = new URL("models/sword.glb", new URL(import.meta.env.BASE_URL, window.location.href)).href;
-
-    const attach = (template: THREE.Object3D) => {
-      const weapon = template.clone(true);
-      weapon.name = `weapon_${itemName}`;
-
-      // Convert to toon materials
-      const gradMap = getGradientMap();
-      weapon.traverse((c) => {
-        if (c instanceof THREE.Mesh) {
-          const std = c.material as THREE.MeshStandardMaterial;
-          c.material = new THREE.MeshToonMaterial({
-            color: std.color ?? 0x888888,
-            gradientMap: gradMap,
-            ...(std.map ? { map: std.map } : {}),
-          });
-        }
-      });
-
-      weapon.position.set(0.010, 0.360, 0.400);
-      weapon.rotation.set(-1.442, -0.192, 0.158);
-      weapon.scale.setScalar(1.0);
-
-      bone.add(weapon);
-      EntityManager.weaponInstances.push(weapon);
-      console.log(`[GLB] 🗡 Attached sword.glb to ${entityName}`);
-    };
-
-    // Use cached template if available
-    if (EntityManager.weaponCache) {
-      attach(EntityManager.weaponCache);
-      return;
-    }
-
-    // Load once, cache, then attach
-    if (!EntityManager.weaponLoading) {
-      EntityManager.weaponLoading = new Promise<void>((resolve) => {
-        EntityManager.getWeaponLoader().load(
-          WEAPON_URL,
-          (gltf) => {
-            EntityManager.weaponCache = gltf.scene;
-            resolve();
-          },
-          undefined,
-          (err) => {
-            console.error("[GLB] Failed to load sword.glb:", err);
-            resolve();
-          },
-        );
-      });
-    }
-
-    EntityManager.weaponLoading.then(() => {
-      if (EntityManager.weaponCache) attach(EntityManager.weaponCache);
-    });
   }
 
   private createHumanoidRig(scale = 1, isFemale = false): { rig: HumanoidRigLike } {
@@ -3852,68 +3189,16 @@ export class EntityManager {
     rFingers.scale.setScalar(armScale);
     rig.rHand.add(rFingers);
 
-    // Weapon → right hand bone
-    if (ent.equipment?.weapon) {
-      const eq = ent.equipment.weapon;
-      const wType = inferWeaponType(eq.name ?? "sword");
-      const quality = eq.quality ?? "common";
-      const metalHex = QUALITY_COLORS[quality] ?? QUALITY_COLORS.common;
-      const emHex = QUALITY_EMISSIVE[quality] ?? 0x000000;
-      const wpn = buildWeaponMesh(wType, metalHex, emHex);
-
-      // Position weapons outside body — Z pushes forward, X pushes outward from hip
-      if (wType === "bow") {
-        wpn.position.set(0.100, 0.020, -0.110);
-        wpn.rotation.set(0.408, 1.458, 0.000);
-      } else if (wType === "staff") {
-        wpn.position.set(0.030, 0.160, 0.070);
-        wpn.rotation.set(0.308, 0.000, 0.050);
-      } else if (wType === "axe") {
-        wpn.position.set(-0.020, 0.140, 0.190);
-        wpn.rotation.set(0.808, -1.342, -0.142);
-      } else if (wType === "mace") {
-        wpn.position.set(0.050, 0.090, 0.190);
-        wpn.rotation.set(1.058, 0.558, -0.100);
-      } else if (wType === "pickaxe") {
-        wpn.position.set(0.040, 0.070, 0.230);
-        wpn.rotation.set(1.158, 0.000, -0.100);
-      } else if (wType === "dagger") {
-        wpn.position.set(0.000, 0.020, 0.070);
-        wpn.rotation.set(1.308, 0.000, -0.100);
-      } else {
-        // Sword — tuned via Equipment Tuner
-        wpn.position.set(0.000, 0.000, 0.100);
-        wpn.rotation.set(1.408, -0.192, 0.158);
-      }
-      wpn.userData.equipSlot = wType;
-      rig.rHand.add(wpn);
-    }
-
-    // Shield — only if equipped (no default)
-    const shieldItem = ent.equipment?.shield ?? ent.equipment?.offhand;
-    if (shieldItem) {
-      const shieldQuality = shieldItem.quality ?? "common";
-      const shieldColor = QUALITY_COLORS[shieldQuality] ?? cls.color;
-      const s = new THREE.Mesh(shieldGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: shieldColor }));
-      s.position.set(-0.090, 0.050, 0.030);
-      s.rotation.set(0.558, 0.108, 0.000);
-      s.userData.equipSlot = "shield";
-      rig.lHand.add(s);
-    }
-
     // Alias arm bones as Groups for armor attachment compatibility
     const leftArm = rig.lShoulder as unknown as THREE.Group;
     const rightArm = rig.rShoulder as unknown as THREE.Group;
-
-    // Procedural armor pieces — pass rig so pieces attach to bones
-    addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg, rig, body);
 
     return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
 
   // ── Mob ───────────────────────────────────────────────────────────
 
-  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike } {
+  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; mixer?: THREE.AnimationMixer; glbClips?: Map<string, THREE.AnimationClip> } {
     const isBoss = ent.type === "boss";
     const color = isBoss ? 0xaa33ff : 0xcc4444;
     const s = isBoss ? 1.4 : 1.0;
@@ -3922,23 +3207,38 @@ export class EntityManager {
     if (this.envAssets?.isReady()) {
       const assetName = this.envAssets.getAssetForMob(ent.name);
       if (assetName) {
-        const model = this.envAssets.place(assetName, 0, 0, 0);
+        // Skinned/animated assets use SkeletonUtils.clone via placeAnimatedMob;
+        // static assets (e.g. shadow_wolf with 0 skins) fall through to place().
+        const animated = this.envAssets.isAnimatedAsset(assetName)
+          ? this.envAssets.placeAnimatedMob(assetName)
+          : null;
+        const model = animated?.model ?? this.envAssets.place(assetName, 0, 0, 0);
         if (model) {
           model.name = "glb_mob";
+          const tint = this.envAssets.getTintForMob(ent.name);
+          const tintColor = tint != null ? new THREE.Color(tint) : null;
+          const cloneMat = (mat: THREE.Material): THREE.Material => {
+            const c = mat.clone();
+            if (tintColor && "color" in c) (c as { color: THREE.Color }).color = tintColor.clone();
+            return c;
+          };
           model.traverse((child) => {
             if (!(child instanceof THREE.Mesh)) return;
             if (Array.isArray(child.material)) {
-              child.material = child.material.map((mat) => mat.clone());
+              child.material = child.material.map(cloneMat);
             } else if (child.material) {
-              child.material = child.material.clone();
+              child.material = cloneMat(child.material);
             }
           });
           group.add(model);
-          // Return dummy rig refs — GLB mobs don't use the bone animation system
           const dummyMesh = new THREE.Mesh();
           const dummyGroup = new THREE.Group();
           const rig = new CharacterRig({ scale: s });
           (group as any)._hasGlbModel = true;
+          if (animated) {
+            const mixer = new THREE.AnimationMixer(model);
+            return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig, mixer, glbClips: animated.clips };
+          }
           return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig };
         }
       }

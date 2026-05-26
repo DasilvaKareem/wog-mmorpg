@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
+import { ItemMarksProvider } from "@/context/ItemMarksContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
@@ -296,6 +297,7 @@ function GameWorld(): React.ReactElement {
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [inboxOpen, setInboxOpen] = React.useState(false);
+  const [inboxUnread, setInboxUnread] = React.useState(0);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const [deferredDialogsReady, setDeferredDialogsReady] = React.useState(false);
@@ -597,6 +599,31 @@ function GameWorld(): React.ReactElement {
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, []);
 
+  // Poll for unread inbox messages every 15s; clear badge when inbox is opened
+  React.useEffect(() => {
+    if (!address) return;
+    const API_URL = (import.meta.env.VITE_API_URL || "http://127.0.0.1:3000").trim();
+
+    async function checkUnread() {
+      try {
+        const res = await fetch(`${API_URL}/inbox/${address}/history?limit=1`);
+        if (!res.ok) return;
+        const data = await res.json() as { unread?: number };
+        setInboxUnread(data.unread ?? 0);
+      } catch {
+        // silent — offline or server down
+      }
+    }
+
+    void checkUnread();
+    const timer = setInterval(() => { void checkUnread(); }, 15_000);
+    return () => clearInterval(timer);
+  }, [address]);
+
+  React.useEffect(() => {
+    if (inboxOpen) setInboxUnread(0);
+  }, [inboxOpen]);
+
   // Dynamic PWA theme color + title per zone
   useZoneTheme(currentZone);
 
@@ -854,6 +881,7 @@ function GameWorld(): React.ReactElement {
             onProfessions={toggleProfessions}
             onSettings={() => setSettingsOpen((s) => !s)}
             inboxActive={inboxOpen}
+            inboxUnread={inboxUnread}
             chatActive={showChat}
             ranksActive={showRanks}
             walletActive={showWallet}
@@ -980,11 +1008,24 @@ function RootDetector(): React.ReactElement {
   return <AppShell />;
 }
 
+/**
+ * The client is served from two URL shapes:
+ *   - https://app.worldofgeneva.com/<path>           (Cloudflare Worker rewrites to bucket /app/<path>)
+ *   - https://worldofgeneva.com/app/<path>           (apex domain keeps /app in the URL)
+ * In the apex case React Router needs basename="/app" so route paths match.
+ */
+function resolveRouterBasename(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const path = window.location.pathname;
+  return path === "/app" || path.startsWith("/app/") ? "/app" : undefined;
+}
+
 export default function App(): React.ReactElement {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={resolveRouterBasename()}>
       <GameProvider>
         <WalletProvider>
+          <ItemMarksProvider>
           <ToastProvider>
             <Routes>
               {/* Farcaster Mini App — explicit route always works */}
@@ -1004,6 +1045,7 @@ export default function App(): React.ReactElement {
               <Route path="*" element={<AppShell />} />
             </Routes>
           </ToastProvider>
+          </ItemMarksProvider>
         </WalletProvider>
       </GameProvider>
     </BrowserRouter>

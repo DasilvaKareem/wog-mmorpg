@@ -8,9 +8,32 @@ export type NpcDialogueIntent =
   | "redirect"
   | "refuse";
 
+/** Closed set of one-click actions an NPC can offer. Quest actions only
+ * resolve if the validator's `referencesQuestId` is in the player's quest
+ * state for this NPC. */
+export type NpcActionKind =
+  | "accept_quest"
+  | "complete_quest"
+  | "open_shop"
+  | "open_quests_tab"
+  | "open_skills"
+  | "farewell";
+
+export interface NpcActionBinding {
+  kind: NpcActionKind;
+  questId?: string;
+}
+
 export interface SuggestedNpcAction {
   label: string;
+  /** Free-text follow-up the player is "saying" if this button is clicked.
+   * If `action` is also present, `prompt` is the synthetic player message
+   * passed to the LLM when generating the NPC's follow-up beat after the
+   * action executes. */
   prompt: string;
+  /** When present, the client renders this as a primary one-click button
+   * that POSTs to /npc/action instead of /npc/dialogue. */
+  action?: NpcActionBinding;
 }
 
 export interface NpcDialogueDraft {
@@ -105,13 +128,34 @@ export function validateNpcDialogueDraft(
     }
   }
 
-  const suggestedActions = (draft.suggestedActions ?? [])
+  const llmActions: SuggestedNpcAction[] = (draft.suggestedActions ?? [])
     .map((action) => ({
       label: normalizeActionLabel(action.label ?? ""),
       prompt: normalizeActionPrompt(action.prompt ?? ""),
     }))
-    .filter((action) => action.prompt.length > 0)
-    .slice(0, 3);
+    .filter((action) => action.prompt.length > 0);
+
+  // Inject deterministic one-click action(s) when the dialogue context
+  // unambiguously implies a quest action. Players should never have to
+  // round-trip through the LLM to accept or turn in a quest.
+  const oneClickActions: SuggestedNpcAction[] = [];
+  if (intent === "quest_turn_in" && referencesQuestId && ctx.completableQuestIds.includes(referencesQuestId)) {
+    oneClickActions.push({
+      label: "Turn in",
+      prompt: "I'm ready to turn it in.",
+      action: { kind: "complete_quest", questId: referencesQuestId },
+    });
+  } else if (intent === "offer_quest" && referencesQuestId && ctx.availableQuestIds.includes(referencesQuestId)) {
+    oneClickActions.push({
+      label: "Accept",
+      prompt: "I'll take the job.",
+      action: { kind: "accept_quest", questId: referencesQuestId },
+    });
+  }
+
+  // One-click actions come first so the player sees the primary action up
+  // front; LLM-suggested follow-ups fill remaining slots. Cap at 3 total.
+  const suggestedActions = [...oneClickActions, ...llmActions].slice(0, 3);
 
   return {
     reply,
