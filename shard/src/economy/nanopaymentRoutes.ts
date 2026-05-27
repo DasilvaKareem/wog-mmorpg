@@ -1,4 +1,5 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import MessageValidator from "sns-validator";
 import { authenticateRequest } from "../auth/auth.js";
 import { getRedis } from "../redis.js";
 import {
@@ -12,11 +13,34 @@ import {
 import {
   getSellerBalance,
   submitAuthorizationsForSettlement,
-  verifyEIP3009Auth,
   CIRCLE_GATEWAY_WALLET_CONTRACT,
   CIRCLE_SELLER_ADDRESS,
   DEFAULT_SESSION_BUDGET_USDC,
 } from "./circleGateway.js";
+
+const ADMIN_SECRET       = process.env.ADMIN_SECRET?.trim() || null;
+const CIRCLE_SNS_TOPIC_ARN = process.env.CIRCLE_SNS_TOPIC_ARN?.trim() || null;
+
+const snsValidator = new MessageValidator();
+
+function snsValidate(envelope: Record<string, unknown>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    snsValidator.validate(envelope, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+function requireAdmin(request: FastifyRequest, reply: FastifyReply): boolean {
+  if (!ADMIN_SECRET) {
+    reply.code(503).send({ error: "Admin route disabled: ADMIN_SECRET is not configured" });
+    return false;
+  }
+  const secret = request.headers["x-admin-secret"];
+  if (secret !== ADMIN_SECRET) {
+    reply.code(401).send({ error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
 
 export function registerNanopaymentRoutes(server: FastifyInstance): void {
   // ── GET /nanopay/status/:wallet ─────────────────────────────────────────────
@@ -67,44 +91,12 @@ export function registerNanopaymentRoutes(server: FastifyInstance): void {
     });
   });
 
-  // ── POST /nanopay/topup ─────────────────────────────────────────────────────
-  // signedAuth is optional — custodial wallets top up without a client signature;
-  // the server generates the EIP-3009 auth internally when Circle is configured.
-  server.post<{
-    Body: { budgetUsdc?: number; signedAuth?: string };
-  }>(
-    "/nanopay/topup",
-    { preHandler: authenticateRequest },
-    async (request, reply) => {
-      const wallet = (request as any).walletAddress as string;
-      const { budgetUsdc = DEFAULT_SESSION_BUDGET_USDC, signedAuth } = request.body;
-
-      if (budgetUsdc <= 0 || budgetUsdc > 100) {
-        return reply.code(400).send({ error: "budgetUsdc must be between 0 and 100" });
-      }
-
-      // If a signed auth is provided, verify it (non-custodial / Circle flow).
-      // Without one, credits are added directly (custodial mode — server holds key).
-      if (signedAuth) {
-        const valid = await verifyEIP3009Auth(signedAuth, budgetUsdc, wallet);
-        if (!valid) {
-          return reply.code(400).send({ error: "Invalid payment authorization signature" });
-        }
-        await initTopUp(wallet, signedAuth, budgetUsdc);
-      } else {
-        // Custodial top-up: add credits directly, no Circle auth stored yet.
-        // When Circle settlement is wired, the server will sign on behalf of the custodial key.
-        await initTopUp(wallet, "custodial", budgetUsdc);
-      }
-
-      const balance = await getSessionBalance(wallet);
-      return reply.send({ ok: true, balance });
-    },
-  );
-
   // ── POST /nanopay/settle ────────────────────────────────────────────────────
-  // Called by the background cron every 5 min, or manually by admin.
-  server.post("/nanopay/settle", async (_req, reply) => {
+  // Admin-only manual trigger. The in-process cron (server.ts) is the normal driver.
+  // Dormant while the non-custodial client-signed top-up path is disabled —
+  // collectPendingAuthorizations() will return [] until that flow is reintroduced.
+  server.post("/nanopay/settle", async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
     const pending = await collectPendingAuthorizations();
     if (!pending.length) return reply.send({ settled: 0, settlementId: null });
 
@@ -117,7 +109,8 @@ export function registerNanopaymentRoutes(server: FastifyInstance): void {
   });
 
   // ── GET /nanopay/balance/seller ─────────────────────────────────────────────
-  server.get("/nanopay/balance/seller", async (_req, reply) => {
+  server.get("/nanopay/balance/seller", async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
     const usdc = await getSellerBalance();
     return reply.send({ usdc });
   });
@@ -125,13 +118,35 @@ export function registerNanopaymentRoutes(server: FastifyInstance): void {
   // ── POST /webhooks/circle ───────────────────────────────────────────────────
   // Circle delivers via AWS SNS. SNS first sends a SubscriptionConfirmation,
   // then wraps every Circle notification inside an SNS Notification envelope.
+  //
+  // Every envelope is verified against the AWS SNS signing-cert chain before
+  // any branching. We also require the envelope's TopicArn to match the
+  // configured CIRCLE_SNS_TOPIC_ARN — this blocks attackers who legitimately
+  // publish to their own SNS topic.
   server.post<{ Body: any }>("/webhooks/circle", async (request, reply) => {
-    const snsType = (request.headers["x-amz-sns-message-type"] ?? "") as string;
-    const body    = request.body ?? {};
+    if (!CIRCLE_SNS_TOPIC_ARN) {
+      console.error("[nanopay:webhook] CIRCLE_SNS_TOPIC_ARN not configured — refusing webhook");
+      return reply.code(503).send({ error: "Webhook not configured" });
+    }
+
+    const snsType  = (request.headers["x-amz-sns-message-type"] ?? "") as string;
+    const envelope = (request.body ?? {}) as Record<string, unknown>;
+
+    try {
+      await snsValidate(envelope);
+    } catch (err: any) {
+      console.warn("[nanopay:webhook] SNS signature validation failed:", err.message);
+      return reply.code(401).send({ error: "Invalid SNS signature" });
+    }
+
+    if (envelope.TopicArn !== CIRCLE_SNS_TOPIC_ARN) {
+      console.warn(`[nanopay:webhook] Rejecting TopicArn ${envelope.TopicArn as string}`);
+      return reply.code(401).send({ error: "Unrecognized TopicArn" });
+    }
 
     // ── Step 1: confirm the SNS subscription ──────────────────────────────────
     if (snsType === "SubscriptionConfirmation") {
-      const subscribeUrl = body.SubscribeURL as string;
+      const subscribeUrl = envelope.SubscribeURL as string;
       if (subscribeUrl?.startsWith("https://sns.")) {
         try {
           await fetch(subscribeUrl);
@@ -146,9 +161,9 @@ export function registerNanopaymentRoutes(server: FastifyInstance): void {
     // ── Step 2: unwrap SNS Notification → Circle payload ─────────────────────
     let payload: any;
     if (snsType === "Notification") {
-      try { payload = JSON.parse(body.Message as string); } catch { payload = body; }
+      try { payload = JSON.parse(envelope.Message as string); } catch { payload = envelope; }
     } else {
-      payload = body; // direct delivery (non-SNS path)
+      payload = envelope;
     }
 
     const notifType = (payload?.notificationType ?? "") as string;
@@ -167,8 +182,8 @@ export function registerNanopaymentRoutes(server: FastifyInstance): void {
     // Deduplicate — SNS retries on timeout
     const redis     = getRedis();
     const dedupeKey = `nanopay:circle:processed:${transfer.id as string}`;
-    const isNew     = await redis.set(dedupeKey, "1", { NX: true, EX: 86400 * 7 });
-    if (!isNew) return reply.send({ ok: true, duplicate: true });
+    const isNew     = await redis.set(dedupeKey, "1", "EX", 86400 * 7, "NX");
+    if (isNew !== "OK") return reply.send({ ok: true, duplicate: true });
 
     const senderAddress: string = (transfer.sourceAddress ?? "").toLowerCase();
     const amount                = parseFloat(transfer.amounts?.[0] ?? "0");

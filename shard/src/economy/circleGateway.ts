@@ -13,22 +13,6 @@ export function usdcToMicro(amount: number): string {
   return Math.round(amount * 10 ** USDC_DECIMALS).toString();
 }
 
-// Verify an EIP-3009 authorization from the buyer before storing it.
-// In dev (no CIRCLE_GATEWAY_WALLET_CONTRACT), skips on-chain verification.
-export async function verifyEIP3009Auth(
-  signedAuth: string,
-  expectedAmountUsdc: number,
-  buyerAddress: string,
-): Promise<boolean> {
-  if (!signedAuth || !buyerAddress) return false;
-  if (!CIRCLE_GATEWAY_WALLET_CONTRACT) return true; // dev: skip
-
-  // TODO: verify EIP-3009 sig using viem/ethers:
-  //   from=buyerAddress, to=CIRCLE_SELLER_ADDRESS, value=usdcToMicro(expectedAmountUsdc)
-  //   validAfter/validBefore timestamps within window
-  return true;
-}
-
 export async function submitAuthorizationsForSettlement(
   auths: Array<{ wallet: string; auth: string; budgetUsdc: number }>,
 ): Promise<string | null> {

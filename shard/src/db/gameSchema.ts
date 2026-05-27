@@ -309,6 +309,58 @@ export async function ensureGameSchema(): Promise<void> {
         create index if not exists idx_chain_tx_attempts_status_created
           on game.chain_tx_attempts (status, created_at desc);
 
+        -- NFT bridge: tracks burn-and-mint bridge ops between SKALE Base and Coinbase Base.
+        create table if not exists game.bridge_operations (
+          bridge_id uuid primary key,
+          direction text not null,                -- 'skale-to-base' | 'base-to-skale'
+          wallet_address text not null,
+          custodial_flow boolean not null,
+          source_chain_id bigint not null,
+          destination_chain_id bigint not null,
+          source_token_id text not null,
+          destination_token_id text,
+          recipient_address text not null,
+          status text not null,                   -- pending_burn | burn_confirmed | claim_signed | redeemed | expired | refunded
+          burn_tx_hash text,
+          redeem_tx_hash text,
+          metadata_uri text,
+          claim_nonce bytea,
+          claim_digest bytea,
+          claim_signature bytea,
+          claim_expires_at timestamptz,
+          character_name text,
+          character_class_id text,
+          last_error text,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        );
+
+        -- Prevents two concurrent bridges of the same tokenId on the same chain.
+        create unique index if not exists idx_bridge_operations_active_source
+          on game.bridge_operations (source_chain_id, source_token_id)
+          where status in ('pending_burn', 'burn_confirmed', 'claim_signed');
+
+        create index if not exists idx_bridge_operations_wallet
+          on game.bridge_operations (wallet_address, created_at desc);
+
+        create index if not exists idx_bridge_operations_status_expiry
+          on game.bridge_operations (status, claim_expires_at);
+
+        create index if not exists idx_bridge_operations_destination_token
+          on game.bridge_operations (destination_chain_id, destination_token_id);
+
+        -- Explicit columns on character_identity_state so ops queries don't need to crack snapshot_json.
+        alter table game.character_identity_state
+          add column if not exists bridged_out boolean not null default false,
+          add column if not exists bridged_at timestamptz,
+          add column if not exists bridged_destination_chain_id bigint,
+          add column if not exists bridged_destination_token_id text,
+          add column if not exists bridged_destination_tx_hash text;
+
+        create index if not exists idx_character_identity_bridged
+          on game.character_identity_state (bridged_out, bridged_at desc)
+          where bridged_out = true;
+
         do $$
         begin
           if not exists (

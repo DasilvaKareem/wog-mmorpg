@@ -65,8 +65,8 @@ export async function creditOnChainDeposit(wallet: string, budgetUsdc: number): 
   await redis.set(spentKey(key), "0");
   await redis.del(breakdownKey(key));
   try {
-    await redis.lPush(topupsKey(key), JSON.stringify({ ts: Date.now(), amount: budgetUsdc }));
-    await redis.lTrim(topupsKey(key), 0, TOPUPS_MAX - 1);
+    await redis.lpush(topupsKey(key), JSON.stringify({ ts: Date.now(), amount: budgetUsdc }));
+    await redis.ltrim(topupsKey(key), 0, TOPUPS_MAX - 1);
   } catch { /* non-fatal */ }
 }
 
@@ -85,8 +85,8 @@ export async function initTopUp(wallet: string, signedAuth: string, budgetUsdc: 
   await redis.del(breakdownKey(wallet));
   // Append to top-up log (these are the meaningful individual events)
   try {
-    await redis.lPush(topupsKey(wallet), JSON.stringify({ ts: Date.now(), amount: budgetUsdc }));
-    await redis.lTrim(topupsKey(wallet), 0, TOPUPS_MAX - 1);
+    await redis.lpush(topupsKey(wallet), JSON.stringify({ ts: Date.now(), amount: budgetUsdc }));
+    await redis.ltrim(topupsKey(wallet), 0, TOPUPS_MAX - 1);
   } catch { /* non-fatal */ }
 }
 
@@ -102,8 +102,8 @@ export async function getSpendBreakdown(wallet: string): Promise<{
   try {
     const redis = getRedis();
     const [rawBreakdown, rawTopups] = await Promise.all([
-      redis.hGetAll(breakdownKey(wallet)),
-      redis.lRange(topupsKey(wallet), 0, TOPUPS_MAX - 1),
+      redis.hgetall(breakdownKey(wallet)),
+      redis.lrange(topupsKey(wallet), 0, TOPUPS_MAX - 1),
     ]);
     const breakdown: Record<string, number> = {};
     for (const [k, v] of Object.entries(rawBreakdown)) {
@@ -143,7 +143,7 @@ export async function deductCost(
     const newSpent    = spent + cost;
     const newRemaining = budget - newSpent;
     await redis.set(spentKey(wallet), newSpent.toFixed(8));
-    void redis.hIncrByFloat(breakdownKey(wallet), action, cost).catch(() => {});
+    void redis.hincrbyfloat(breakdownKey(wallet), action, cost).catch(() => {});
     const lowBalance = budget > 0 && newRemaining / budget <= LOW_BALANCE_RATIO;
     return { ok: true, remaining: newRemaining, lowBalance };
   } catch (err: any) {

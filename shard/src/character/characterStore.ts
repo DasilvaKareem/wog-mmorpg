@@ -28,8 +28,19 @@ export interface CharacterSaveData {
   characterTokenId?: string;
   agentId?: string;
   agentRegistrationTxHash?: string;
-  chainRegistrationStatus?: "unregistered" | "pending_mint" | "pending_mint_receipt" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent";
+  chainRegistrationStatus?: "unregistered" | "pending_mint" | "pending_mint_receipt" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent" | "bridged_out";
   chainRegistrationLastError?: string;
+  /** True while the character NFT is bridged out to another chain (e.g. Base mainnet).
+   *  Gates spawn/deploy/play actions; cleared on bridge-back. */
+  bridgedOut?: boolean;
+  /** Unix ms when bridge-out was confirmed on source chain. */
+  bridgedAt?: number;
+  /** Destination chain id (e.g. 8453 for Base mainnet) while bridged. */
+  bridgedDestinationChainId?: number;
+  /** Token id on the destination chain. */
+  bridgedDestinationTokenId?: string;
+  /** Mint tx hash on the destination chain. */
+  bridgedDestinationTxHash?: string;
   raceId: string;
   classId: string;
   calling?: CharacterCalling;
@@ -193,6 +204,11 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
     equipment: raw.equipment ? (() => { try { return JSON.parse(raw.equipment); } catch { return undefined; } })() : undefined,
     professionSkills: parseProfessionSkills(raw.professionSkills),
+    bridgedOut: raw.bridgedOut === "true" ? true : undefined,
+    bridgedAt: raw.bridgedAt ? (parseInt(raw.bridgedAt, 10) || undefined) : undefined,
+    bridgedDestinationChainId: raw.bridgedDestinationChainId ? (parseInt(raw.bridgedDestinationChainId, 10) || undefined) : undefined,
+    bridgedDestinationTokenId: raw.bridgedDestinationTokenId || undefined,
+    bridgedDestinationTxHash: raw.bridgedDestinationTxHash || undefined,
   };
 }
 
@@ -496,6 +512,59 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
   }
 
   return [];
+}
+
+/** Thrown by `assertCharacterNotBridgedOut` when a character is currently exported. */
+export class CharacterBridgedOutError extends Error {
+  constructor(
+    public readonly walletAddress: string,
+    public readonly characterName: string,
+    public readonly destinationChainId: number | null,
+    public readonly destinationTokenId: string | null,
+  ) {
+    super(
+      `Character "${characterName}" is bridged out` +
+        (destinationChainId ? ` to chain ${destinationChainId}` : "") +
+        ". Bridge back before playing."
+    );
+    this.name = "CharacterBridgedOutError";
+  }
+}
+
+/** Throw if the character is currently bridged out; otherwise no-op. */
+export async function assertCharacterNotBridgedOut(
+  walletAddress: string,
+  characterName: string,
+): Promise<void> {
+  const saved = await loadCharacter(walletAddress, characterName);
+  if (saved?.bridgedOut === true) {
+    throw new CharacterBridgedOutError(
+      walletAddress,
+      characterName,
+      saved.bridgedDestinationChainId ?? null,
+      saved.bridgedDestinationTokenId ?? null,
+    );
+  }
+}
+
+/** Convenience setter used by the bridge service when burn/mint events confirm. */
+export async function setCharacterBridgedOut(params: {
+  walletAddress: string;
+  characterName: string;
+  bridgedOut: boolean;
+  destinationChainId?: number | null;
+  destinationTokenId?: string | null;
+  destinationTxHash?: string | null;
+}): Promise<void> {
+  const patch: CharacterSavePatch = {
+    bridgedOut: params.bridgedOut || (null as unknown as undefined),
+    bridgedAt: params.bridgedOut ? Date.now() : (null as unknown as undefined),
+    bridgedDestinationChainId: params.destinationChainId ?? (null as unknown as undefined),
+    bridgedDestinationTokenId: params.destinationTokenId ?? (null as unknown as undefined),
+    bridgedDestinationTxHash: params.destinationTxHash ?? (null as unknown as undefined),
+    chainRegistrationStatus: params.bridgedOut ? "bridged_out" : (null as unknown as undefined),
+  };
+  await saveCharacter(params.walletAddress, params.characterName, patch);
 }
 
 export async function deleteCharacter(walletAddress: string, characterName: string): Promise<void> {

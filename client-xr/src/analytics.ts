@@ -4,7 +4,20 @@ const key = import.meta.env.VITE_PUBLIC_POSTHOG_KEY as string | undefined;
 const host = import.meta.env.VITE_PUBLIC_POSTHOG_HOST as string | undefined;
 
 if (key) {
-  posthog.init(key, { api_host: host ?? "https://us.i.posthog.com", defaults: "2026-01-30" });
+  posthog.init(key, {
+    api_host: host ?? "https://us.i.posthog.com",
+    defaults: "2026-01-30",
+    session_recording: {
+      maskAllInputs: false,
+      captureCanvas: {
+        recordCanvas: true,
+        canvasFps: 4,
+        canvasQuality: "0.6",
+      },
+    },
+    capture_pageview: true,
+    capture_pageleave: true,
+  });
 }
 
 // ── Auth / Acquisition ───────────────────────────────────────────────────────

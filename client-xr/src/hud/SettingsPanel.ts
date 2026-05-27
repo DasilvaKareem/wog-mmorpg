@@ -7,8 +7,23 @@ import {
 } from "../sfx.js";
 import { QualityManager } from "../quality/QualityManager.js";
 import { TIER_CONFIGS, TIER_LABELS, TIER_ORDER, type Tier } from "../quality/tierConfig.js";
+import { postBugReport, type BugReportPayload } from "../api.js";
+import { getRecentErrors } from "../utils/errorBuffer.js";
+import { playerSession } from "../state/PlayerSession.js";
 
-type TabId = "audio" | "graphics";
+type TabId = "audio" | "graphics" | "bug";
+
+type BugCategory = BugReportPayload["category"];
+const BUG_CATEGORIES: Array<{ id: BugCategory; label: string }> = [
+  { id: "gameplay", label: "Gameplay" },
+  { id: "visual", label: "Visual / Graphics" },
+  { id: "performance", label: "Performance" },
+  { id: "crash", label: "Crash / Freeze" },
+  { id: "other", label: "Other" },
+];
+
+const TITLE_MAX = 80;
+const DESC_MAX = 1000;
 
 const MUSIC_MUTED_KEY = "wog-music-muted";
 const MUSIC_VOLUME_KEY = "wog-music-volume";
@@ -95,6 +110,7 @@ export class SettingsPanel {
     const tabs: Array<{ id: TabId; label: string }> = [
       { id: "audio", label: "Audio" },
       { id: "graphics", label: "Graphics" },
+      { id: "bug", label: "Bug Report" },
     ];
     this.tabBar.innerHTML = "";
     for (const tab of tabs) {
@@ -119,6 +135,7 @@ export class SettingsPanel {
     this.body.innerHTML = "";
     if (this.activeTab === "audio") this.renderAudioTab();
     else if (this.activeTab === "graphics") this.renderGraphicsTab();
+    else if (this.activeTab === "bug") this.renderBugTab();
   }
 
   private renderGraphicsTab() {
@@ -195,6 +212,125 @@ export class SettingsPanel {
     });
 
     this.body.appendChild(section);
+  }
+
+  private renderBugTab() {
+    const section = document.createElement("section");
+    section.className = "settings-section";
+    section.innerHTML = `<h3>Report a Bug</h3>`;
+
+    const catRow = document.createElement("label");
+    catRow.className = "settings-row settings-row-slider";
+    const catLabel = document.createElement("span");
+    catLabel.className = "settings-slider-label";
+    catLabel.textContent = "Category";
+    const catSelect = document.createElement("select");
+    catSelect.className = "settings-select";
+    for (const c of BUG_CATEGORIES) {
+      const opt = document.createElement("option");
+      opt.value = c.id;
+      opt.textContent = c.label;
+      catSelect.appendChild(opt);
+    }
+    catRow.appendChild(catLabel);
+    catRow.appendChild(catSelect);
+    section.appendChild(catRow);
+
+    const titleInput = document.createElement("input");
+    titleInput.type = "text";
+    titleInput.className = "settings-input";
+    titleInput.maxLength = TITLE_MAX;
+    titleInput.placeholder = "Short title (e.g. Quest reward not credited)";
+    section.appendChild(this.fieldWrap("Title", titleInput));
+
+    const descInput = document.createElement("textarea");
+    descInput.className = "settings-textarea";
+    descInput.maxLength = DESC_MAX;
+    descInput.rows = 5;
+    descInput.placeholder = "What happened? Steps to reproduce, what you expected, what you saw.";
+    section.appendChild(this.fieldWrap("Details", descInput));
+
+    const counter = document.createElement("div");
+    counter.className = "settings-counter";
+    counter.textContent = `0 / ${DESC_MAX}`;
+    descInput.addEventListener("input", () => {
+      counter.textContent = `${descInput.value.length} / ${DESC_MAX}`;
+    });
+    section.appendChild(counter);
+
+    const note = document.createElement("div");
+    note.className = "settings-graphics-note";
+    note.textContent = "We auto-attach your character, zone, browser info, and recent errors.";
+    section.appendChild(note);
+
+    const status = document.createElement("div");
+    status.className = "settings-bug-status";
+    section.appendChild(status);
+
+    const submit = document.createElement("button");
+    submit.className = "settings-reload-btn";
+    submit.textContent = "Submit report";
+    submit.addEventListener("click", async () => {
+      const title = titleInput.value.trim();
+      const description = descInput.value.trim();
+      if (!title) { status.textContent = "Please enter a title."; status.className = "settings-bug-status err"; return; }
+      if (!description) { status.textContent = "Please describe what happened."; status.className = "settings-bug-status err"; return; }
+
+      submit.disabled = true;
+      status.textContent = "Sending…";
+      status.className = "settings-bug-status";
+
+      const payload: BugReportPayload = {
+        category: catSelect.value as BugCategory,
+        title,
+        description,
+        context: this.collectBugContext(),
+      };
+      const result = await postBugReport(payload);
+      submit.disabled = false;
+
+      if (result.ok) {
+        status.textContent = `✓ Thanks — ref ${result.id ?? "received"}`;
+        status.className = "settings-bug-status ok";
+        titleInput.value = "";
+        descInput.value = "";
+        counter.textContent = `0 / ${DESC_MAX}`;
+        playSoundEffect("ui_tab_switch");
+      } else {
+        status.textContent = `✗ ${result.error ?? "Failed to send"}`;
+        status.className = "settings-bug-status err";
+      }
+    });
+    section.appendChild(submit);
+
+    this.body.appendChild(section);
+  }
+
+  private fieldWrap(label: string, input: HTMLElement): HTMLElement {
+    const wrap = document.createElement("label");
+    wrap.className = "settings-field";
+    const text = document.createElement("span");
+    text.className = "settings-field-label";
+    text.textContent = label;
+    wrap.appendChild(text);
+    wrap.appendChild(input);
+    return wrap;
+  }
+
+  private collectBugContext(): BugReportPayload["context"] {
+    const buildSha = (import.meta.env.VITE_BUILD_SHA as string | undefined) ?? "";
+    return {
+      walletAddress: playerSession.wallet ?? undefined,
+      characterId: playerSession.entityId ?? undefined,
+      zoneId: playerSession.zoneId ?? undefined,
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      screen: `${window.innerWidth}x${window.innerHeight}`,
+      devicePixelRatio: window.devicePixelRatio,
+      qualityTier: String(QualityManager.current()),
+      clientVersion: buildSha || undefined,
+      recentErrors: getRecentErrors(),
+    };
   }
 
   private renderAudioTab() {
@@ -390,6 +526,58 @@ export class SettingsPanel {
       .settings-reload-btn:hover {
         background: rgba(255, 194, 79, 0.35);
       }
+      .settings-reload-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .settings-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 6px 0;
+      }
+      .settings-field-label {
+        color: #9ab;
+        font: bold 11px monospace;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      .settings-input,
+      .settings-textarea {
+        background: rgba(10, 16, 28, 0.8);
+        color: #ddd;
+        border: 1px solid rgba(255, 194, 79, 0.3);
+        border-radius: 4px;
+        padding: 6px 8px;
+        font: 12px monospace;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .settings-textarea {
+        resize: vertical;
+        min-height: 80px;
+        line-height: 1.4;
+      }
+      .settings-input:focus,
+      .settings-textarea:focus {
+        outline: none;
+        border-color: #ffc24f;
+      }
+      .settings-counter {
+        text-align: right;
+        color: #667;
+        font-size: 10px;
+        margin-top: 2px;
+      }
+      .settings-bug-status {
+        margin-top: 8px;
+        padding: 4px 0;
+        min-height: 16px;
+        font-size: 11px;
+        color: #9ab;
+      }
+      .settings-bug-status.ok { color: #6dcf6d; }
+      .settings-bug-status.err { color: #f88; }
     `;
     document.head.appendChild(style);
   }

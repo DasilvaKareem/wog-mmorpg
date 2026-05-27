@@ -7,6 +7,9 @@ window.onerror = (msg, src, line, col, err) => {
   document.body.appendChild(el);
 };
 
+import { installErrorBuffer } from "./utils/errorBuffer.js";
+installErrorBuffer();
+
 import * as THREE from "three";
 import { WorldManager } from "./scene/WorldManager.js";
 import { EntityManager, type QuestIndicatorState } from "./scene/EntityManager.js";

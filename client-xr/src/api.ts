@@ -1181,3 +1181,189 @@ export async function fetchTelegramStatus(wallet: string): Promise<{ linked: boo
 export async function fetchTelegramBotLink(wallet: string): Promise<{ url: string | null; botUsername: string | null } | null> {
   return fetchJsonWithFallback(`/notifications/telegram/bot-link/${encodeURIComponent(wallet)}`);
 }
+
+// ── NFT Bridge (SKALE Base ↔ Coinbase Base) ───────────────────────
+
+export interface BridgeInfo {
+  enabled: boolean;
+  chains: {
+    skale: { chainId: number; adapterContract: string | null };
+    base: { chainId: number; characterContract: string | null };
+  };
+}
+
+export interface BridgeStatusPayload {
+  bridgeId: string;
+  direction: "skale-to-base" | "base-to-skale";
+  walletAddress: string;
+  sourceChainId: number;
+  destinationChainId: number;
+  sourceTokenId: string;
+  destinationTokenId: string | null;
+  recipientAddress: string;
+  status:
+    | "pending_burn"
+    | "burn_confirmed"
+    | "claim_signed"
+    | "redeemed"
+    | "expired"
+    | "refunded";
+  burnTxHash: string | null;
+  redeemTxHash: string | null;
+  metadataURI: string | null;
+  claimDigest: string | null;
+  claimExpiresAt: number | null;
+  characterName: string | null;
+  characterClassId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  lastError: string | null;
+}
+
+export interface BridgeClaimPayload {
+  claim: {
+    sourceTokenId: string;
+    destinationTokenId: string;
+    recipient: string;
+    sourceChainId: number;
+    destinationChainId: number;
+    metadataURI: string;
+    nonce: string;
+    expiresAt: number;
+  };
+  signature: string;
+  digest: string;
+  verifyingContract: string;
+}
+
+export async function fetchBridgeInfo(): Promise<BridgeInfo | null> {
+  return fetchJsonWithFallback<BridgeInfo>("/bridge/info");
+}
+
+export async function postBridgeExport(
+  token: string,
+  body: { walletAddress: string; characterName: string; baseRecipient: string },
+): Promise<{ ok: boolean; data?: BridgeStatusPayload; error?: string }> {
+  return postJsonWithFallback<BridgeStatusPayload>("/bridge/export", token, body);
+}
+
+export async function postBridgeImport(
+  token: string,
+  body: {
+    walletAddress: string;
+    baseTokenId: string;
+    skaleRecipient: string;
+    characterName?: string;
+    characterClassId?: string;
+    freshMint?: boolean;
+  },
+): Promise<{ ok: boolean; data?: BridgeStatusPayload; error?: string }> {
+  return postJsonWithFallback<BridgeStatusPayload>("/bridge/import", token, body);
+}
+
+export async function fetchBridgeStatus(
+  bridgeId: string,
+  token: string,
+): Promise<BridgeStatusPayload | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/bridge/status/${encodeURIComponent(bridgeId)}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as BridgeStatusPayload;
+    } catch {}
+  }
+  return null;
+}
+
+export async function fetchBridgeClaim(
+  bridgeId: string,
+  token: string,
+): Promise<BridgeClaimPayload | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/bridge/claim/${encodeURIComponent(bridgeId)}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as BridgeClaimPayload;
+    } catch {}
+  }
+  return null;
+}
+
+export async function fetchBridgeHistory(
+  wallet: string,
+  token: string,
+): Promise<BridgeStatusPayload[]> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(
+        toUrl(base, `/bridge/history?wallet=${encodeURIComponent(wallet)}`),
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) continue;
+      const json = (await res.json()) as { history?: BridgeStatusPayload[] };
+      return json.history ?? [];
+    } catch {}
+  }
+  return [];
+}
+
+export async function fetchCharacterBridgeStatus(
+  wallet: string,
+  characterName: string,
+  token: string,
+): Promise<{ bridgedOut: boolean; destinationChainId: number | null } | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const url = `/bridge/character-status?wallet=${encodeURIComponent(wallet)}&characterName=${encodeURIComponent(characterName)}`;
+      const res = await fetchWithRetry(toUrl(base, url), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as { bridgedOut: boolean; destinationChainId: number | null };
+    } catch {}
+  }
+  return null;
+}
+
+// ── Bug reports ─────────────────────────────────────────────────────
+
+export type BugReportPayload = {
+  category: "gameplay" | "visual" | "performance" | "crash" | "other";
+  title: string;
+  description: string;
+  context: {
+    walletAddress?: string;
+    characterId?: string;
+    characterName?: string;
+    zoneId?: string;
+    url?: string;
+    userAgent?: string;
+    screen?: string;
+    devicePixelRatio?: number;
+    qualityTier?: string;
+    clientVersion?: string;
+    recentErrors?: string[];
+  };
+};
+
+export async function postBugReport(
+  payload: BugReportPayload,
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, "/bug-report"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data?.error ?? res.statusText };
+      return { ok: true, id: data?.id };
+    } catch {}
+  }
+  return { ok: false, error: "Network unreachable" };
+}

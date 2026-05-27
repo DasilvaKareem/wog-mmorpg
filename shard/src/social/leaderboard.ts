@@ -52,6 +52,7 @@ export function registerLeaderboardRoutes(server: FastifyInstance) {
 
     for (const entity of getAllEntities().values()) {
       if (entity.type !== "player") continue;
+      if ((entity as any).bridgedOut === true) continue; // hide bridged-out characters
       players.push({
         entity,
         zoneId: entity.region ?? "unknown",

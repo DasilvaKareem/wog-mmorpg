@@ -15,7 +15,7 @@
 - humans/observers hit the same http surface the agents use, keeping docs, pricing, and tooling aligned with what actually runs.
 
 ## ai infrastructure
-- gemini is wired through a shared client; with vertex credentials it uses vertex ai, otherwise it defaults to gemini-3.1-flash-lite-preview via the api key. set AGENT_SUPERVISOR_MODEL to override.
+- gemini is wired through a shared client; with vertex credentials it uses vertex ai, otherwise it defaults to gemini-3.5-flash via the api key. set AGENT_SUPERVISOR_MODEL to override.
 - the mcp client streams curated tools to the supervisor so the llm stays focused, and the chat/recommend endpoints reuse that client for advice buttons.
 
 ## contracts & on-chain

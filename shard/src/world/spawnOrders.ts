@@ -189,6 +189,24 @@ export function registerSpawnOrders(server: FastifyInstance) {
           zoneId: existing.zoneId,
         };
       }
+
+      // Block spawn when this character is currently bridged out to another chain.
+      try {
+        const { assertCharacterNotBridgedOut, CharacterBridgedOutError } =
+          await import("../character/characterStore.js");
+        await assertCharacterNotBridgedOut(walletAddress, name);
+      } catch (err) {
+        const { CharacterBridgedOutError } = await import("../character/characterStore.js");
+        if (err instanceof CharacterBridgedOutError) {
+          reply.code(409);
+          return {
+            error: err.message,
+            code: "character_bridged_out",
+            destinationChainId: err.destinationChainId,
+          };
+        }
+        throw err;
+      }
     }
 
     // Try to restore saved character from Redis

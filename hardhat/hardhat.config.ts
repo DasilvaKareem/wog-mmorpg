@@ -10,6 +10,10 @@ const SKALE_BASE_MAINNET_RPC_URL =
 const SKALE_BASE_SEPOLIA_RPC_URL =
   process.env.SKALE_BASE_SEPOLIA_RPC_URL ||
   "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha";
+const BASE_MAINNET_RPC_URL =
+  process.env.BASE_MAINNET_RPC_URL || "https://mainnet.base.org";
+const BASE_SEPOLIA_RPC_URL =
+  process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org";
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -50,6 +54,16 @@ const config: HardhatUserConfig = {
     skaleSepolia: {
       url: SKALE_BASE_SEPOLIA_RPC_URL,
       chainId: 324705682,
+      accounts: DEPLOYER_ACCOUNTS,
+    },
+    base: {
+      url: BASE_MAINNET_RPC_URL,
+      chainId: 8453,
+      accounts: DEPLOYER_ACCOUNTS,
+    },
+    baseSepolia: {
+      url: BASE_SEPOLIA_RPC_URL,
+      chainId: 84532,
       accounts: DEPLOYER_ACCOUNTS,
     },
   },

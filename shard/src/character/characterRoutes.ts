@@ -57,8 +57,11 @@ type CharacterListEntry = {
     | "identity_pending"
     | "registered"
     | "failed_retryable"
-    | "failed_permanent";
+    | "failed_permanent"
+    | "bridged_out";
   chainRegistrationLastError?: string | null;
+  bridgedOut?: boolean;
+  bridgedDestinationChainId?: number | null;
   bootstrapStatus?:
     | "queued"
     | "pending_mint"

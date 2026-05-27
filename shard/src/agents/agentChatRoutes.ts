@@ -46,7 +46,13 @@ import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { enqueueGoldMint, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntitiesInRegion, getWorldTick, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
-import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
+import {
+  saveCharacter,
+  loadAnyCharacterForWallet,
+  loadAllCharactersForWallet,
+  assertCharacterNotBridgedOut,
+  CharacterBridgedOutError,
+} from "../character/characterStore.js";
 import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques, getTechniqueById } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
@@ -58,6 +64,7 @@ import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
 import { getAgentOrigin, emitAgentChat } from "./agentDialogue.js";
 import { handleSlashCommand } from "./slashCommands.js";
+import { inferInteractionMode, inferSlashFromNaturalLanguage, buildDirectiveQuip } from "./directiveRouter.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
 import { validateEdicts, type Edict } from "../combat/edicts.js";
@@ -199,24 +206,27 @@ async function captureDirectives(userWallet: string, message: string): Promise<s
   return captured;
 }
 
-function inferInteractionMode(message: string): "directive" | "question" | "conversation" {
-  const text = message.trim().toLowerCase();
-  if (!text) return "conversation";
+/**
+ * In ANY-mode tool calls, restrict the LLM to action-producing tools only.
+ * Without this, the model can satisfy ANY-mode by calling a read tool like
+ * scan_zone — which leaves actionsTaken at 0 and trips the "I don't know
+ * what you mean" fallback at the end of /agent/chat.
+ */
+const DIRECTIVE_ACTION_TOOLS = [
+  "queue_actions",
+  "update_focus",
+  "take_action",
+  "send_message",
+  "clear_queue",
+];
 
-  const directivePatterns = [
-    /\b(go to|head to|travel to|take me to|move to)\b/,
-    /\b(fight|farm|grind|kill|hunt|gather|mine|herb|skin|craft|brew|cook|shop|buy|sell|equip|repair)\b/,
-    /\b(quest|idle|stop|resume|switch to|focus on|play it safe|be aggressive|be defensive)\b/,
-    /\b(learn|train|talk to|message|invite|trade with)\b/,
-  ];
-  if (directivePatterns.some((pattern) => pattern.test(text))) return "directive";
-
-  if (text.includes("?") || /^(what|where|why|how|who|when|can|do|are|is)\b/.test(text)) {
-    return "question";
-  }
-
-  return "conversation";
-}
+/**
+ * Chat is a fast user-facing path — disable thinking on every chat-side
+ * Gemini call to avoid the latency tax of gemini-3.5-flash's new default
+ * thinkingLevel="medium". The supervisor at agentSupervisor.ts keeps
+ * thinking on; only the chat-facing call sites use this.
+ */
+const CHAT_THINKING_CONFIG = { thinkingBudget: 0 };
 
 function isExplicitClearQueueRequest(message: string): boolean {
   const text = message.trim().toLowerCase();
@@ -470,6 +480,20 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     if (!characterName) {
       return reply.code(400).send({ error: "No character found for this wallet. Create a character first." });
+    }
+
+    // Block deploy when the character NFT is currently bridged out to another chain.
+    try {
+      await assertCharacterNotBridgedOut(authWallet, characterName);
+    } catch (err) {
+      if (err instanceof CharacterBridgedOutError) {
+        return reply.code(409).send({
+          error: err.message,
+          code: "character_bridged_out",
+          destinationChainId: err.destinationChainId,
+        });
+      }
+      throw err;
     }
 
     try {
@@ -1156,6 +1180,7 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
         model: GEMINI_MODEL,
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: {
+          thinkingConfig: CHAT_THINKING_CONFIG,
           temperature: 0.8,
           maxOutputTokens: 512,
         },
@@ -1385,6 +1410,29 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
           response: cmdResult.response,
           configUpdated: cmdResult.configChanged ?? false,
           isCommand: true,
+        });
+      }
+    }
+
+    // ── Natural-language directive shortcut — instant, no AI ───────────────
+    // "fight" / "stop" / "mine" etc. route through the same slash-command
+    // pipeline so the deterministic path is identical. Compound or freetext
+    // inputs return null and fall through to the LLM (which Phase 1's
+    // allowedFunctionNames keeps reliable).
+    const inferredSlash = inferSlashFromNaturalLanguage(message);
+    if (inferredSlash) {
+      const cmdResult = await handleSlashCommand(inferredSlash, authWallet);
+      if (cmdResult) {
+        const quip = buildDirectiveQuip(inferredSlash, null);
+        const ts = Date.now();
+        await appendChatMessage(authWallet, { role: "user",  text: message, ts });
+        await appendChatMessage(authWallet, { role: "agent", text: quip,    ts: ts + 1 });
+        server.log.info(`[agent/chat] directive routed: "${message.slice(0, 40)}" → ${inferredSlash}`);
+        return reply.send({
+          response: quip,
+          configUpdated: cmdResult.configChanged ?? true,
+          agentRunning: agentManager.isRunning(authWallet),
+          actionResults: [],
         });
       }
     }
@@ -1765,16 +1813,17 @@ Strategy options: aggressive, balanced, defensive`;
       },
     ];
 
-    // When MCP is connected, replace hardcoded read tools with focus-gated MCP subset.
-    // chatOnly=true provides the base curated set; focus further narrows to ~10-15
-    // relevant tools so the LLM doesn't see unrelated options (e.g. dungeon tools during shopping).
+    // When MCP is connected, replace hardcoded read tools with the curated chat subset.
+    // The user is driving here and may ask about anything (e.g. "make me a dungeon key"
+    // while focus=combat), so intentionally do NOT intersect with the agent's current
+    // focus — that's the supervisor's filter, not the chat's.
     if (mcpClient) {
       const localOnlyTools = new Set(["update_focus", "take_action", "send_message", "queue_actions", "clear_queue"]);
       const localTools = chatToolDecls.filter((t) => localOnlyTools.has(t.name!));
-      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true, config.focus);
+      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true);
       chatToolDecls.length = 0;
       chatToolDecls.push(...localTools, ...mcpTools);
-      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools (focus=${config.focus}) + ${localTools.length} local tools`);
+      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools + ${localTools.length} local tools (focus=${config.focus} not applied in chat)`);
     }
 
     const fullSystemInstruction = recentActivity
@@ -1797,10 +1846,17 @@ Strategy options: aggressive, balanced, defensive`;
         config: {
           systemInstruction: fullSystemInstruction,
           tools: [{ functionDeclarations: chatToolDecls }],
-          // Force tool calling for directives — otherwise Gemini just chats about doing it
+          // Force tool calling for directives — and restrict the model to
+          // action-producing tools only. Without allowedFunctionNames, ANY
+          // mode lets Gemini satisfy the constraint with a read tool like
+          // scan_zone, leaving actionsTaken=0 and tripping the fallback.
           ...(interactionMode === "directive"
-            ? { toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } } }
+            ? { toolConfig: { functionCallingConfig: {
+                  mode: FunctionCallingConfigMode.ANY,
+                  allowedFunctionNames: DIRECTIVE_ACTION_TOOLS,
+                } } }
             : {}),
+          thinkingConfig: CHAT_THINKING_CONFIG,
           temperature: 0.5,
           maxOutputTokens: 150,
         },
@@ -1824,6 +1880,12 @@ Strategy options: aggressive, balanced, defensive`;
     server.log.info(`[agent/chat] Gemini response: text=${JSON.stringify(textParts[0]?.text)?.slice(0, 120)} tool_calls=${fnCallParts.length} model=${GEMINI_MODEL}`);
     for (const fc of fnCallParts) {
       server.log.info(`[agent/chat] tool_call: ${fc.functionCall!.name}(${JSON.stringify(fc.functionCall!.args)?.slice(0, 100)})`);
+    }
+    // Smoking-gun diagnostic: directive that produced zero tool calls is the
+    // exact shape that trips the bottom-of-handler fallback. Dump the raw
+    // parts so we can see why the model stalled (empty parts, refusal, etc.).
+    if (interactionMode === "directive" && fnCallParts.length === 0) {
+      server.log.warn(`[agent/chat] directive produced no tool calls — message="${message.slice(0, 60)}" parts=${JSON.stringify(responseParts).slice(0, 500)}`);
     }
 
     // Capture first response content only when no tools are involved. If the
@@ -2807,6 +2869,7 @@ Truth contract:
 - status=accepted means settings changed, but no concrete action has completed.
 - status=blocked or status=failed means it did not happen; explain the concrete reason.
 - Do not mention internal tool names, JSON fields, statuses, or bracket tags.`,
+            thinkingConfig: CHAT_THINKING_CONFIG,
             temperature: 0.5,
             maxOutputTokens: 150,
           },
@@ -2857,6 +2920,7 @@ Truth contract:
               }],
             }],
             toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY, allowedFunctionNames: ["update_focus"] } },
+            thinkingConfig: CHAT_THINKING_CONFIG,
             temperature: 0.3,
             maxOutputTokens: 150,
           },
@@ -2906,6 +2970,7 @@ Truth contract:
           ],
           config: {
             systemInstruction: fullSystemInstruction,
+            thinkingConfig: CHAT_THINKING_CONFIG,
             temperature: 0.7,
             maxOutputTokens: 80,
           },
@@ -2930,7 +2995,12 @@ Truth contract:
             ? `${completed.message}.`
             : "I updated the plan.";
     } else if (!agentResponse) {
-      agentResponse = "Not sure what you mean — tell me to fight, quest, gather, or explore and I’m on it.";
+      // Last-resort fallback — should be rare now that the directive router
+      // catches single-word commands and Phase 1's allowedFunctionNames keeps
+      // the LLM from satisfying ANY-mode with read tools. Log loudly when it
+      // fires so we can spot model regressions.
+      server.log.warn(`[agent/chat] FALLBACK fired — message="${message.slice(0, 60)}" mode=${interactionMode} tool_calls=${fnCallParts.length} tool_results=${toolResults.length}`);
+      agentResponse = "Hmm, my brain glitched. Try a clearer command — like \"fight\", \"quest\", \"gather\", \"mine\", \"craft\", \"stop\" — or be specific like \"travel to dark-forest\" or \"fight wolves\".";
     }
 
     // Deduct nanopayment for this chat interaction (fire-and-forget — don't block reply)

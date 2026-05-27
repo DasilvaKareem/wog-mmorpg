@@ -76,6 +76,7 @@ import { registerDiaryRoutes } from "./social/diary.js";
 import { registerFarcasterAuthRoutes } from "./auth/farcasterAuth.js";
 import { registerNotificationRoutes } from "./social/notificationRoutes.js";
 import { registerWebPushRoutes } from "./social/webPushRoutes.js";
+import { registerBugReportRoutes } from "./social/bugReportRoutes.js";
 import { initWebPushAlerts } from "./social/webPushService.js";
 import { registerGoldPurchaseRoutes } from "./economy/goldPurchaseRoutes.js";
 import { registerNanopaymentRoutes, runSettlementBatch } from "./economy/nanopaymentRoutes.js";
@@ -1005,6 +1006,7 @@ registerStateApi(server);
 registerStatsRoutes(server);
 registerWalletRoutes(server);
 registerShopRoutes(server);
+(await import("./blockchain/bridge/index.js")).registerBridgeRoutes(server);
 registerCharacterRoutes(server);
 registerTradeRoutes(server);
 registerTradeListingsTick(server);
@@ -1068,6 +1070,7 @@ registerWorldMapRoutes(server);
 registerDiaryRoutes(server);
 registerNotificationRoutes(server);
 registerWebPushRoutes(server);
+registerBugReportRoutes(server);
 initDungeonLootTables();
 startGuildNameCacheRefresh(GUILD_CACHE_REFRESH_INTERVAL_MS);
 spawnNpcs();
@@ -1194,6 +1197,11 @@ const start = async () => {
   // USDC deposit watcher: credits compute budget when USDC lands on an agent wallet (Base mainnet).
   void (await import("./economy/usdcDepositWatcher.js")).startUsdcDepositWatcher().catch((err: any) => {
     server.log.warn(`[usdcWatcher] startup failed: ${err.message?.slice(0, 140) ?? err}`);
+  });
+
+  // NFT bridge workers (no-op unless BRIDGE_ENABLED=true + contracts configured).
+  void (await import("./blockchain/bridge/index.js")).startBridgeWorkers().catch((err: any) => {
+    server.log.warn(`[bridge] startup failed: ${err.message?.slice(0, 140) ?? err}`);
   });
 
   if (LAZY_RUNTIME_HYDRATION) {
