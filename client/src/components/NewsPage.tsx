@@ -96,7 +96,7 @@ const ROADMAP = [
     title: "Multi-Continent",
     status: "planned",
     color: "#ff4d6d",
-    items: ["Nocturia continent", "New races & classes", "Cross-continent portals", "World bosses", "Player housing"],
+    items: ["Nocturnia continent", "New races & classes", "Cross-continent portals", "World bosses", "Player housing"],
   },
 ];
 

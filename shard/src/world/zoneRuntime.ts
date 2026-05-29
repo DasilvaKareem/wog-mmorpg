@@ -562,7 +562,11 @@ const RUN_MOVE_SPEED = 15; // units per tick (was 60/tick @ 1s)
 // a walk over the final stretch. Tuned so arriving at an NPC plays the walk
 // animation in the last ~1s of travel.
 const RUN_DISTANCE_THRESHOLD = 30;
-const MELEE_RANGE = 40; // units — fallback for melee / mobs
+// Mob / class-less melee reach. Kept below the melee-class range (40 in
+// classes.ts) so a mob has to close to near-contact before it can land a hit —
+// this is what gives ranged players a real kiting window instead of getting
+// tagged from what looks (on a polled client) like well out of range.
+const MELEE_RANGE = 28; // units — fallback for mobs / class-less entities
 // Basic-attack telegraph: number of ticks between the windup event and damage
 // resolution. 1 tick = 250ms — long enough for client clients on slower poll
 // intervals to often see the windup before damage lands. Bumping this makes

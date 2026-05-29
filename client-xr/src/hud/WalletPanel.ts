@@ -399,10 +399,11 @@ export class WalletPanel {
     const LABELS: Record<string, string> = {
       supervisor: "AI decisions",
       chat:       "Chat messages",
+      banter:     "Banter",
       combat:     "Combat",
       gather:     "Gathering",
     };
-    const ORDER = ["supervisor", "chat", "combat", "gather"];
+    const ORDER = ["supervisor", "chat", "banter", "combat", "gather"];
 
     const rows: string[] = [];
 

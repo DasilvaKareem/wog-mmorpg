@@ -135,6 +135,15 @@ const EVENT_COLORS: Record<string, string> = {
 };
 
 /**
+ * Zone-event types worth surfacing in the bot tab's "SAYS & DID" lane.
+ * Excludes per-tick noise (combat, move, attack-windup, technique-start, ability,
+ * spawn, consume) so the lane reads as a narrative of dialogue + milestones.
+ */
+const AGENT_EVENT_TYPES = new Set<string>([
+  "chat", "kill", "death", "levelup", "loot", "trade", "quest", "quest-progress", "profession",
+]);
+
+/**
  * Unified chat console: zone events + agent command input + slash commands.
  * Press Enter or T to focus, type a command, Enter to send.
  */
@@ -166,12 +175,30 @@ interface AgentStatus {
     nodeType?: string | null;
   }>;
   recentActivities: string[];
+  recentMilestones?: string[];
   pendingMessages?: string[];
   running: boolean;
   entity?: { name: string; level: number; hp: number | null; maxHp: number | null } | null;
   zoneId?: string | null;
   config?: { focus?: string; strategy?: string } | null;
+  activeQuests?: Array<{
+    questId: string;
+    title: string;
+    objectiveType: string;
+    progress: number;
+    required: number;
+    complete: boolean;
+    npcId: string;
+  }>;
 }
+
+const OBJECTIVE_VERBS: Record<string, string> = {
+  kill: "Slay",
+  talk: "Speak with",
+  gather: "Gather",
+  craft: "Craft",
+  clear_dungeon: "Clear",
+};
 
 function humanizeOrder(order: NonNullable<AgentStatus["activeOrder"]>): string {
   const target = order.targetName ? ` → ${order.targetName}` : "";
@@ -181,13 +208,38 @@ function humanizeOrder(order: NonNullable<AgentStatus["activeOrder"]>): string {
   return order.action.replace(/-/g, " ");
 }
 
-function renderActivityLine(text: string): string {
+/** Collapse runs of identical consecutive lines so combat/gather spam folds into one "×N" row. */
+function collapseConsecutive(items: string[]): Array<{ text: string; count: number }> {
+  const out: Array<{ text: string; count: number }> = [];
+  for (const t of items) {
+    const last = out[out.length - 1];
+    if (last && last.text === t) last.count++;
+    else out.push({ text: t, count: 1 });
+  }
+  return out;
+}
+
+/** Light keyword classifier → left-border color, so the history reads at a glance. */
+function activityColor(text: string): string {
+  const t = text.toLowerCase();
+  if (/\bquest\b|talked to|turned in|^accepted /.test(t)) return EVENT_COLORS.quest;
+  if (/^learned |leveled? up|reached level/.test(t)) return EVENT_COLORS.levelup;
+  if (/bought|sold|repaired|auto-listed|recycled|gold/.test(t)) return EVENT_COLORS.trade;
+  if (/^mining|gathered|harvest|skinn|gathering|brewed|crafting|enchant/.test(t)) return EVENT_COLORS.craft;
+  if (/^attacking|grinding|casting|fighting|low hp|disengag|died/.test(t)) return EVENT_COLORS.combat;
+  if (/travel|walking to|arrived|heading to|detour/.test(t)) return EVENT_COLORS["technique-start"];
+  return "#888";
+}
+
+function renderActivityLine(text: string, count = 1): string {
+  const suffix = count > 1 ? ` <span class="ai-recent-count">×${count}</span>` : "";
+  const color = activityColor(text);
   const match = text.match(/^\[edict:\s*([^\]]+)\]\s*(.*)$/i);
-  if (!match) return `<div class="ai-recent-item">${escapeHtml(text)}</div>`;
+  if (!match) return `<div class="ai-recent-item" style="border-left-color:${color}">${escapeHtml(text)}${suffix}</div>`;
   return `
-    <div class="ai-recent-item edict">
+    <div class="ai-recent-item edict" style="border-left-color:${color}">
       <span class="ai-edict-chip">${escapeHtml(match[1])}</span>
-      <span>${escapeHtml(match[2] || text)}</span>
+      <span>${escapeHtml(match[2] || text)}${suffix}</span>
     </div>`;
 }
 
@@ -212,6 +264,8 @@ export class AgentChat {
   private selectedSuggestion = 0;
   private activeTab: ActiveTab = "chat";
   private aiStatus: AgentStatus | null = null;
+  /** Curated zone events emitted by the agent's own entity (dialogue, milestones). */
+  private agentEvents: Array<{ type: string; message: string; time: number }> = [];
   private aiPollTimer: ReturnType<typeof setInterval> | null = null;
   private bgPollTimer: ReturnType<typeof setInterval> | null = null;
   private vvListener: (() => void) | null = null;
@@ -550,10 +604,16 @@ export class AgentChat {
       </div>`;
 
     const currentLabel = s.currentScript ? humanizeScript(s.currentScript) : (s.currentActivity ?? "Idle");
+    // The script label is the coarse mode ("Questing"); currentActivity is the
+    // granular live step ("Talked to Bram for quest"). Surface it when it adds info.
+    const liveStep = s.currentActivity && s.currentActivity !== currentLabel
+      ? `<div class="ai-now">▸ ${escapeHtml(s.currentActivity)}</div>`
+      : "";
     const activityHtml = `
       <div class="ai-section">
         <div class="ai-label">CURRENTLY</div>
         <div class="ai-current">${escapeHtml(currentLabel)}</div>
+        ${liveStep}
         ${s.currentScript ? `
           <div class="ai-script">
             <span class="ai-script-type">${escapeHtml(s.currentScript.type)}</span>
@@ -562,6 +622,25 @@ export class AgentChat {
           </div>
         ` : ""}
       </div>`;
+
+    const quests = Array.isArray(s.activeQuests) ? s.activeQuests : [];
+    const questsHtml = quests.length > 0 ? `
+      <div class="ai-section">
+        <div class="ai-label">QUESTS <span class="ai-count">${quests.length}</span></div>
+        ${quests.map((q) => {
+          const verb = OBJECTIVE_VERBS[q.objectiveType] ?? "";
+          const counter = q.required > 0 ? `${Math.min(q.progress, q.required)}/${q.required}` : "";
+          const pct = q.required > 0 ? Math.min(100, Math.round((q.progress / q.required) * 100)) : (q.complete ? 100 : 0);
+          return `
+            <div class="ai-quest ${q.complete ? "done" : ""}">
+              <div class="ai-quest-top">
+                <span class="ai-quest-title">${q.complete ? "✓ " : ""}${escapeHtml(q.title)}</span>
+                ${counter ? `<span class="ai-quest-count">${counter}</span>` : ""}
+              </div>
+              ${verb || counter ? `<div class="ai-quest-bar"><div class="ai-quest-fill" style="width:${pct}%"></div></div>` : ""}
+            </div>`;
+        }).join("")}
+      </div>` : "";
 
     const activeOrder = s.activeOrder;
     const executingHtml = activeOrder ? `
@@ -588,13 +667,36 @@ export class AgentChat {
               </div>`).join("")}
       </div>`;
 
-    const recentHtml = s.recentActivities.length > 0 ? `
+    const saysDidHtml = this.agentEvents.length > 0 ? `
       <div class="ai-section">
-        <div class="ai-label">HISTORY</div>
-        ${s.recentActivities.slice().reverse().map(renderActivityLine).join("")}
+        <div class="ai-label">SAYS &amp; DID</div>
+        ${this.agentEvents.slice().reverse().map((e) => `
+          <div class="ai-event-item" style="border-left-color:${EVENT_COLORS[e.type] ?? "#999"}">
+            ${e.type === "chat" ? `<span class="ai-event-quote">“</span>` : ""}${escapeHtml(e.message)}
+          </div>`).join("")}
       </div>` : "";
 
-    this.aiPanel.innerHTML = headerHtml + activityHtml + executingHtml + queueHtml + recentHtml;
+    const milestones = Array.isArray(s.recentMilestones) ? s.recentMilestones : [];
+    const milestonesHtml = milestones.length > 0 ? `
+      <div class="ai-section">
+        <div class="ai-label">MILESTONES</div>
+        ${milestones.slice().reverse().map((m) => `
+          <div class="ai-milestone" style="border-left-color:${activityColor(m)}">${escapeHtml(m)}</div>`).join("")}
+      </div>` : "";
+
+    const collapsed = collapseConsecutive(s.recentActivities);
+    const recentHtml = collapsed.length > 0 ? `
+      <div class="ai-section">
+        <div class="ai-label">HISTORY</div>
+        ${collapsed.slice().reverse().map((e) => renderActivityLine(e.text, e.count)).join("")}
+      </div>` : "";
+
+    this.aiPanel.innerHTML = headerHtml + activityHtml + executingHtml + questsHtml + milestonesHtml + queueHtml + saysDidHtml + recentHtml;
+
+    // If the panel was dragged to a top-anchored position, content that grows
+    // after expand could push it off-screen — clamp keeps it on-screen. No-op
+    // when it already fits, so re-running each render is cheap and idempotent.
+    if (this.expanded) this.clampExpandedIntoViewport();
   }
 
   setWallet(address: string | null) {
@@ -621,6 +723,7 @@ export class AgentChat {
 
   /** Add zone events to the feed */
   addEvents(events: ZoneEvent[]) {
+    let agentEventAdded = false;
     for (const ev of events) {
       if (this.seenEventIds.has(ev.id)) continue;
       this.seenEventIds.add(ev.id);
@@ -630,6 +733,17 @@ export class AgentChat {
         time: Date.now(),
         color: EVENT_COLORS[ev.type] ?? "#999",
       });
+
+      // Mirror the agent's own meaningful events into the bot tab's lane.
+      if (this.entityId && ev.entityId === this.entityId && AGENT_EVENT_TYPES.has(ev.type)) {
+        this.agentEvents.push({ type: ev.type, message: ev.message, time: Date.now() });
+        if (this.agentEvents.length > 20) this.agentEvents.shift();
+        agentEventAdded = true;
+      }
+    }
+    // Live-refresh the bot tab between status polls when new agent events land.
+    if (agentEventAdded && this.activeTab === "ai" && this.expanded && this.aiStatus) {
+      this.renderAiPanel();
     }
   }
 
@@ -1156,7 +1270,8 @@ export class AgentChat {
       .agent-chat-ai {
         display: none;
         padding: 8px 10px;
-        max-height: 260px;
+        /* Viewport-aware cap so the Bot tab never dominates short windows. */
+        max-height: min(40vh, 240px);
         overflow-y: auto;
         pointer-events: auto;
         background: rgba(8, 6, 4, 0.75);
@@ -1170,8 +1285,12 @@ export class AgentChat {
         display: block;
       }
 
+      /* Expanded: stable height (not fit-to-content) so the panel doesn't pop
+         between sizes as live status/events stream in — it stays one size and
+         scrolls internally. */
       #agent-chat.expanded .agent-chat-ai:not([hidden]) {
-        max-height: 320px;
+        height: min(46vh, 340px);
+        max-height: none;
         background: transparent;
         border: none;
       }
@@ -1238,6 +1357,61 @@ export class AgentChat {
         font-weight: bold;
         margin-bottom: 4px;
       }
+
+      .ai-now {
+        color: #7fd6be;
+        font-size: 10px;
+        margin-bottom: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ai-quest {
+        padding: 4px 8px;
+        background: rgba(0, 0, 0, 0.3);
+        border-left: 2px solid rgba(102, 187, 255, 0.5);
+        margin-bottom: 4px;
+      }
+      .ai-quest.done { border-left-color: rgba(68, 255, 136, 0.6); opacity: 0.7; }
+
+      .ai-quest-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .ai-quest-title {
+        color: #f4ead0;
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ai-quest-count {
+        color: #66bbff;
+        font-size: 10px;
+        font-weight: bold;
+        flex-shrink: 0;
+      }
+
+      .ai-quest-bar {
+        height: 3px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 99px;
+        overflow: hidden;
+        margin-top: 3px;
+      }
+
+      .ai-quest-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #3a78c0, #66bbff);
+        border-radius: 99px;
+        transition: width 0.4s ease;
+      }
+      .ai-quest.done .ai-quest-fill { background: #44ff88; }
 
       .ai-script, .ai-queue-item {
         padding: 4px 8px;
@@ -1310,8 +1484,43 @@ export class AgentChat {
         padding: 2px 8px;
         color: rgba(244, 234, 208, 0.55);
         font-size: 10px;
-        border-left: 1px solid rgba(239, 201, 127, 0.15);
+        border-left: 2px solid rgba(239, 201, 127, 0.15);
         margin-bottom: 1px;
+      }
+
+      .ai-recent-count {
+        color: rgba(244, 234, 208, 0.4);
+        font-size: 9px;
+        font-weight: bold;
+      }
+
+      .ai-milestone {
+        padding: 3px 8px;
+        color: rgba(244, 234, 208, 0.85);
+        font-size: 10px;
+        border-left: 2px solid #66bbff;
+        background: rgba(255, 255, 255, 0.02);
+        margin-bottom: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ai-event-item {
+        padding: 3px 8px;
+        color: rgba(244, 234, 208, 0.8);
+        font-size: 10px;
+        border-left: 2px solid #999;
+        margin-bottom: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ai-event-quote {
+        color: rgba(204, 221, 238, 0.7);
+        font-weight: bold;
+        margin-right: 1px;
       }
 
       .ai-recent-item.edict {

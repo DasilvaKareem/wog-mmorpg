@@ -4,13 +4,14 @@
 
 import { getRedis } from "../redis.js";
 
-export type ActionType = "combat" | "gather" | "supervisor" | "chat" | "idle";
+export type ActionType = "combat" | "gather" | "supervisor" | "chat" | "banter" | "idle";
 
 export const ACTION_COSTS_USDC: Record<ActionType, number> = {
   combat:     0.000001,
   gather:     0.000001,
   supervisor: 0.0001,
   chat:       0.001,
+  banter:     0.00001,   // deterministic templated banter — no LLM, 100x cheaper than chat
   idle:       0,
 };
 

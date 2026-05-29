@@ -1,0 +1,100 @@
+{
+  "id": "duskhaven",
+  "name": "Duskhaven",
+  "continentId": "nocturnia",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(90,60,140,0.12)",
+  "budget": { "maxPopulation": 24, "maxThreat": 60 },
+  "pois": [
+    {
+      "id": "twilight-rift",
+      "name": "Twilight Rift",
+      "type": "portal",
+      "position": { "x": 20, "z": 320 },
+      "radius": 14,
+      "tags": [],
+      "portal": {
+        "destinationZone": "emerald-woods",
+        "destinationPoi": "twilight-rift",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "hollow-gate",
+      "name": "Hollow Gate",
+      "type": "portal",
+      "position": { "x": 620, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "sanguine-hollow",
+        "destinationPoi": "duskhaven-path",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "town-square",
+      "name": "Duskhaven Square",
+      "type": "landmark",
+      "position": { "x": 320, "z": 320 },
+      "radius": 24,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "dusk-market",
+      "name": "Dusk Market",
+      "type": "structure",
+      "position": { "x": 280, "z": 270 },
+      "radius": 8,
+      "tags": [],
+      "structure": {
+        "kind": "shop",
+        "capacity": 4,
+        "services": ["buy", "sell"],
+        "npcs": ["merchant", "auctioneer"]
+      }
+    },
+    {
+      "id": "wayfarers-rest",
+      "name": "Wayfarer's Rest",
+      "type": "structure",
+      "position": { "x": 372, "z": 372 },
+      "radius": 8,
+      "tags": [],
+      "structure": {
+        "kind": "house",
+        "capacity": 3,
+        "services": ["quest"],
+        "npcs": ["quest-giver"]
+      }
+    },
+    {
+      "id": "misty-fringe",
+      "name": "Misty Fringe",
+      "type": "spawn-point",
+      "position": { "x": 150, "z": 480 },
+      "radius": 36,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "north-crossing",
+      "name": "North Crossing",
+      "type": "road-node",
+      "position": { "x": 320, "z": 160 },
+      "radius": 10,
+      "tags": []
+    }
+  ],
+  "roads": [
+    {
+      "id": "market-row",
+      "name": "Market Row",
+      "nodes": ["twilight-rift", "town-square", "hollow-gate"]
+    },
+    {
+      "id": "fringe-trail",
+      "name": "Fringe Trail",
+      "nodes": ["town-square", "north-crossing", "misty-fringe"]
+    }
+  ]
+}

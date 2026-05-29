@@ -172,6 +172,8 @@ export interface AgentRuntimeState {
   currentScript: BotScript | null;
   currentActivity: string;
   recentActivities: string[];
+  /** Protected lane of quest/social/milestone lines — never evicted by combat spam. */
+  recentMilestones?: string[];
   currentRegion: string;
   entityId: string | null;
   custodialWallet: string | null;

@@ -63,6 +63,12 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
   const connections = metadata?.connections ?? [];
   const continents = metadata?.continents ?? [];
 
+  // Zones belonging to the currently-selected continent. Arcadia zones carry no
+  // explicit continentId, so they default to "arcadia".
+  const visibleZones = zones.filter(
+    (z) => (z.continentId ?? "arcadia") === selectedContinent
+  );
+
   const handleZoneClick = (zoneId: string) => {
     playSoundEffect("ui_button_click");
     gameBus.emit("switchZone", { zoneId });
@@ -182,8 +188,8 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
           </div>
         )}
 
-        {/* Placeholder continent view */}
-        {continents.find((c) => c.id === selectedContinent)?.status === "placeholder" && (() => {
+        {/* Placeholder continent view — shown for placeholder continents with no live zones */}
+        {visibleZones.length === 0 && continents.find((c) => c.id === selectedContinent)?.status === "placeholder" && (() => {
           const continent = continents.find((c) => c.id === selectedContinent)!;
           return (
             <div className="flex items-center justify-center px-8 py-16">
@@ -223,8 +229,8 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
           );
         })()}
 
-        {/* Zone panels + connection lines (Arcadia) */}
-        {selectedContinent === "arcadia" && zones.length > 0 && (
+        {/* Zone panels + connection lines for the selected continent */}
+        {visibleZones.length > 0 && (
           <div className="relative px-4 py-6">
             {/* SVG connection lines behind panels */}
             <svg
@@ -232,12 +238,12 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
               style={{ zIndex: 0 }}
             >
               {connections.map(([fromId, toId]) => {
-                const fromIdx = zones.findIndex((z) => z.id === fromId);
-                const toIdx = zones.findIndex((z) => z.id === toId);
+                const fromIdx = visibleZones.findIndex((z) => z.id === fromId);
+                const toIdx = visibleZones.findIndex((z) => z.id === toId);
                 if (fromIdx < 0 || toIdx < 0) return null;
 
                 // Each panel is ~1/N of width. Lines go from right edge to left edge.
-                const totalPanels = zones.length;
+                const totalPanels = visibleZones.length;
                 const gapFraction = 0.04;
                 const panelFraction = (1 - gapFraction * (totalPanels - 1)) / totalPanels;
 
@@ -271,7 +277,7 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
                 zIndex: 1,
               }}
             >
-              {zones.map((zone) => {
+              {visibleZones.map((zone) => {
                 const zoneEntities = entities[zone.id] || [];
                 const players = zoneEntities.filter((e) => e.type === "player");
                 const mobs = zoneEntities.filter((e) => e.type === "mob" || e.type === "boss");
@@ -409,8 +415,8 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
           </div>
         )}
 
-        {/* Legend (only for active continent) */}
-        {selectedContinent === "arcadia" && <div
+        {/* Legend (only when zones are shown) */}
+        {visibleZones.length > 0 && <div
           className="flex items-center justify-center gap-6 px-4 py-2"
           style={{ borderTop: "2px solid #283454" }}
         >

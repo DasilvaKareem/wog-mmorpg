@@ -1,0 +1,76 @@
+{
+  "zoneId": "sanguine-hollow",
+  "npcs": [
+    {
+      "type": "quest-giver",
+      "name": "Confessor Lucretia",
+      "aliases": ["Lucretia"],
+      "x": 300,
+      "y": 200,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Sanguine Fledgling",
+      "x": 260,
+      "y": 420,
+      "hp": 860,
+      "level": 27,
+      "xpReward": 310
+    },
+    {
+      "type": "mob",
+      "name": "Sanguine Fledgling",
+      "x": 230,
+      "y": 440,
+      "hp": 860,
+      "level": 27,
+      "xpReward": 310
+    },
+    {
+      "type": "mob",
+      "name": "Blood Acolyte",
+      "x": 290,
+      "y": 400,
+      "hp": 940,
+      "level": 29,
+      "xpReward": 340
+    },
+    {
+      "type": "mob",
+      "name": "Blood Acolyte",
+      "x": 200,
+      "y": 250,
+      "hp": 940,
+      "level": 28,
+      "xpReward": 330
+    },
+    {
+      "type": "mob",
+      "name": "Crimson Reaver",
+      "x": 440,
+      "y": 300,
+      "hp": 1080,
+      "level": 31,
+      "xpReward": 380
+    },
+    {
+      "type": "mob",
+      "name": "Crimson Reaver",
+      "x": 470,
+      "y": 280,
+      "hp": 1080,
+      "level": 32,
+      "xpReward": 400
+    },
+    {
+      "type": "boss",
+      "name": "Countess Mortavia",
+      "x": 500,
+      "y": 480,
+      "hp": 1900,
+      "level": 33,
+      "xpReward": 900
+    }
+  ]
+}

@@ -372,6 +372,8 @@ export class AgentRunner {
   private combatFallbackCount = 0;
   public currentActivity = "Idle";
   public recentActivities: string[] = [];
+  /** Quest/social/milestone lines, protected from eviction by high-frequency combat/gather logs. */
+  public recentMilestones: string[] = [];
   private currentScript: BotScript | null = null;
   public get script(): BotScript | null { return this.currentScript; }
   public lastTrigger: TriggerEvent | null = null;
@@ -450,6 +452,7 @@ export class AgentRunner {
     this.currentScript = runtime.currentScript ?? null;
     this.currentActivity = runtime.currentActivity ?? "Idle";
     this.recentActivities = Array.isArray(runtime.recentActivities) ? runtime.recentActivities.slice(-20) : [];
+    this.recentMilestones = Array.isArray(runtime.recentMilestones) ? runtime.recentMilestones.slice(-15) : [];
     this.currentRegion = runtime.currentRegion ?? this.currentRegion;
     this.entityId = runtime.entityId ?? this.entityId;
     this.custodialWallet = runtime.custodialWallet ?? this.custodialWallet;
@@ -462,6 +465,7 @@ export class AgentRunner {
       currentScript: this.currentScript,
       currentActivity: this.currentActivity,
       recentActivities: this.recentActivities.slice(-20),
+      recentMilestones: this.recentMilestones.slice(-15),
       currentRegion: this.currentRegion,
       entityId: this.entityId,
       custodialWallet: this.custodialWallet,
@@ -1027,9 +1031,24 @@ export class AgentRunner {
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Classify an activity line so quest/social/milestone events can be routed to
+   * the protected `recentMilestones` lane. Keyword-based so we don't have to
+   * thread a category through ~50 call sites.
+   */
+  private isMilestoneActivity(text: string): boolean {
+    const t = text.toLowerCase();
+    // Skip transient "failed/blocked/can't" noise even if it mentions a quest.
+    if (/could not|couldn't|can't|blocked|stuck|delayed|no quest|error/.test(t)) return false;
+    return /\bquest\b|talked to|turning in|turned in|^accepted |walking to .*(accept|turn in|talk)|^learned |leveled? up|reached level|^died /.test(t);
+  }
+
   private async logActivity(text: string): Promise<void> {
     this.currentActivity = text;
-    this.recentActivities = [...this.recentActivities, text].slice(-8);
+    this.recentActivities = [...this.recentActivities, text].slice(-30);
+    if (this.isMilestoneActivity(text) && this.recentMilestones[this.recentMilestones.length - 1] !== text) {
+      this.recentMilestones = [...this.recentMilestones, text].slice(-15);
+    }
     try {
       await appendChatMessage(this.userWallet, { role: "activity", text, ts: Date.now() });
     } catch (err: any) {

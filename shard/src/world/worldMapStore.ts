@@ -41,6 +41,7 @@ export interface SimplePOI {
 export interface ZoneMapInfo {
   id: string;
   name: string;
+  continentId: string;
   levelRange: string;
   levelReq: number;
   bgTint: string;
@@ -177,6 +178,7 @@ function buildWorldMapData(): WorldMapData {
     return {
       id: zoneId,
       name: zoneData.name ?? zoneId,
+      continentId: zoneData.continentId ?? "arcadia",
       levelRange: levelRangeLabel(zoneId, zoneIds),
       levelReq: ZONE_LEVEL_REQUIREMENTS[zoneId] ?? 1,
       bgTint,

@@ -1,0 +1,76 @@
+{
+  "zoneId": "lycan-wilds",
+  "npcs": [
+    {
+      "type": "lore-npc",
+      "name": "Greywatch Sentinel Bram",
+      "aliases": ["Bram"],
+      "x": 140,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Moonscarred Lycan",
+      "x": 280,
+      "y": 360,
+      "hp": 1180,
+      "level": 33,
+      "xpReward": 420
+    },
+    {
+      "type": "mob",
+      "name": "Moonscarred Lycan",
+      "x": 300,
+      "y": 380,
+      "hp": 1180,
+      "level": 34,
+      "xpReward": 440
+    },
+    {
+      "type": "mob",
+      "name": "Frostfang Howler",
+      "x": 460,
+      "y": 240,
+      "hp": 1380,
+      "level": 36,
+      "xpReward": 480
+    },
+    {
+      "type": "mob",
+      "name": "Frostfang Howler",
+      "x": 440,
+      "y": 220,
+      "hp": 1380,
+      "level": 37,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Dire Ravener",
+      "x": 250,
+      "y": 340,
+      "hp": 1600,
+      "level": 39,
+      "xpReward": 540
+    },
+    {
+      "type": "mob",
+      "name": "Dire Ravener",
+      "x": 320,
+      "y": 320,
+      "hp": 1700,
+      "level": 40,
+      "xpReward": 560
+    },
+    {
+      "type": "boss",
+      "name": "Alpha Greymane",
+      "x": 520,
+      "y": 500,
+      "hp": 2600,
+      "level": 41,
+      "xpReward": 1100
+    }
+  ]
+}

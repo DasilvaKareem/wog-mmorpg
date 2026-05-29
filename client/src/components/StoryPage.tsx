@@ -12,7 +12,7 @@ const CONTINENTS = [
     landmarks: ["Viridian Range", "Lake Lumina", "Aurundel (Sky City)", "Library of Selerion"],
   },
   {
-    name: "Nocturia",
+    name: "Nocturnia",
     color: "#aa44ff",
     icon: ")(",
     tagline: "Land of Eternal Twilight",
@@ -313,7 +313,7 @@ export function StoryPage(): React.ReactElement {
             <div className="flex items-center gap-2">
               <span style={{ color: "#54f28b" }}>Arcadia</span>
               <span>{"---"}</span>
-              <span style={{ color: "#aa44ff" }}>Nocturia</span>
+              <span style={{ color: "#aa44ff" }}>Nocturnia</span>
               <span>{"---"}</span>
               <span style={{ color: "#ff4d6d" }}>Draconis</span>
             </div>

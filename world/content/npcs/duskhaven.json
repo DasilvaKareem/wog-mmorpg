@@ -1,0 +1,84 @@
+{
+  "zoneId": "duskhaven",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Mireth the Pale - Trader",
+      "aliases": ["Mireth"],
+      "x": 280,
+      "y": 270,
+      "hp": 999,
+      "shopItems": [0, 1, 2, 4, 6, 7, 8, 10, 12, 13, 14, 15, 16, 27, 41, 76, 227]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Auctioneer Vesper",
+      "aliases": ["Vesper"],
+      "x": 300,
+      "y": 290,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Warden Aldric",
+      "aliases": ["Aldric"],
+      "x": 372,
+      "y": 372,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Pale Stalker",
+      "x": 150,
+      "y": 480,
+      "hp": 640,
+      "level": 20,
+      "xpReward": 220
+    },
+    {
+      "type": "mob",
+      "name": "Pale Stalker",
+      "x": 180,
+      "y": 500,
+      "hp": 640,
+      "level": 21,
+      "xpReward": 230
+    },
+    {
+      "type": "mob",
+      "name": "Duskbat Swarmer",
+      "x": 120,
+      "y": 450,
+      "hp": 560,
+      "level": 20,
+      "xpReward": 210
+    },
+    {
+      "type": "mob",
+      "name": "Duskbat Swarmer",
+      "x": 200,
+      "y": 460,
+      "hp": 560,
+      "level": 22,
+      "xpReward": 240
+    },
+    {
+      "type": "mob",
+      "name": "Nightshade Lurker",
+      "x": 160,
+      "y": 520,
+      "hp": 760,
+      "level": 24,
+      "xpReward": 270
+    },
+    {
+      "type": "mob",
+      "name": "Nightshade Lurker",
+      "x": 110,
+      "y": 510,
+      "hp": 820,
+      "level": 26,
+      "xpReward": 300
+    }
+  ]
+}

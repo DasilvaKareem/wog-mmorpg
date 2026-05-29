@@ -1479,6 +1479,19 @@ export class EntityManager {
   }
 
   /**
+   * Snap a GLB skinned skeleton back to its bind pose. Used for attack-only mob
+   * rigs (e.g. the Quaternius "Easy Enemy" pack ships no idle/walk clip): once
+   * an attack one-shot finishes it would otherwise stay clamped on its final
+   * frame forever, since there's no locomotion clip to blend back to. Resetting
+   * to bind pose returns them to a neutral standing stance.
+   */
+  private restoreBindPose(obj: EntityObject) {
+    obj.group.traverse((c) => {
+      if (c instanceof THREE.SkinnedMesh) c.skeleton.pose();
+    });
+  }
+
+  /**
    * Show/hide/pulse a red ring at the entity's feet whenever it's actively
    * attacking someone. Only applies to hostile types (mob, boss). Fades in/out
    * smoothly over ~250ms so it doesn't flicker between tick boundaries.
@@ -1623,7 +1636,20 @@ export class EntityManager {
         if (isAnimDebugFor(obj.entity.name)) {
           animWarn(`${obj.entity.name} (${obj.entity.classId ?? "?"}): no clip for ${action} hasGlb=${obj.hasGlbModel}`);
         }
-        if (!loop) {
+        if (loop) {
+          // Locomotion requested but this GLB rig has no idle/walk clip
+          // (attack-only mob). Stop any one-shot still clamped on its final
+          // frame and restore the bind pose so the mob holds a neutral stance
+          // instead of freezing mid-attack.
+          if (obj.hasGlbModel) {
+            const current = obj.currentAnimKey ? obj.animActions.get(obj.currentAnimKey) : null;
+            current?.stop();
+            this.restoreBindPose(obj);
+            obj.currentAction = action;
+            obj.currentAnimKey = null;
+            obj.oneShotStart = 0;
+          }
+        } else {
           onFinish?.();
           const nextAction = locomotionAction(obj.entity, obj.movingSmooth);
           if (action !== nextAction) this.playAction(obj, nextAction, true);

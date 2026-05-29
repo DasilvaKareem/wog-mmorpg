@@ -30,7 +30,10 @@
     "silkwood-grove",
     "emberglow-estate",
     "starfall-ranch",
-    "westmarch-ridge"
+    "westmarch-ridge",
+    "duskhaven",
+    "sanguine-hollow",
+    "lycan-wilds"
   ],
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
@@ -75,7 +78,10 @@
     { "from": "dewveil-orchard", "to": "emberglow-estate", "portal": "emberglow-gate" },
     { "from": "silkwood-grove", "to": "emberglow-estate", "portal": "emberglow-path" },
     { "from": "moonpetal-gardens", "to": "starfall-ranch", "portal": "starfall-gate" },
-    { "from": "emberglow-estate", "to": "starfall-ranch", "portal": "starfall-path" }
+    { "from": "emberglow-estate", "to": "starfall-ranch", "portal": "starfall-path" },
+    { "from": "emerald-woods", "to": "duskhaven", "portal": "twilight-rift" },
+    { "from": "duskhaven", "to": "sanguine-hollow", "portal": "hollow-gate" },
+    { "from": "sanguine-hollow", "to": "lycan-wilds", "portal": "wilds-pass" }
   ],
   "worldOffsets": {
     "village-square": { "x": 0, "z": 0 },
@@ -108,7 +114,10 @@
     "silkwood-grove": { "x": 1280, "z": 1280 },
     "emberglow-estate": { "x": 1920, "z": 1280 },
     "starfall-ranch": { "x": 2560, "z": 1280 },
-    "westmarch-ridge": { "x": -640, "z": 0 }
+    "westmarch-ridge": { "x": -640, "z": 0 },
+    "duskhaven": { "x": 0, "z": -3200 },
+    "sanguine-hollow": { "x": 640, "z": -3200 },
+    "lycan-wilds": { "x": 1280, "z": -3200 }
   },
   "continents": [
     {
@@ -130,7 +139,7 @@
     {
       "id": "nocturnia",
       "name": "Nocturnia",
-      "status": "placeholder",
+      "status": "active",
       "description": "The frozen north, shrouded in eternal twilight. The Sanguine vampires and Lycan werewolves wage an endless war beneath blood-red moons.",
       "tint": "rgba(120,40,160,0.10)",
       "icon": "🌙"

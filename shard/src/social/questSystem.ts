@@ -1191,7 +1191,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "mining_101",
     title: "Mining 101: Strike the Earth",
     description:
-      "Grizzled Miner Torvik beckons you over. 'Every adventurer needs ore — for swords, armor, and trade. I'll teach you mining and give you your first pickaxe. The veins in this meadow are rich with coal and tin. Learn mining from me with POST /professions/learn, then find ore nodes with GET /mining/nodes/:zoneId, and gather with POST /mining/gather. Simple as stone.'",
+      "Grizzled Miner Torvik beckons you over. 'Every adventurer needs ore — for swords, armor, and trade. I'll teach you mining and set you up with your first pickaxe. The veins in this meadow are rich with coal and tin. Swing at the rock face until it gives. Simple as stone.'",
     npcId: "Grizzled Miner Torvik",
     objective: {
       type: "talk",
@@ -1238,7 +1238,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "herbalism_101",
     title: "Herbalism 101: The Flower Path",
     description:
-      "Herbalist Willow crouches among the wildflowers. 'The meadow is full of useful plants — lilies for healing, roses for mana, sage for enchantments. Learn herbalism from me, then use GET /herbalism/nodes/:zoneId to find flower patches and POST /herbalism/gather to pick them. Here's a sickle and your first bundle of herbs.'",
+      "Herbalist Willow crouches among the wildflowers. 'The meadow is full of useful plants — lilies for healing, roses for mana, sage for enchantments. I'll teach you what to look for and what to leave alone. Here's a sickle and your first bundle to get you started.'",
     npcId: "Herbalist Willow",
     objective: {
       type: "talk",
@@ -1286,7 +1286,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "skinning_101",
     title: "Skinning 101: The Hunter's Trade",
     description:
-      "Huntsman Greaves sharpens a blade by the treeline. 'Every beast you slay drops a corpse. Most adventurers leave them to rot — a waste. Learn skinning from me and you'll harvest leather, pelts, and bone from every kill. Use GET /skinning/corpses/:zoneId to find fresh corpses, POST /skinning/harvest to skin them. Here's your first knife.'",
+      "Huntsman Greaves sharpens a blade by the treeline. 'Every beast you slay drops a corpse. Most adventurers leave them to rot — a waste. Learn skinning from me and you'll pull leather, pelts, and bone from every kill. Don't leave coin on the ground. Here's your first knife.'",
     npcId: "Huntsman Greaves",
     objective: {
       type: "talk",
@@ -1333,7 +1333,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "blacksmithing_101",
     title: "Blacksmithing 101: The Forge Awakens",
     description:
-      "Master Smith Durgan hammers at the Ancient Forge, sparks flying. 'A crafter who can forge their own weapons never goes unarmed. Learn blacksmithing from me. First you smelt ore into bars — GET /crafting/recipes to see what you can make, POST /crafting/forge to craft. I'll give you enough ore to smelt your first bars and forge a blade.'",
+      "Master Smith Durgan hammers at the Ancient Forge, sparks flying. 'A crafter who can forge their own weapons never goes unarmed. Learn blacksmithing from me. First you smelt ore into bars, then you shape them at the anvil. I'll give you enough ore to smelt your first bars and put a blade in your hand.'",
     npcId: "Master Smith Durgan",
     objective: {
       type: "talk",
@@ -1355,7 +1355,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "blacksmithing_102",
     title: "Blacksmithing 102: Forge Your Legend",
     description:
-      "Journeyman Smith Ward wipes oil from his hands. 'Durgan taught you the forge — I'll teach you the upgrade path. But first: Rogue Bandits have been lifting ore from our meadow supply caches. Drop 3 of them and I'll show you how GET /crafting/upgrades turns an iron blade into a Reinforced one, and eventually a Masterwork.'",
+      "Journeyman Smith Ward wipes oil from his hands. 'Durgan taught you the forge — I'll teach you the upgrade path. But first: Rogue Bandits have been lifting ore from our meadow supply caches. Drop 3 of them and I'll show you how to take an iron blade all the way to Reinforced — and eventually a Masterwork.'",
     npcId: "Journeyman Smith Ward",
     prerequisiteQuestId: "blacksmithing_101",
     objective: {
@@ -1381,7 +1381,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "alchemy_101",
     title: "Alchemy 101: Bubbling Cauldrons",
     description:
-      "Alchemist Mirelle stirs a glowing cauldron. 'Potions are the difference between life and death out there. Learn alchemy from me — brew health potions, mana elixirs, even enchantment oils. Use GET /alchemy/recipes to see what's possible, POST /alchemy/brew to create. I'll start you off with flowers from my garden.'",
+      "Alchemist Mirelle stirs a glowing cauldron. 'Potions are the difference between life and death out there. Learn alchemy from me — brew health potions, mana elixirs, even enchantment oils. Every recipe is just the right plants in the right order. I'll start you off with flowers from my garden.'",
     npcId: "Alchemist Mirelle",
     objective: {
       type: "talk",
@@ -1430,7 +1430,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "cooking_101",
     title: "Cooking 101: Kitchen Duty",
     description:
-      "Chef Gastron wipes his hands on a flour-dusted apron. 'Food heals. Simple as that. Learn cooking from me, then use GET /cooking/recipes to see what you can make and POST /cooking/cook at any campfire. Raw Meat drops from every beast you slay — cook it up for instant healing. Start with these basics.'",
+      "Chef Gastron wipes his hands on a flour-dusted apron. 'Food heals. Simple as that. Learn cooking from me and any campfire becomes a field kitchen. Raw Meat drops from every beast you slay — a few minutes over flame and it patches wounds no sword can close. Start with these basics.'",
     npcId: "Chef Gastron",
     objective: {
       type: "talk",
@@ -1450,7 +1450,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "cooking_102",
     title: "Cooking 102: A Proper Feast",
     description:
-      "Camp Cook Rolo stirs a pot over an open fire. 'Gastron taught you basics — I cook for armies on the move. Forest Bears have been raiding my supply cache. Drive off 3 and I'll teach you Hearty Stew: 3 Raw Meat and a Meadow Lily, 60 HP restored. Double what plain meat gives. Use POST /cooking/consume to eat.'",
+      "Camp Cook Rolo stirs a pot over an open fire. 'Gastron taught you basics — I cook for armies on the move. Forest Bears have been raiding my supply cache. Drive off 3 and I'll teach you Hearty Stew: 3 Raw Meat and a Meadow Lily, 60 HP restored. Double what plain meat gives.'",
     npcId: "Camp Cook Rolo",
     prerequisiteQuestId: "cooking_101",
     objective: {
@@ -1476,7 +1476,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "leatherworking_101",
     title: "Leatherworking 101: Tanning Basics",
     description:
-      "Tanner Hilda stretches a hide across the rack. 'Armor saves lives, and leather armor is light enough for any class. Learn leatherworking from me, then use GET /leatherworking/recipes to see patterns and POST /leatherworking/craft at any tanning rack. You'll need leather from skinning — I'll give you enough to start.'",
+      "Tanner Hilda stretches a hide across the rack. 'Armor saves lives, and leather is light enough for any class to wear. Learn leatherworking from me. You'll need pelts and leather from your hunts — bring them to any tanning rack and I'll show you the patterns. Here's enough to get started.'",
     npcId: "Tanner Hilda",
     objective: {
       type: "talk",
@@ -1498,7 +1498,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "leatherworking_102",
     title: "Leatherworking 102: Full Set",
     description:
-      "Tanner Breck stretches a fresh hide on the rack. 'Hilda showed you basics — I'll show you quality. Dire Wolf pelts are the gold standard out here: thicker, tougher, worth more at any market. Hunt 4 and I'll give you materials for a full tanned leather set. Check GET /leatherworking/recipes for the patterns.'",
+      "Tanner Breck stretches a fresh hide on the rack. 'Hilda showed you basics — I'll show you quality. Dire Wolf pelts are the gold standard out here: thicker, tougher, worth more at any market. Hunt 4 and I'll give you materials for a full tanned leather set — the patterns will be waiting at the rack.'",
     npcId: "Tanner Breck",
     prerequisiteQuestId: "leatherworking_101",
     objective: {
@@ -1525,7 +1525,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "jewelcrafting_101",
     title: "Jewelcrafting 101: The Gem Trade",
     description:
-      "Gemcutter Orik polishes a rough stone under a magnifying lens. 'Rings and amulets — the most powerful accessories in Arcadia. Learn jewelcrafting from me, then use GET /jewelcrafting/recipes to see what gems you can set. You'll need rough gems from mining and gold bars from smelting. I'll give you enough to craft your first ring.'",
+      "Gemcutter Orik polishes a rough stone under a magnifying lens. 'Rings and amulets — the most powerful accessories in Arcadia. Learn jewelcrafting from me. The right gem set in the right metal can change a fight entirely. You'll need rough gems from mining and gold bars from smelting. I'll give you enough to craft your first ring.'",
     npcId: "Gemcutter Orik",
     objective: {
       type: "talk",
@@ -1581,7 +1581,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "mining_103",
     title: "Mining 103: Coal Run",
     description:
-      "Sven pats a dusty coal sack. 'Every forge in Arcadia runs on coal — no coal, no steel, no progress. Mine 5 Coal Deposits from the meadow veins. Use GET /mining/nodes/:zoneId to find the richest spots.'",
+      "Sven pats a dusty coal sack. 'Every forge in Arcadia runs on coal — no coal, no steel, no progress. Mine 5 Coal Deposits from the meadow veins. Follow the dark rock and you'll find them.'",
     npcId: "Prospector Sven",
     prerequisiteQuestId: "mining_102",
     objective: {
@@ -1709,7 +1709,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "blacksmithing_103",
     title: "Blacksmithing 103: Bar Stock",
     description:
-      "Ward taps a forge blueprint on the wall. 'Smelting is where it all starts. Smelt 2 Tin Bars at any forge — use POST /crafting/forge with the smelt-tin-bar recipe. Tin bars are the stepping stone to steel, and steel is what Arcadia runs on.'",
+      "Ward taps a forge blueprint on the wall. 'Smelting is where it all starts. Smelt 2 Tin Bars at any forge. Tin bars are the stepping stone to steel, and steel is what Arcadia runs on.'",
     npcId: "Journeyman Smith Ward",
     prerequisiteQuestId: "blacksmithing_102",
     objective: {
@@ -1729,7 +1729,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "alchemy_103",
     title: "Alchemy 103: Potion Production",
     description:
-      "Pell fans the coals under his field cauldron. 'Now put that knowledge to work. Brew 2 Minor Health Potions at any alchemy station — POST /alchemy/brew. Your allies will need them before long out here.'",
+      "Pell fans the coals under his field cauldron. 'Now put that knowledge to work. Brew 2 Minor Health Potions at any alchemy station. Your allies will need them before long out here.'",
     npcId: "Field Alchemist Pell",
     prerequisiteQuestId: "alchemy_102",
     objective: {
@@ -1749,7 +1749,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "cooking_103",
     title: "Cooking 103: Stew Master",
     description:
-      "Rolo ladles out a bowl and nods. 'Hearty Stew is camp food done right — 60 HP in one bowl. Cook 2 more at any campfire with POST /cooking/cook. Once that's muscle memory, we move on to proper roasts.'",
+      "Rolo ladles out a bowl and nods. 'Hearty Stew is camp food done right — 60 HP in one bowl. Cook 2 more at any campfire. Once that's muscle memory, we move on to proper roasts.'",
     npcId: "Camp Cook Rolo",
     prerequisiteQuestId: "cooking_102",
     objective: {
@@ -1786,7 +1786,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "leatherworking_103",
     title: "Leatherworking 103: Armor Up",
     description:
-      "Breck runs his thumb along a fresh seam. 'Good pelts deserve good craft. Take those Dire Wolf hides to a tanning rack and make 1 piece of tanned leather armor — vest, boots, helm, your pick. GET /leatherworking/recipes has all the patterns.'",
+      "Breck runs his thumb along a fresh seam. 'Good pelts deserve good craft. Take those Dire Wolf hides to a tanning rack and make 1 piece of tanned leather armor — vest, boots, helm, your pick. The patterns are all there waiting for you.'",
     npcId: "Tanner Breck",
     prerequisiteQuestId: "leatherworking_102",
     objective: {
@@ -1806,7 +1806,7 @@ export const QUEST_CATALOG: Quest[] = [
     id: "jewelcrafting_103",
     title: "Jewelcrafting 103: Your First Commission",
     description:
-      "Orsa tosses you a pouch of rough gems. 'Talk is cheap in this trade. Craft 1 ring — any ring — at the Jeweler's Workbench using POST /jewelcrafting/craft. Let the stone do the talking.'",
+      "Orsa tosses you a pouch of rough gems. 'Talk is cheap in this trade. Craft 1 ring — any ring — at the Jeweler's Workbench. Let the stone do the talking.'",
     npcId: "Gemhunter Orsa",
     prerequisiteQuestId: "jewelcrafting_102",
     objective: {
@@ -3619,6 +3619,37 @@ function buildMissingQuestRequirements(
  */
 export function isQuestComplete(quest: Quest, progress: number): boolean {
   return progress >= quest.objective.count;
+}
+
+/** Compact active-quest summary for display surfaces (e.g. the agent bot tab). */
+export interface ActiveQuestSummary {
+  questId: string;
+  title: string;
+  objectiveType: Quest["objective"]["type"] | "unknown";
+  progress: number;
+  required: number;
+  complete: boolean;
+  npcId: string;
+}
+
+/**
+ * Map an entity's raw activeQuests into display-ready summaries.
+ * Shared by the quest routes and the agent status endpoint so progress is
+ * computed in exactly one place.
+ */
+export function summarizeActiveQuests(activeQuests: ActiveQuest[] | undefined | null): ActiveQuestSummary[] {
+  return (activeQuests ?? []).map((aq) => {
+    const quest = QUEST_CATALOG.find((q) => q.id === aq.questId);
+    return {
+      questId: aq.questId,
+      title: quest?.title ?? aq.questId,
+      objectiveType: quest?.objective.type ?? "unknown",
+      progress: aq.progress,
+      required: quest?.objective.count ?? 0,
+      complete: quest ? isQuestComplete(quest, aq.progress) : false,
+      npcId: quest?.npcId ?? "",
+    };
+  });
 }
 
 /**

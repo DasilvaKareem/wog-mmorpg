@@ -1,0 +1,89 @@
+{
+  "id": "lycan-wilds",
+  "name": "Lycan Wilds",
+  "continentId": "nocturnia",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(70,80,130,0.12)",
+  "budget": { "maxPopulation": 32, "maxThreat": 140 },
+  "pois": [
+    {
+      "id": "hollow-return",
+      "name": "Hollow Return",
+      "type": "portal",
+      "position": { "x": 20, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "sanguine-hollow",
+        "destinationPoi": "wilds-pass",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "moonlit-ridge",
+      "name": "Moonlit Ridge",
+      "type": "landmark",
+      "position": { "x": 200, "z": 200 },
+      "radius": 24,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "howling-pass",
+      "name": "Howling Pass",
+      "type": "spawn-point",
+      "position": { "x": 280, "z": 360 },
+      "radius": 36,
+      "tags": ["hostile", "dense"]
+    },
+    {
+      "id": "frostfang-slope",
+      "name": "Frostfang Slope",
+      "type": "spawn-point",
+      "position": { "x": 460, "z": 240 },
+      "radius": 32,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "wardens-watch",
+      "name": "Warden's Watch",
+      "type": "structure",
+      "position": { "x": 140, "z": 420 },
+      "radius": 8,
+      "tags": [],
+      "structure": {
+        "kind": "tower",
+        "capacity": 2,
+        "services": ["quest"],
+        "npcs": ["lore-npc"]
+      }
+    },
+    {
+      "id": "moonfang-den",
+      "name": "Moonfang Den",
+      "type": "landmark",
+      "position": { "x": 520, "z": 500 },
+      "radius": 30,
+      "tags": ["hostile", "boss-area"]
+    },
+    {
+      "id": "ridge-junction",
+      "name": "Ridge Junction",
+      "type": "road-node",
+      "position": { "x": 320, "z": 300 },
+      "radius": 10,
+      "tags": []
+    }
+  ],
+  "roads": [
+    {
+      "id": "wilds-trail",
+      "name": "Wilds Trail",
+      "nodes": ["hollow-return", "moonlit-ridge", "ridge-junction", "howling-pass"]
+    },
+    {
+      "id": "den-approach",
+      "name": "Den Approach",
+      "nodes": ["ridge-junction", "frostfang-slope", "moonfang-den"]
+    }
+  ]
+}

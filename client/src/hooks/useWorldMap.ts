@@ -16,6 +16,7 @@ export interface SimplePOI {
 export interface ZoneMapInfo {
   id: string;
   name: string;
+  continentId: string;
   levelRange: string;
   levelReq: number;
   bgTint: string;
@@ -63,13 +64,21 @@ export function useWorldMap(enabled: boolean, pollInterval = 3000) {
     try {
       let data: WorldMapMetadata | null = null;
 
-      const layoutRes = await fetch(`${API_URL}/world/layout`);
-      if (layoutRes.ok) {
+      // Prefer /worldmap — it carries real zone names, POIs, connections, and
+      // continent grouping (continentId). Fall back to /world/layout, which
+      // only knows zone ids/bounds, if the rich endpoint is unavailable.
+      const res = await fetch(`${API_URL}/worldmap`);
+      if (res.ok) {
+        data = (await res.json()) as WorldMapMetadata;
+      } else {
+        const layoutRes = await fetch(`${API_URL}/world/layout`);
+        if (!layoutRes.ok) return;
         const layout = (await layoutRes.json()) as WorldLayoutData;
         data = {
           zones: Object.values(layout.zones).map((zone) => ({
             id: zone.id,
             name: zone.id,
+            continentId: "arcadia",
             levelRange: `L${zone.levelReq}+`,
             levelReq: zone.levelReq,
             bgTint: "rgba(84,242,139,0.08)",
@@ -79,10 +88,6 @@ export function useWorldMap(enabled: boolean, pollInterval = 3000) {
           connections: [],
           continents: [],
         };
-      } else {
-        const res = await fetch(`${API_URL}/worldmap`);
-        if (!res.ok) return;
-        data = (await res.json()) as WorldMapMetadata;
       }
 
       if (!mountedRef.current) return;

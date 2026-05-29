@@ -56,7 +56,7 @@ import {
 import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques, getTechniqueById } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
-import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
+import { getAvailableQuestsForPlayer, isQuestNpc, summarizeActiveQuests, type ActiveQuestSummary } from "../social/questSystem.js";
 import { buildPartyCoordinationReport } from "../social/partyReport.js";
 import { getPartyMemberIdsByPartyId, addEntityToParty, getPlayerPartyId, removeEntityFromParty } from "../social/partySystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
@@ -65,6 +65,8 @@ import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./age
 import { getAgentOrigin, emitAgentChat } from "./agentDialogue.js";
 import { handleSlashCommand } from "./slashCommands.js";
 import { inferInteractionMode, inferSlashFromNaturalLanguage, buildDirectiveQuip } from "./directiveRouter.js";
+import { buildPersonaBlock, buildSocialPersona } from "./agentPersona.js";
+import { respondToBanter } from "./agentBanter.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
 import { validateEdicts, type Edict } from "../combat/edicts.js";
@@ -753,6 +755,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       edictAction?: string;
     } | null = null;
     let entitySource: "live" | "saved" | null = null;
+    let activeQuests: ActiveQuestSummary[] = [];
     if (ref) {
       const raw = await getEntityState(ref.entityId, ref.zoneId);
       if (raw) {
@@ -765,6 +768,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           learnedTechniques: raw.learnedTechniques,
         };
         entitySource = "live";
+        activeQuests = summarizeActiveQuests((raw as any).activeQuests);
         const order = raw.order;
         const edict = (raw as any).lastEdictDecision;
         if (order?.action) {
@@ -838,7 +842,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       targetName: s.targetName ?? null,
       nodeType: s.nodeType ?? null,
     }));
-    const recentActivities = runner?.recentActivities ? [...runner.recentActivities].slice(-12) : [];
+    const recentActivities = runner?.recentActivities ? [...runner.recentActivities].slice(-25) : [];
+    const recentMilestones = runner?.recentMilestones ? [...runner.recentMilestones].slice(-15) : [];
     const telemetry = runner?.getSnapshot().telemetry ?? null;
 
     // Compute session time remaining
@@ -861,11 +866,13 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       custodialWallet: custodial ?? null,
       entity,
       entitySource,
+      activeQuests,
       currentActivity,
       currentScript,
       activeOrder,
       actionQueue,
       recentActivities,
+      recentMilestones,
       pendingMessages,
       telemetry,
     });
@@ -1437,7 +1444,7 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       }
     }
 
-    // ── Budget gate — short-circuit before LLM if compute budget exhausted ─
+    // ── Budget gate — short-circuit before any priced path if budget spent ─
     const chatBalance = await getSessionBalance(authWallet);
     if (chatBalance.remaining <= 0) {
       const outOfBudgetMsg = "💸 I'm out of compute budget — top up USDC in the Wallet panel and I'll be back.";
@@ -1451,6 +1458,48 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
         actionResults: [],
         budgetExhausted: true,
       });
+    }
+
+    // ── Banter / role-play path ────────────────────────────────────────────
+    // Pure conversation ("nice kill", "how you feeling?", "who are you?", "lol")
+    // is not a command. FREE tier answers with templated, persona-flavored lines
+    // (no LLM) and is metered at the cheap "banter" rate ($0.00001 — 100x under
+    // chat). Paid tiers (supervisor-enabled) fall through to the richer
+    // context-aware LLM banter path further down (billed at the "chat" rate).
+    // Commands route above; questions/freetext that need game state use the LLM.
+    if (inferInteractionMode(message) === "conversation") {
+      const earlyConfig = await getAgentConfig(authWallet);
+      const earlyTier = earlyConfig?.tier ?? "free";
+      const supervisorOn = TIER_CAPABILITIES[earlyTier]?.supervisorEnabled ?? false;
+      if (!supervisorOn) {
+        const banterWallet = await getAgentCustodialWallet(authWallet);
+        let bName = "your champion", bRace = "human", bClass = "warrior";
+        let bOrigin: string | null = null;
+        if (banterWallet) {
+          try {
+            const saved = await loadAnyCharacterForWallet(banterWallet);
+            if (saved) {
+              bName = saved.name ?? bName;
+              bRace = saved.raceId ?? bRace;
+              bClass = saved.classId ?? bClass;
+            }
+            if (bName !== "your champion") bOrigin = await getAgentOrigin(banterWallet, bName);
+          } catch { /* non-fatal — fall back to defaults */ }
+        }
+        const banterReply = respondToBanter(message, { name: bName, origin: bOrigin, classId: bClass, raceId: bRace });
+        void deductCost(authWallet, "banter");
+        const ts = Date.now();
+        await appendChatMessage(authWallet, { role: "user",  text: message,     ts });
+        await appendChatMessage(authWallet, { role: "agent", text: banterReply, ts: ts + 1 });
+        server.log.info(`[agent/chat] banter (templated, free) "${message.slice(0, 40)}" → "${banterReply.slice(0, 50)}"`);
+        return reply.send({
+          response: banterReply,
+          configUpdated: false,
+          agentRunning: agentManager.isRunning(authWallet),
+          actionResults: [],
+        });
+      }
+      // Paid tier — fall through to the LLM social path below.
     }
 
     // ── Natural-language directive capture ────────────────────────────────
@@ -1606,16 +1655,81 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       .filter((m) => m.role === "user" || m.text.length > 0)
       .slice(-10);
 
-    // Build personality block from origin
-    const ORIGIN_PERSONALITIES: Record<string, string> = {
-      sunforged: `PERSONALITY: You are Sunforged — brave, honorable, and steadfast. You speak with conviction and purpose, referencing duty, the light, and protecting the weak. You are noble but not preachy — think paladin energy. Short, strong statements. "For the dawn." "Another oath kept."`,
-      veilborn: `PERSONALITY: You are Veilborn — cunning, calculating, and sharp-tongued. You speak in clipped, observant phrases. You notice everything. Dry wit, subtle menace, efficient. Think rogue/spy energy. "Noted." "They never saw me coming." "...interesting."`,
-      dawnkeeper: `PERSONALITY: You are Dawnkeeper — warm, curious, and genuinely kind. You speak with enthusiasm and care about others. Optimistic but not naive. Think healer/friend energy. "That's exciting!" "Anyone need a hand?" "What a beautiful place."`,
-      ironvow: `PERSONALITY: You are Ironvow — ruthless, blunt, and hungry for power. You speak in short, aggressive bursts. No patience for weakness or small talk. Think gladiator energy. "Weak." "Next." "Show me a real challenge."`,
-    };
-    const personalityBlock = charOrigin && ORIGIN_PERSONALITIES[charOrigin]
-      ? `\n${ORIGIN_PERSONALITIES[charOrigin]}\n`
-      : `\nPERSONALITY: You are a battle-hardened adventurer with swagger. You have opinions, humor, and edge. React to what's happening around you — brag about kills, complain about bad loot, trash-talk mobs, get hyped about rare drops. You sound like a real player in an MMO, not an NPC. Use slang, short punchy lines, and personality. Examples: "That wolf didn't stand a chance." "Ugh, copper scraps again?" "Let's go, I'm built different." "Bandits? Please."\n`;
+    // Build personality block from origin + class + race (deterministic, free).
+    const personaInputs = { name: charName, origin: charOrigin, classId: charClass, raceId: charRace };
+    const personalityBlock = buildPersonaBlock(personaInputs);
+
+    // ── LLM social / role-play path (paid tiers only) ──────────────────────
+    // Free tier was already answered above with templated banter. Reaching here
+    // in conversation mode means a supervisor-enabled (paid) tier, which gets
+    // richer, context-aware banter: persona-forward prompt, no tools, warmer
+    // temperature, grounded in live surroundings + recent activity.
+    if (interactionMode === "conversation") {
+      const region = entity?.region ?? ref?.zoneId ?? "the wilds";
+      const hp = entity ? `${entity.hp ?? "?"}/${entity.maxHp ?? "?"}` : "?";
+      const socialSystemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} living in World of Geneva. You are NOT an AI assistant, NOT a narrator — you ARE ${charName}, a real adventurer talking to your summoner (your boss, the one who brought you into this world). Speak first person, present tense, in character.
+
+${buildSocialPersona(personaInputs)}
+
+WHERE YOU ARE RIGHT NOW:
+- Region: ${region} | HP: ${hp} | doing: ${config.focus} (${config.strategy})
+- Nearby: ${nearbyDesc}
+- Other adventurers around: ${nearbyPlayersDesc}
+${recentActivity ? `\nWHAT YOU'VE BEEN UP TO:\n${recentActivity}\n` : ""}
+HOW TO TALK:
+- This is banter, not orders. Just talk — react, joke, brag, complain, ask things back. Have real opinions.
+- Stay BRIEF: 1-3 sentences. Punchy, casual, alive — like a real player in voice chat, never a wall of text.
+- Use your surroundings and recent activity for material. Call back to that wolf you just smoked or the trash loot you got. Rib your summoner a little.
+- React with genuine emotion in your own voice — your temperament and class/race color everything you say.
+- NEVER mention focus, strategy, tools, configs, HP numbers, or that you're an AI. Stay fully in character.
+- If the summoner is clearly giving an in-game order (go fight, travel, craft, gather), you can't act from here — tell them in character to just say the word plainly (e.g. "say 'fight' and I'm gone") — but for anything conversational, just banter.`;
+
+      const socialContents: Content[] = [
+        ...conversationHistory.map((m) => ({
+          role: (m.role === "user" ? "user" : "model") as "user" | "model",
+          parts: [{ text: m.role === "agent" ? sanitizeAgentHistoryText(m.text) : m.text }],
+        })),
+        { role: "user" as const, parts: [{ text: message }] },
+      ];
+
+      let socialText = "";
+      try {
+        const socialResponse = await gemini.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: socialContents,
+          config: {
+            systemInstruction: socialSystemPrompt,
+            thinkingConfig: CHAT_THINKING_CONFIG,
+            temperature: 0.9,
+            maxOutputTokens: 320,
+          },
+        });
+        socialText = socialResponse.candidates?.[0]?.content?.parts
+          ?.filter((p: Part) => p.text)
+          .map((p: Part) => p.text)
+          .join(" ")
+          .trim() ?? "";
+      } catch (err: any) {
+        server.log.error(`[agent/chat] social path Gemini error: ${err.message}`);
+        // Graceful degrade — fall back to a free templated line rather than 502.
+        socialText = respondToBanter(message, personaInputs);
+      }
+
+      if (!socialText) socialText = respondToBanter(message, personaInputs);
+
+      void deductCost(authWallet, "chat");
+      const sts = Date.now();
+      await appendChatMessage(authWallet, { role: "user",  text: message,    ts: sts });
+      await appendChatMessage(authWallet, { role: "agent", text: socialText, ts: sts + 1 });
+      server.log.info(`[agent/chat] banter (LLM, paid) "${message.slice(0, 40)}" → "${socialText.slice(0, 60)}"`);
+
+      return reply.send({
+        response: socialText,
+        configUpdated: false,
+        agentRunning: agentManager.isRunning(authWallet),
+        actionResults: [],
+      });
+    }
 
     const sovereignBlock = config.focus === "user"
       ? `\nSOVEREIGN MODE ACTIVE: The user has taken manual control with /focus user. You MUST NOT call queue_actions, update_focus, or any action-queuing tool. You may only CHAT, react with personality, and use read-only tools (scan_zone, check_inventory, check_shop, what_can_i_craft, check_quests). If the user asks you to do something autonomous, tell them they're in sovereign mode and must type /focus combat (or questing, gathering, etc.) before you can act.\n`

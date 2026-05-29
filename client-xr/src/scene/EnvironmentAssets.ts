@@ -702,6 +702,21 @@ export class EnvironmentAssets {
         c.castShadow = true;
         c.receiveShadow = true;
       }
+      if (c instanceof THREE.SkinnedMesh) {
+        // Skinned meshes can pop out of the view frustum easily (their bind-pose
+        // bounding sphere doesn't track the animated vertices) — disable culling
+        // like the player path does (CharacterAssets). Without this, mobs flicker
+        // invisible at certain camera angles.
+        c.frustumCulled = false;
+        // Snap the skeleton to its bind pose. Several mob GLBs (e.g. the
+        // Quaternius "Easy Enemy" pack) ship attack-only — no idle/walk clip —
+        // so the animation system never drives their skeleton on spawn and the
+        // mob holds its raw rest pose, which for these models renders collapsed/
+        // invisible until the attack clip first plays (i.e. only after it's hit
+        // or killed). pose() restores the correct bind pose so it's visible from
+        // the moment it spawns, independent of which clips exist.
+        c.skeleton.pose();
+      }
     });
     wrapper.add(cloned);
 

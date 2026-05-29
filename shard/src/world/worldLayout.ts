@@ -78,6 +78,10 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "silkwood-grove": 1,
   "emberglow-estate": 1,
   "starfall-ranch": 1,
+  // Nocturnia continent (mid-game L20-40)
+  "duskhaven": 20,
+  "sanguine-hollow": 27,
+  "lycan-wilds": 33,
 };
 
 /** Farmland zones — used for farming/crops only, not questing or combat.
@@ -97,6 +101,7 @@ export const QUEST_ZONES: ReadonlySet<string> = new Set([
   "auroral-plains", "emerald-woods", "viridian-range",
   "moondancer-glade", "felsrock-citadel", "lake-lumina",
   "azurshard-chasm", "sunflower-fields",
+  "duskhaven", "sanguine-hollow", "lycan-wilds",
 ]);
 
 // ── Connection graph (loaded from world.json) ───────────────────────
