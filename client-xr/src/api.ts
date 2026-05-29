@@ -659,7 +659,12 @@ export async function sendFriendRequestByName(
   fromWallet: string,
   toName: string,
 ): Promise<{ ok: boolean; error?: string; resolvedWallet?: string }> {
-  return postJsonWithFallback("/friends/request-by-name", token, { fromWallet, toName });
+  const result = await postJsonWithFallback<{ resolvedWallet?: string }>(
+    "/friends/request-by-name",
+    token,
+    { fromWallet, toName },
+  );
+  return { ok: result.ok, error: result.error, resolvedWallet: result.data?.resolvedWallet };
 }
 
 export async function acceptFriendRequest(

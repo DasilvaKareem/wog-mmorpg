@@ -87,9 +87,16 @@ export class ActionBar {
   private injectStyles() {
     const style = document.createElement("style");
     style.textContent = `
+      /* --wog-ab-reserve is the vertical "safe zone" the action bar occupies
+         at the bottom of the viewport (button height + bottom gap + iOS
+         home-indicator inset). HUD bottom-sheets read this so they stop
+         above the icons instead of bleeding into them. Defined here because
+         the action bar is the authority on its own height. */
+      :root { --wog-ab-reserve: 0px; }
+
       #action-bar {
         position: fixed;
-        bottom: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         right: 12px;
         display: flex;
         gap: 4px;
@@ -101,19 +108,24 @@ export class ActionBar {
       }
 
       /* Single-row layout on phones — buttons shrink so all icons stay
-         visible without wrapping. Sized so 8 buttons fit in 360px CSS. */
+         visible without wrapping. Sized so 8 buttons fit in 360px CSS.
+         Keep the breakpoints ordered largest→smallest so the narrowest
+         --wog-ab-reserve wins where multiple queries match. */
       @media (max-width: 600px) {
+        :root { --wog-ab-reserve: calc(38px + 20px + env(safe-area-inset-bottom, 0px)); }
         #action-bar { gap: 3px; right: 8px; max-width: calc(100vw - 12px); }
         .ab-btn { width: 38px !important; height: 38px !important; }
         .ab-icon { font-size: 17px !important; }
         .ab-key { display: none; }
       }
       @media (max-width: 480px) {
+        :root { --wog-ab-reserve: calc(34px + 18px + env(safe-area-inset-bottom, 0px)); }
         #action-bar { gap: 2px; right: 6px; max-width: calc(100vw - 8px); }
         .ab-btn { width: 34px !important; height: 34px !important; border-radius: 5px; }
         .ab-icon { font-size: 15px !important; }
       }
       @media (max-width: 380px) {
+        :root { --wog-ab-reserve: calc(30px + 16px + env(safe-area-inset-bottom, 0px)); }
         #action-bar { gap: 2px; right: 4px; max-width: calc(100vw - 4px); }
         .ab-btn { width: 30px !important; height: 30px !important; border-radius: 4px; }
         .ab-icon { font-size: 13px !important; }

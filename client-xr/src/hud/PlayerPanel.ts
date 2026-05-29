@@ -42,6 +42,9 @@ export class PlayerPanel {
   private socialWallet: string | null = null;
   private friends: FriendInfo[] = [];
   private friendRequests: FriendRequestInfo[] = [];
+  // Wallets we've sent an outgoing friend request to this session. Used to flip
+  // the "+" button to a disabled "sent" state so users don't spam the button.
+  private sentRequestWallets = new Set<string>();
   private friendsStatus = "";
   private addFriendDraft = "";
   private addFriendInputFocused = false;
@@ -379,6 +382,7 @@ export class PlayerPanel {
     if (result.ok) {
       this.friendsStatus = `Friend request sent to ${name}.`;
       this.addFriendDraft = "";
+      if (result.resolvedWallet) this.sentRequestWallets.add(result.resolvedWallet.toLowerCase());
       await this.refreshFriends(true);
     } else {
       this.friendsStatus = result.error ?? `Couldn't send request to ${name}.`;
@@ -488,18 +492,29 @@ export class PlayerPanel {
     if (incomingRequest) {
       return `<button class="pp-add-friend pp-accept-friend" data-player-action="accept-friend" data-request-id="${esc(incomingRequest.id)}" title="Accept friend request">\u2713</button>`;
     }
+    if (this.sentRequestWallets.has(wallet)) {
+      return `<button class="pp-add-friend pp-friend-pending" title="Friend request sent" disabled>\u23f3</button>`;
+    }
     return `<button class="pp-add-friend" data-player-action="add-friend" title="Add friend">+</button>`;
   }
 
   private async addFriend(playerId: string): Promise<void> {
     const player = this.playersById.get(playerId);
     if (!player || !this.callbacks.onAddFriend) return;
-    this.friendsStatus = "Sending friend request...";
+    const wallet = player.walletAddress?.toLowerCase();
+    // Ignore repeat clicks for someone we've already requested this session.
+    if (wallet && this.sentRequestWallets.has(wallet)) return;
+    // Optimistically flip the button to a disabled "sent" state right away so
+    // the user gets immediate feedback even on tabs where the footer is hidden.
+    if (wallet) this.sentRequestWallets.add(wallet);
+    this.friendsStatus = `Sending friend request to ${player.name}...`;
     this.render();
     try {
       this.friendsStatus = await this.callbacks.onAddFriend(player);
       await this.refreshFriends(true);
     } catch (err) {
+      // Roll back so the user can retry after a genuine failure.
+      if (wallet) this.sentRequestWallets.delete(wallet);
       this.friendsStatus = err instanceof Error ? err.message : "Friend request failed.";
       this.render();
     }
@@ -656,6 +671,12 @@ export class PlayerPanel {
         opacity: 0.35;
         cursor: default;
         color: #7a84a8;
+      }
+      .pp-add-friend.pp-friend-pending:disabled {
+        opacity: 0.85;
+        border-color: rgba(126, 214, 190, 0.4);
+        color: #7fd6be;
+        font-size: 11px;
       }
 
       .pp-friend-section {

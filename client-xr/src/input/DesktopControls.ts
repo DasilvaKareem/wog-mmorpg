@@ -277,6 +277,7 @@ export class DesktopControls {
     const activeEl = document.activeElement;
     if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
 
+    if (!e.key) return;
     this.keys.add(e.key.toLowerCase());
   };
 
@@ -287,6 +288,7 @@ export class DesktopControls {
     const activeEl = document.activeElement;
     if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
 
+    if (!e.key) return;
     this.keys.delete(e.key.toLowerCase());
   };
 

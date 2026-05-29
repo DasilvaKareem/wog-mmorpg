@@ -24,8 +24,10 @@ const MIN_WINDOW_MS = 10_000;
 
 function fmtUsdc(n: number): string {
   if (n <= 0) return "$0.000000";
-  if (n < 1)  return `$${n.toFixed(6)}`;
-  return `$${n.toFixed(3)}`;
+  // Always show 6 decimals — agent actions cost as little as $0.000001, so
+  // anything coarser (e.g. 3 decimals on a $20 balance) makes the number look
+  // frozen and hides spend. Full precision lets users watch the balance drain.
+  return `$${n.toFixed(6)}`;
 }
 
 function fmtGold(copper: number): string {

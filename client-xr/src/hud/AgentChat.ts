@@ -1009,7 +1009,7 @@ export class AgentChat {
 
     window.addEventListener("keydown", (e) => {
       // Global PTT shortcut (V key)
-      if (e.key.toLowerCase() === "v" && !this.isListening) {
+      if (e.key?.toLowerCase() === "v" && !this.isListening) {
         // Ignore if typing in any input/textarea
         const tag = document.activeElement?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -1021,7 +1021,7 @@ export class AgentChat {
     });
 
     window.addEventListener("keyup", (e) => {
-      if (e.key.toLowerCase() === "v") {
+      if (e.key?.toLowerCase() === "v") {
         this.stopListening();
       }
     });
