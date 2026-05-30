@@ -1,0 +1,84 @@
+{
+  "zoneId": "sanguine-laboratories",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Quartermaster Sera - Reagents",
+      "aliases": ["Sera"],
+      "x": 280,
+      "y": 140,
+      "hp": 999,
+      "shopItems": [6, 7, 8, 32, 33, 34, 35, 78, 79, 80]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Lead Researcher Morwen",
+      "aliases": ["Morwen"],
+      "x": 360,
+      "y": 140,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Archivist Kael",
+      "aliases": ["Kael", "Archivist"],
+      "x": 320,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Blood Thrall",
+      "x": 200,
+      "y": 380,
+      "hp": 1180,
+      "level": 37,
+      "xpReward": 470
+    },
+    {
+      "type": "mob",
+      "name": "Blood Thrall",
+      "x": 170,
+      "y": 400,
+      "hp": 1180,
+      "level": 37,
+      "xpReward": 470
+    },
+    {
+      "type": "mob",
+      "name": "Failed Experiment",
+      "x": 460,
+      "y": 360,
+      "hp": 1280,
+      "level": 38,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Failed Experiment",
+      "x": 490,
+      "y": 380,
+      "hp": 1280,
+      "level": 38,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Sanguine Aberration",
+      "x": 320,
+      "y": 480,
+      "hp": 1440,
+      "level": 39,
+      "xpReward": 540
+    },
+    {
+      "type": "boss",
+      "name": "Hemarch Valis, the Bloodwright",
+      "x": 520,
+      "y": 540,
+      "hp": 2700,
+      "level": 41,
+      "xpReward": 1250
+    }
+  ]
+}

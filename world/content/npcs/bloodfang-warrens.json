@@ -1,0 +1,84 @@
+{
+  "zoneId": "bloodfang-warrens",
+  "npcs": [
+    {
+      "type": "quest-giver",
+      "name": "Warren-Scout Korrigan",
+      "aliases": ["Korrigan"],
+      "x": 280,
+      "y": 160,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Denmother Vex",
+      "aliases": ["Vex", "Denmother"],
+      "x": 360,
+      "y": 160,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Warren Stalker",
+      "x": 200,
+      "y": 360,
+      "hp": 1320,
+      "level": 39,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Warren Stalker",
+      "x": 170,
+      "y": 380,
+      "hp": 1320,
+      "level": 39,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Bonegnawer",
+      "x": 460,
+      "y": 380,
+      "hp": 1240,
+      "level": 40,
+      "xpReward": 520
+    },
+    {
+      "type": "mob",
+      "name": "Bonegnawer",
+      "x": 490,
+      "y": 400,
+      "hp": 1240,
+      "level": 40,
+      "xpReward": 520
+    },
+    {
+      "type": "mob",
+      "name": "Dire Lycan",
+      "x": 320,
+      "y": 500,
+      "hp": 1520,
+      "level": 41,
+      "xpReward": 560
+    },
+    {
+      "type": "mob",
+      "name": "Dire Lycan",
+      "x": 350,
+      "y": 520,
+      "hp": 1520,
+      "level": 42,
+      "xpReward": 580
+    },
+    {
+      "type": "boss",
+      "name": "The Bloodfang Matriarch",
+      "x": 520,
+      "y": 560,
+      "hp": 2900,
+      "level": 44,
+      "xpReward": 1350
+    }
+  ]
+}

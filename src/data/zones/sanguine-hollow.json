@@ -33,6 +33,19 @@
       }
     },
     {
+      "id": "lab-stair",
+      "name": "Lab Stair",
+      "type": "portal",
+      "position": { "x": 320, "z": 620 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "sanguine-laboratories",
+        "destinationPoi": "hollow-stair",
+        "bidirectional": true
+      }
+    },
+    {
       "id": "crimson-grove",
       "name": "Crimson Grove",
       "type": "landmark",

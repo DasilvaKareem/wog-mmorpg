@@ -1,0 +1,115 @@
+{
+  "id": "sanguine-laboratories",
+  "name": "Sanguine Laboratories",
+  "continentId": "nocturnia",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(160,30,50,0.15)",
+  "budget": { "maxPopulation": 32, "maxThreat": 180 },
+  "pois": [
+    {
+      "id": "hollow-stair",
+      "name": "Hollow Stair",
+      "type": "portal",
+      "position": { "x": 320, "z": 20 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "sanguine-hollow", "destinationPoi": "lab-stair", "bidirectional": true }
+    },
+    {
+      "id": "institute-gate",
+      "name": "Institute Gate",
+      "type": "portal",
+      "position": { "x": 20, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "nocturne-institute", "destinationPoi": "labs-gate", "bidirectional": true }
+    },
+    {
+      "id": "atrium-vestibule",
+      "name": "Atrium Vestibule",
+      "type": "landmark",
+      "position": { "x": 320, "z": 160 },
+      "radius": 26,
+      "tags": ["safe-zone", "hub"]
+    },
+    {
+      "id": "reagent-dispensary",
+      "name": "Reagent Dispensary",
+      "type": "structure",
+      "position": { "x": 280, "z": 140 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 3, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "research-directorate",
+      "name": "Research Directorate",
+      "type": "structure",
+      "position": { "x": 360, "z": 140 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "house", "capacity": 2, "services": ["quest"], "npcs": ["quest-giver"] }
+    },
+    {
+      "id": "specimen-archive",
+      "name": "Specimen Archive",
+      "type": "structure",
+      "position": { "x": 320, "z": 220 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "tower", "capacity": 2, "services": ["quest"], "npcs": ["lore-npc"] }
+    },
+    {
+      "id": "hemostasis-wards",
+      "name": "Hemostasis Wards",
+      "type": "spawn-point",
+      "position": { "x": 200, "z": 380 },
+      "radius": 38,
+      "tags": ["hostile", "dense"]
+    },
+    {
+      "id": "transfusion-vats",
+      "name": "Transfusion Vats",
+      "type": "spawn-point",
+      "position": { "x": 460, "z": 360 },
+      "radius": 36,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "containment-cells",
+      "name": "Containment Cells",
+      "type": "spawn-point",
+      "position": { "x": 320, "z": 480 },
+      "radius": 34,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "hemarchs-sanctum",
+      "name": "Hemarch's Sanctum",
+      "type": "landmark",
+      "position": { "x": 520, "z": 540 },
+      "radius": 30,
+      "tags": ["hostile", "boss-area"]
+    },
+    {
+      "id": "lab-crossing",
+      "name": "Lab Crossing",
+      "type": "road-node",
+      "position": { "x": 320, "z": 320 },
+      "radius": 10,
+      "tags": []
+    }
+  ],
+  "roads": [
+    {
+      "id": "main-corridor",
+      "name": "Main Corridor",
+      "nodes": ["hollow-stair", "atrium-vestibule", "lab-crossing", "containment-cells"]
+    },
+    {
+      "id": "ward-corridor",
+      "name": "Ward Corridor",
+      "nodes": ["institute-gate", "lab-crossing", "hemostasis-wards", "transfusion-vats", "hemarchs-sanctum"]
+    }
+  ]
+}

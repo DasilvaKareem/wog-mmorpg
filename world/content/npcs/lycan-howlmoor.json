@@ -1,0 +1,84 @@
+{
+  "zoneId": "lycan-howlmoor",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Pelt-Trader Brokkr - Lycan Wares",
+      "aliases": ["Brokkr"],
+      "x": 180,
+      "y": 280,
+      "hp": 999,
+      "shopItems": [0, 1, 2, 4, 6, 7, 8, 21, 22, 43, 44]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Packmaster Greymane",
+      "aliases": ["Greymane", "Packmaster"],
+      "x": 220,
+      "y": 360,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Old Wolf Yara",
+      "aliases": ["Yara"],
+      "x": 140,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Moonborn Lycan",
+      "x": 420,
+      "y": 240,
+      "hp": 1180,
+      "level": 34,
+      "xpReward": 420
+    },
+    {
+      "type": "mob",
+      "name": "Moonborn Lycan",
+      "x": 390,
+      "y": 260,
+      "hp": 1180,
+      "level": 35,
+      "xpReward": 440
+    },
+    {
+      "type": "mob",
+      "name": "Feral Stalker",
+      "x": 450,
+      "y": 220,
+      "hp": 1020,
+      "level": 35,
+      "xpReward": 430
+    },
+    {
+      "type": "mob",
+      "name": "Bloodmoon Howler",
+      "x": 460,
+      "y": 440,
+      "hp": 1320,
+      "level": 36,
+      "xpReward": 470
+    },
+    {
+      "type": "mob",
+      "name": "Bloodmoon Howler",
+      "x": 490,
+      "y": 460,
+      "hp": 1320,
+      "level": 37,
+      "xpReward": 490
+    },
+    {
+      "type": "boss",
+      "name": "Alpha Skarn, the Moonfang",
+      "x": 520,
+      "y": 140,
+      "hp": 2400,
+      "level": 39,
+      "xpReward": 1100
+    }
+  ]
+}

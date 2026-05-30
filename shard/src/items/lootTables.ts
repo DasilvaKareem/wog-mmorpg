@@ -67,7 +67,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 12,
     copperMax: 20,
     autoDrops: [
-      { tokenId: 22n, minQuantity: 1, maxQuantity: 2, chance: 0.2 }, // Coal Ore
+      { tokenId: 116n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Rough Ruby (stolen hoard)
     ],
     skinningDrops: [
       { tokenId: 63n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Light Leather
@@ -80,7 +80,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 25,
     autoDrops: [
       { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Health Potion
-      { tokenId: 22n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Coal Ore
     ],
     skinningDrops: [
       { tokenId: 63n, minQuantity: 1, maxQuantity: 3, chance: 0.6 }, // Light Leather
@@ -92,7 +91,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 8,
     copperMax: 14,
     autoDrops: [
-      { tokenId: 31n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Meadow Lily (slime residue)
+      { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Rough Sapphire (engulfed)
     ],
     skinningDrops: [], // Slimes can't be skinned
   },
@@ -130,7 +129,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 18,
     copperMax: 30,
     autoDrops: [
-      { tokenId: 38n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Moonflower (venom gland)
+      { tokenId: 118n, minQuantity: 1, maxQuantity: 1, chance: 0.10 }, // Rough Emerald
     ],
     skinningDrops: [
       { tokenId: 67n, minQuantity: 1, maxQuantity: 3, chance: 0.7 }, // Spider Silk
@@ -144,7 +143,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 40,
     autoDrops: [
       { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Health Potion
-      { tokenId: 23n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Tin Ore
     ],
     skinningDrops: [
       { tokenId: 64n, minQuantity: 1, maxQuantity: 3, chance: 0.6 }, // Medium Leather
@@ -156,7 +154,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 30,
     copperMax: 50,
     autoDrops: [
-      { tokenId: 35n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, // Lavender (corrupted wood)
+      { tokenId: 118n, minQuantity: 1, maxQuantity: 2, chance: 0.15 }, // Rough Emerald (sap-crystal)
     ],
     skinningDrops: [
       { tokenId: 69n, minQuantity: 4, maxQuantity: 6, chance: 0.7 }, // Thick Bone (wood)
@@ -184,7 +182,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 65,
     autoDrops: [
       { tokenId: 1n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Raw Meat
-      { tokenId: 39n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }, // Starbloom (shadow essence)
       { tokenId: 116n, minQuantity: 1, maxQuantity: 1, chance: 0.08 }, // Rough Ruby
     ],
     skinningDrops: [
@@ -200,7 +197,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 80,
     autoDrops: [
       { tokenId: 80n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Mana Potion
-      { tokenId: 24n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Copper Ore
       { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Rough Sapphire
     ],
     skinningDrops: [
@@ -213,8 +209,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 60,
     copperMax: 95,
     autoDrops: [
-      { tokenId: 24n, minQuantity: 1, maxQuantity: 3, chance: 0.4 }, // Copper Ore
-      { tokenId: 25n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Silver Ore
       { tokenId: 118n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Rough Emerald
       { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.05 }, // Flawed Diamond
     ],
@@ -244,8 +238,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 80,
     copperMax: 130,
     autoDrops: [
-      { tokenId: 25n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Silver Ore
-      { tokenId: 26n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Gold Ore
       { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Flawed Diamond
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.05 }, // Arcane Crystal
     ],
@@ -261,8 +253,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 250,
     autoDrops: [
       { tokenId: 80n, minQuantity: 3, maxQuantity: 5, chance: 0.8 }, // Mana Potion
-      { tokenId: 26n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.25 }, // Arcane Crystal
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
     ],
@@ -280,7 +270,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 140,
     autoDrops: [
       { tokenId: 1n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, // Raw Meat
-      { tokenId: 25n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }, // Silver Ore
     ],
     skinningDrops: [
       { tokenId: 70n, minQuantity: 2, maxQuantity: 3, chance: 0.7 }, // Heavy Leather
@@ -293,7 +282,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 90,
     copperMax: 150,
     autoDrops: [
-      { tokenId: 39n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Starbloom
       { tokenId: 80n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Mana Potion
     ],
     skinningDrops: [], // Wisps can't be skinned
@@ -319,7 +307,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 160,
     autoDrops: [
       { tokenId: 80n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Mana Potion
-      { tokenId: 39n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }, // Starbloom
       { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Rough Sapphire
     ],
     skinningDrops: [],
@@ -330,7 +317,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 110,
     copperMax: 175,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Gold Ore
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.08 }, // Arcane Crystal
     ],
     skinningDrops: [
@@ -344,8 +330,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 350,
     autoDrops: [
       { tokenId: 1n, minQuantity: 4, maxQuantity: 6, chance: 0.8 }, // Raw Meat
-      { tokenId: 26n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }, // Arcane Crystal
     ],
     skinningDrops: [
@@ -361,7 +345,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 120,
     copperMax: 200,
     autoDrops: [
-      { tokenId: 35n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, // Lavender (bark)
       { tokenId: 118n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Rough Emerald
     ],
     skinningDrops: [
@@ -375,7 +358,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 210,
     autoDrops: [
       { tokenId: 1n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Raw Meat
-      { tokenId: 38n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Moonflower (venom)
     ],
     skinningDrops: [
       { tokenId: 70n, minQuantity: 2, maxQuantity: 4, chance: 0.7 }, // Heavy Leather
@@ -403,7 +385,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 230,
     autoDrops: [
       { tokenId: 80n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Mana Potion
-      { tokenId: 39n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Starbloom
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Shadow Opal
     ],
     skinningDrops: [],
@@ -414,8 +395,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 280,
     copperMax: 450,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 3, maxQuantity: 5, chance: 0.6 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Arcane Crystal
       { tokenId: 118n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }, // Rough Emerald
     ],
@@ -445,8 +424,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 170,
     copperMax: 275,
     autoDrops: [
-      { tokenId: 25n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Silver Ore
-      { tokenId: 26n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Gold Ore
       { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Flawed Diamond
     ],
     skinningDrops: [
@@ -473,7 +450,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 185,
     copperMax: 300,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Gold Ore
       { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Flawed Diamond
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Arcane Crystal
     ],
@@ -489,7 +465,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 320,
     autoDrops: [
       { tokenId: 1n, minQuantity: 4, maxQuantity: 6, chance: 0.7 }, // Raw Meat
-      { tokenId: 26n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Gold Ore
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Shadow Opal
     ],
     skinningDrops: [
@@ -503,8 +478,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 350,
     copperMax: 550,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 4, maxQuantity: 6, chance: 0.7 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Arcane Crystal
       { tokenId: 119n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Flawed Diamond
     ],
@@ -521,7 +494,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 340,
     autoDrops: [
       { tokenId: 1n, minQuantity: 3, maxQuantity: 5, chance: 0.6 }, // Raw Meat
-      { tokenId: 39n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Starbloom
     ],
     skinningDrops: [
       { tokenId: 71n, minQuantity: 2, maxQuantity: 4, chance: 0.7 }, // Shadow Pelt
@@ -535,7 +507,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 355,
     autoDrops: [
       { tokenId: 80n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Mana Potion
-      { tokenId: 38n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Moonflower
       { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Rough Sapphire
     ],
     skinningDrops: [
@@ -548,8 +519,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 230,
     copperMax: 370,
     autoDrops: [
-      { tokenId: 35n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Lavender
-      { tokenId: 39n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Starbloom
       { tokenId: 118n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Rough Emerald
     ],
     skinningDrops: [
@@ -563,7 +532,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 385,
     autoDrops: [
       { tokenId: 80n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, // Mana Potion
-      { tokenId: 40n, minQuantity: 1, maxQuantity: 2, chance: 0.35 }, // Dragon's Breath
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Shadow Opal
     ],
     skinningDrops: [
@@ -576,7 +544,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 250,
     copperMax: 400,
     autoDrops: [
-      { tokenId: 39n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Starbloom
       { tokenId: 80n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Mana Potion
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Arcane Crystal
     ],
@@ -588,8 +555,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 450,
     copperMax: 700,
     autoDrops: [
-      { tokenId: 40n, minQuantity: 3, maxQuantity: 5, chance: 0.7 }, // Dragon's Breath
-      { tokenId: 26n, minQuantity: 4, maxQuantity: 6, chance: 0.6 }, // Gold Ore
       { tokenId: 121n, minQuantity: 1, maxQuantity: 2, chance: 0.35 }, // Arcane Crystal
       { tokenId: 120n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Shadow Opal
     ],
@@ -605,8 +570,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 260,
     copperMax: 420,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Gold Ore
-      { tokenId: 25n, minQuantity: 2, maxQuantity: 4, chance: 0.4 }, // Silver Ore
+      { tokenId: 121n, minQuantity: 1, maxQuantity: 2, chance: 0.45 }, // Arcane Crystal (power core)
     ],
     skinningDrops: [
       { tokenId: 74n, minQuantity: 2, maxQuantity: 3, chance: 0.7 }, // Golem Core
@@ -618,8 +582,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 275,
     copperMax: 440,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Dragon's Breath
       { tokenId: 116n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Rough Ruby
     ],
     skinningDrops: [
@@ -646,7 +608,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 300,
     copperMax: 480,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 3, maxQuantity: 5, chance: 0.5 }, // Gold Ore
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Arcane Crystal
       { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Flawed Diamond
     ],
@@ -661,7 +622,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 320,
     copperMax: 510,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 3, maxQuantity: 5, chance: 0.6 }, // Gold Ore
       { tokenId: 0n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Health Potion
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
     ],
@@ -676,8 +636,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 550,
     copperMax: 900,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 5, maxQuantity: 8, chance: 0.8 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 3, maxQuantity: 5, chance: 0.6 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Arcane Crystal
       { tokenId: 119n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Flawed Diamond
       { tokenId: 120n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Shadow Opal
@@ -694,7 +652,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 340,
     copperMax: 540,
     autoDrops: [
-      { tokenId: 39n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Starbloom
       { tokenId: 80n, minQuantity: 2, maxQuantity: 4, chance: 0.4 }, // Mana Potion
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Arcane Crystal
     ],
@@ -706,7 +663,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 360,
     copperMax: 570,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 3, maxQuantity: 5, chance: 0.5 }, // Gold Ore
       { tokenId: 119n, minQuantity: 1, maxQuantity: 2, chance: 0.2 }, // Flawed Diamond
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Arcane Crystal
     ],
@@ -720,7 +676,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 380,
     copperMax: 600,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Gold Ore
       { tokenId: 0n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Health Potion
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
     ],
@@ -736,7 +691,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 630,
     autoDrops: [
       { tokenId: 1n, minQuantity: 4, maxQuantity: 6, chance: 0.6 }, // Raw Meat
-      { tokenId: 39n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Starbloom
       { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Rough Sapphire
     ],
     skinningDrops: [
@@ -750,7 +704,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 420,
     copperMax: 660,
     autoDrops: [
-      { tokenId: 40n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Arcane Crystal
       { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Flawed Diamond
     ],
@@ -765,8 +718,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 700,
     copperMax: 1100,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 6, maxQuantity: 10, chance: 0.8 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 4, maxQuantity: 6, chance: 0.7 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Arcane Crystal
       { tokenId: 119n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Flawed Diamond
       { tokenId: 120n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Shadow Opal
@@ -784,7 +735,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 700,
     autoDrops: [
       { tokenId: 1n, minQuantity: 4, maxQuantity: 6, chance: 0.6 }, // Raw Meat
-      { tokenId: 40n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Dragon's Breath
       { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Rough Sapphire
     ],
     skinningDrops: [
@@ -799,7 +749,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 740,
     autoDrops: [
       { tokenId: 80n, minQuantity: 3, maxQuantity: 5, chance: 0.5 }, // Mana Potion
-      { tokenId: 39n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Starbloom
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Arcane Crystal
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Shadow Opal
     ],
@@ -813,7 +762,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 500,
     copperMax: 780,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 3, maxQuantity: 5, chance: 0.5 }, // Gold Ore
       { tokenId: 119n, minQuantity: 1, maxQuantity: 2, chance: 0.2 }, // Flawed Diamond
       { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Arcane Crystal
     ],
@@ -829,7 +777,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 830,
     autoDrops: [
       { tokenId: 1n, minQuantity: 5, maxQuantity: 8, chance: 0.7 }, // Raw Meat
-      { tokenId: 40n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Dragon's Breath
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
     ],
     skinningDrops: [
@@ -843,7 +790,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 560,
     copperMax: 880,
     autoDrops: [
-      { tokenId: 40n, minQuantity: 3, maxQuantity: 5, chance: 0.5 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 1, maxQuantity: 2, chance: 0.2 }, // Arcane Crystal
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
       { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.12 }, // Flawed Diamond
@@ -858,8 +804,6 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 900,
     copperMax: 1500,
     autoDrops: [
-      { tokenId: 26n, minQuantity: 8, maxQuantity: 12, chance: 0.9 }, // Gold Ore
-      { tokenId: 40n, minQuantity: 5, maxQuantity: 8, chance: 0.8 }, // Dragon's Breath
       { tokenId: 121n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Arcane Crystal
       { tokenId: 119n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Flawed Diamond
       { tokenId: 120n, minQuantity: 2, maxQuantity: 3, chance: 0.35 }, // Shadow Opal

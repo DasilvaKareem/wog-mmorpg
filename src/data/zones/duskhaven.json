@@ -46,6 +46,19 @@
       }
     },
     {
+      "id": "institute-descent",
+      "name": "Institute Descent",
+      "type": "portal",
+      "position": { "x": 320, "z": 620 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "nocturne-institute",
+        "destinationPoi": "institute-ascent",
+        "bidirectional": true
+      }
+    },
+    {
       "id": "town-square",
       "name": "Duskhaven Square",
       "type": "landmark",

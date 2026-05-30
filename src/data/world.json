@@ -36,7 +36,11 @@
     "lycan-wilds",
     "ashborne-city",
     "ashborne-academy",
-    "moonhaven"
+    "moonhaven",
+    "lycan-howlmoor",
+    "bloodfang-warrens",
+    "sanguine-laboratories",
+    "nocturne-institute"
   ],
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
@@ -88,7 +92,12 @@
     { "from": "duskhaven", "to": "ashborne-city", "portal": "ashborne-road" },
     { "from": "ashborne-city", "to": "ashborne-academy", "portal": "academy-gate" },
     { "from": "ashborne-city", "to": "moonhaven", "portal": "moon-gate" },
-    { "from": "moonhaven", "to": "lycan-wilds", "portal": "wilds-gate" }
+    { "from": "moonhaven", "to": "lycan-wilds", "portal": "wilds-gate" },
+    { "from": "lycan-wilds", "to": "lycan-howlmoor", "portal": "howlmoor-pass" },
+    { "from": "lycan-howlmoor", "to": "bloodfang-warrens", "portal": "warrens-descent" },
+    { "from": "sanguine-hollow", "to": "sanguine-laboratories", "portal": "lab-stair" },
+    { "from": "duskhaven", "to": "nocturne-institute", "portal": "institute-descent" },
+    { "from": "nocturne-institute", "to": "sanguine-laboratories", "portal": "labs-gate" }
   ],
   "worldOffsets": {
     "village-square": { "x": 0, "z": 0 },
@@ -127,7 +136,11 @@
     "lycan-wilds": { "x": 1280, "z": -3200 },
     "ashborne-city": { "x": 0, "z": -4480 },
     "ashborne-academy": { "x": 1280, "z": -4480 },
-    "moonhaven": { "x": 1280, "z": -3840 }
+    "moonhaven": { "x": 1280, "z": -3840 },
+    "lycan-howlmoor": { "x": 1920, "z": -3200 },
+    "bloodfang-warrens": { "x": 1920, "z": -2560 },
+    "sanguine-laboratories": { "x": 640, "z": -2560 },
+    "nocturne-institute": { "x": 0, "z": -2560 }
   },
   "continents": [
     {

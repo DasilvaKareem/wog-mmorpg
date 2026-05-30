@@ -1,0 +1,97 @@
+{
+  "id": "bloodfang-warrens",
+  "name": "Bloodfang Warrens",
+  "continentId": "nocturnia",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(80,50,70,0.16)",
+  "budget": { "maxPopulation": 36, "maxThreat": 200 },
+  "pois": [
+    {
+      "id": "howlmoor-ascent",
+      "name": "Howlmoor Ascent",
+      "type": "portal",
+      "position": { "x": 320, "z": 20 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "lycan-howlmoor", "destinationPoi": "warrens-descent", "bidirectional": true }
+    },
+    {
+      "id": "den-mouth",
+      "name": "Den Mouth",
+      "type": "landmark",
+      "position": { "x": 320, "z": 140 },
+      "radius": 24,
+      "tags": ["safe-zone", "hub"]
+    },
+    {
+      "id": "scouts-hollow",
+      "name": "Scout's Hollow",
+      "type": "structure",
+      "position": { "x": 280, "z": 160 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "house", "capacity": 2, "services": ["quest"], "npcs": ["quest-giver"] }
+    },
+    {
+      "id": "denmother-warren",
+      "name": "Denmother's Warren",
+      "type": "structure",
+      "position": { "x": 360, "z": 160 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "house", "capacity": 2, "services": ["quest"], "npcs": ["lore-npc"] }
+    },
+    {
+      "id": "bonepit-tunnels",
+      "name": "Bonepit Tunnels",
+      "type": "spawn-point",
+      "position": { "x": 200, "z": 360 },
+      "radius": 40,
+      "tags": ["hostile", "dense"]
+    },
+    {
+      "id": "marrow-galleries",
+      "name": "Marrow Galleries",
+      "type": "spawn-point",
+      "position": { "x": 460, "z": 380 },
+      "radius": 38,
+      "tags": ["hostile", "dense"]
+    },
+    {
+      "id": "deepfang-sump",
+      "name": "Deepfang Sump",
+      "type": "spawn-point",
+      "position": { "x": 320, "z": 500 },
+      "radius": 36,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "matriarchs-lair",
+      "name": "Matriarch's Lair",
+      "type": "landmark",
+      "position": { "x": 520, "z": 560 },
+      "radius": 32,
+      "tags": ["hostile", "boss-area"]
+    },
+    {
+      "id": "warren-crossing",
+      "name": "Warren Crossing",
+      "type": "road-node",
+      "position": { "x": 320, "z": 300 },
+      "radius": 10,
+      "tags": []
+    }
+  ],
+  "roads": [
+    {
+      "id": "deep-descent",
+      "name": "Deep Descent",
+      "nodes": ["howlmoor-ascent", "den-mouth", "warren-crossing", "deepfang-sump"]
+    },
+    {
+      "id": "gallery-run",
+      "name": "Gallery Run",
+      "nodes": ["warren-crossing", "bonepit-tunnels", "marrow-galleries", "matriarchs-lair"]
+    }
+  ]
+}

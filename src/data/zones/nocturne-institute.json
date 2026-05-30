@@ -1,0 +1,115 @@
+{
+  "id": "nocturne-institute",
+  "name": "Nocturne Research Institute",
+  "continentId": "nocturnia",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(60,40,110,0.15)",
+  "budget": { "maxPopulation": 30, "maxThreat": 190 },
+  "pois": [
+    {
+      "id": "institute-ascent",
+      "name": "Institute Ascent",
+      "type": "portal",
+      "position": { "x": 320, "z": 20 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "duskhaven", "destinationPoi": "institute-descent", "bidirectional": true }
+    },
+    {
+      "id": "labs-gate",
+      "name": "Labs Gate",
+      "type": "portal",
+      "position": { "x": 620, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "sanguine-laboratories", "destinationPoi": "institute-gate", "bidirectional": true }
+    },
+    {
+      "id": "rotunda",
+      "name": "The Rotunda",
+      "type": "landmark",
+      "position": { "x": 320, "z": 160 },
+      "radius": 26,
+      "tags": ["safe-zone", "hub"]
+    },
+    {
+      "id": "logistics-desk",
+      "name": "Logistics Desk",
+      "type": "structure",
+      "position": { "x": 280, "z": 140 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 3, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "overseers-office",
+      "name": "Overseer's Office",
+      "type": "structure",
+      "position": { "x": 360, "z": 140 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "house", "capacity": 2, "services": ["quest"], "npcs": ["quest-giver"] }
+    },
+    {
+      "id": "data-vault",
+      "name": "Data Vault",
+      "type": "structure",
+      "position": { "x": 320, "z": 220 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "tower", "capacity": 2, "services": ["quest"], "npcs": ["lore-npc"] }
+    },
+    {
+      "id": "essence-reactor-floor",
+      "name": "Essence Reactor Floor",
+      "type": "spawn-point",
+      "position": { "x": 200, "z": 380 },
+      "radius": 38,
+      "tags": ["hostile", "dense"]
+    },
+    {
+      "id": "automaton-bay",
+      "name": "Automaton Bay",
+      "type": "spawn-point",
+      "position": { "x": 460, "z": 360 },
+      "radius": 36,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "testing-chambers",
+      "name": "Testing Chambers",
+      "type": "spawn-point",
+      "position": { "x": 320, "z": 480 },
+      "radius": 34,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "prototype-core",
+      "name": "Prototype Core",
+      "type": "landmark",
+      "position": { "x": 520, "z": 540 },
+      "radius": 30,
+      "tags": ["hostile", "boss-area"]
+    },
+    {
+      "id": "institute-crossing",
+      "name": "Institute Crossing",
+      "type": "road-node",
+      "position": { "x": 320, "z": 320 },
+      "radius": 10,
+      "tags": []
+    }
+  ],
+  "roads": [
+    {
+      "id": "grand-hall",
+      "name": "Grand Hall",
+      "nodes": ["institute-ascent", "rotunda", "institute-crossing", "testing-chambers"]
+    },
+    {
+      "id": "reactor-corridor",
+      "name": "Reactor Corridor",
+      "nodes": ["labs-gate", "institute-crossing", "essence-reactor-floor", "automaton-bay", "prototype-core"]
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "zoneId": "nocturne-institute",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Logistics Officer Pell - Supplies",
+      "aliases": ["Pell"],
+      "x": 280,
+      "y": 140,
+      "hp": 999,
+      "shopItems": [0, 1, 2, 6, 7, 8, 32, 33, 78, 79, 227]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Overseer Lyra",
+      "aliases": ["Lyra", "Overseer"],
+      "x": 360,
+      "y": 140,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Data-Keeper Onyx",
+      "aliases": ["Onyx", "Data-Keeper"],
+      "x": 320,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Construct",
+      "x": 200,
+      "y": 380,
+      "hp": 1340,
+      "level": 41,
+      "xpReward": 540
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Construct",
+      "x": 170,
+      "y": 400,
+      "hp": 1340,
+      "level": 41,
+      "xpReward": 540
+    },
+    {
+      "type": "mob",
+      "name": "Test Subject",
+      "x": 460,
+      "y": 360,
+      "hp": 1220,
+      "level": 42,
+      "xpReward": 560
+    },
+    {
+      "type": "mob",
+      "name": "Test Subject",
+      "x": 490,
+      "y": 380,
+      "hp": 1220,
+      "level": 42,
+      "xpReward": 560
+    },
+    {
+      "type": "mob",
+      "name": "Essence Wraith",
+      "x": 320,
+      "y": 480,
+      "hp": 1500,
+      "level": 43,
+      "xpReward": 600
+    },
+    {
+      "type": "boss",
+      "name": "The Prototype",
+      "x": 520,
+      "y": 540,
+      "hp": 3100,
+      "level": 45,
+      "xpReward": 1450
+    }
+  ]
+}

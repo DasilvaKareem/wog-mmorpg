@@ -29,7 +29,9 @@ import {
   getRegionAtPosition,
   getWorldLayout,
   getZoneOffset,
+  getWalkableNeighbors,
 } from "./worldLayout.js";
+import { activeZoneSet } from "./activeZones.js";
 import { getActiveXpMultiplier } from "../professions/potionEffects.js";
 import { getAttackMultiplier, getDefenseMultiplier } from "../combat/elementSystem.js";
 import { computeDamage } from "../combat/damageCalc.js";
@@ -2082,9 +2084,27 @@ export function forEachInRadius(
   }
 }
 
+/**
+ * Zones worth simulating this tick: every zone that currently holds a player,
+ * plus each of their walkable neighbors (so a player walking toward a boundary
+ * keeps the destination zone awake *before* they cross). Built from player-
+ * entity regions in a single pass over world.entities — this covers AI agents
+ * (spawned players) and any wallet-less player entity. Zones not in this set are
+ * dormant: their mob AI, effects, movement, and resource ticks pause until a
+ * player returns. Region recalculation runs unconditionally outside the zone
+ * loop, so a player crossing a boundary still flips region and wakes the zone.
+ */
+function computeActiveZones(): Set<string> {
+  const playerRegions: string[] = [];
+  for (const entity of world.entities.values()) {
+    if (entity.type === "player" && entity.region) playerRegions.push(entity.region);
+  }
+  return activeZoneSet(playerRegions, getWalkableNeighbors);
+}
+
 function moveToward(
   entity: Entity, tx: number, ty: number,
-  zoneEntities?: Map<string, Entity>,
+  grid?: SpatialGrid,
 ): boolean {
   const dx = tx - entity.x;
   const dy = ty - entity.y;
@@ -2096,13 +2116,19 @@ function moveToward(
   let nx = entity.x + (dx / dist) * step;
   let ny = entity.y + (dy / dist) * step;
 
-  // Entity-to-entity collision: push out of overlapping living entities
-  if (zoneEntities) {
-    for (const other of zoneEntities.values()) {
-      if (other.id === entity.id) continue;
-      if ((other.hp ?? 0) <= 0) continue; // ignore corpses/dead
+  // Entity-to-entity collision: push out of overlapping living entities.
+  // Query the per-tick spatial grid's nearby cells instead of scanning every
+  // entity — collision only ever matters within a couple of cells. The grid is
+  // built pre-move so candidacy can lag ≤1 cell (< the 64-unit cell size), but
+  // the push-out reads live other.x/other.y, so the physics stays correct; any
+  // residual overlap converges next tick (same tolerance as the separation pass).
+  // Do NOT rebuild the grid post-move — that would re-add the O(n) cost.
+  if (grid) {
+    forEachInRadius(grid, nx, ny, ENTITY_COLLISION_RADIUS, (other) => {
+      if (other.id === entity.id) return;
+      if ((other.hp ?? 0) <= 0) return; // ignore corpses/dead
       if (other.type === "flower-node" || other.type === "ore-node" ||
-          other.type === "nectar-node" || other.type === "crop-node" || other.type === "corpse") continue;
+          other.type === "nectar-node" || other.type === "crop-node" || other.type === "corpse") return;
       const ox = nx - other.x;
       const oy = ny - other.y;
       const oDist = Math.sqrt(ox * ox + oy * oy);
@@ -2112,7 +2138,7 @@ function moveToward(
         nx += (ox / oDist) * push;
         ny += (oy / oDist) * push;
       }
-    }
+    });
   }
 
   entity.x = nx;
@@ -2136,6 +2162,11 @@ async function worldTick() {
   lastTickStartAt = tickStart;
   world.tick++;
 
+  // Zones worth simulating this tick (have a player, or border one). Everything
+  // else is dormant — skip its whole per-zone body below. Recomputed each tick;
+  // a single pass over world.entities, cheap relative to the work it skips.
+  const activeZones = computeActiveZones();
+
   // Broadcast day/night phase transitions to all zones
   const newPhase = checkPhaseTransition(world.tick);
   if (newPhase) {
@@ -2158,6 +2189,19 @@ async function worldTick() {
   }
 
   for (const zone of getAllZones().values()) {
+    // Dormant-zone skip: no player in or bordering this zone → nothing to
+    // simulate. Mobs/effects/resources pause until a player returns (timers are
+    // tick-delta based, so they resume correctly). This is the main saving from
+    // empty continents — every per-zone pass below is O(all entities) because
+    // zone.entities is a filtered view over the whole world.
+    if (!activeZones.has(zone.zoneId)) continue;
+
+    // Spatial grid built once per zone, BEFORE movement, and reused for the
+    // whole zone iteration: collision (moveToward), the separation pass, mob
+    // aggro, and auto-combat target selection. Building it up front lets the
+    // order-processing movement below use grid-scoped collision instead of an
+    // O(n) scan of the entire world.
+    const spatialGrid = buildSpatialGrid(zone);
 
     // Regenerate player resources and clear per-tick locomotion state.
     for (const entity of zone.entities.values()) {
@@ -2333,7 +2377,7 @@ async function worldTick() {
       }
 
       if (entity.order.action === "move") {
-        const arrived = moveToward(entity, entity.order.x, entity.order.y, zone.entities);
+        const arrived = moveToward(entity, entity.order.x, entity.order.y, spatialGrid);
         if (arrived) entity.order = undefined;
       } else if (entity.order.action === "attack") {
         // `let` so the pending-attack resolve branch below can redirect to
@@ -2359,7 +2403,7 @@ async function worldTick() {
         const dy = target.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > getEntityAttackRange(entity)) {
-          moveToward(entity, target.x, target.y, world.entities);
+          moveToward(entity, target.x, target.y, spatialGrid);
         } else {
           if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
             rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
@@ -2501,7 +2545,7 @@ async function worldTick() {
           ? Math.max(baseRange, 100)
           : baseRange;
         if (dist > techRange) {
-          moveToward(entity, target.x, target.y, world.entities);
+          moveToward(entity, target.x, target.y, spatialGrid);
         } else {
           if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
             rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
@@ -2756,10 +2800,9 @@ async function worldTick() {
     }
 
     // ── Entity separation pass: push overlapping entities apart ─────
-    // Build spatial grid once — reused for aggro + auto-combat below.
-    // Single pass with grid neighbor lookup replaces 3× O(n²) scan;
-    // any residual overlap converges within a few ticks at 4Hz.
-    const spatialGrid = buildSpatialGrid(zone);
+    // Reuses spatialGrid (built at the top of the zone body). Single pass
+    // with grid neighbor lookup replaces a 3× O(n²) scan; any residual
+    // overlap converges within a few ticks at 4Hz.
     const livingEntities: Entity[] = [];
     for (const e of zone.entities.values()) {
       if ((e.hp ?? 0) <= 0) continue;

@@ -24,7 +24,8 @@
     "test:ttl-map": "tsx tests/ttlMap.test.ts",
     "test:target-commitment": "tsx tests/targetCommitment.test.ts",
     "test:action-queue": "tsx tests/actionQueue.test.ts",
-    "test:agent-units": "tsx tests/circuitBreaker.test.ts && tsx tests/ttlMap.test.ts && tsx tests/targetCommitment.test.ts && tsx tests/actionQueue.test.ts"
+    "test:active-zones": "tsx tests/activeZones.test.ts",
+    "test:agent-units": "tsx tests/circuitBreaker.test.ts && tsx tests/ttlMap.test.ts && tsx tests/targetCommitment.test.ts && tsx tests/actionQueue.test.ts && tsx tests/activeZones.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.77.0",

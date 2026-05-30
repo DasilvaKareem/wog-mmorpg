@@ -85,6 +85,10 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "ashborne-city": 20,
   "ashborne-academy": 22,
   "moonhaven": 25,
+  "lycan-howlmoor": 34,
+  "bloodfang-warrens": 39,
+  "sanguine-laboratories": 37,
+  "nocturne-institute": 41,
 };
 
 /** Farmland zones — used for farming/crops only, not questing or combat.
@@ -106,6 +110,8 @@ export const QUEST_ZONES: ReadonlySet<string> = new Set([
   "azurshard-chasm", "sunflower-fields",
   "duskhaven", "sanguine-hollow", "lycan-wilds",
   "ashborne-city", "ashborne-academy", "moonhaven",
+  "lycan-howlmoor", "bloodfang-warrens",
+  "sanguine-laboratories", "nocturne-institute",
 ]);
 
 // ── Connection graph (loaded from world.json) ───────────────────────

@@ -1,0 +1,107 @@
+{
+  "id": "lycan-howlmoor",
+  "name": "Howlmoor Reach",
+  "continentId": "nocturnia",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(60,75,120,0.13)",
+  "budget": { "maxPopulation": 34, "maxThreat": 160 },
+  "pois": [
+    {
+      "id": "wilds-gate",
+      "name": "Wilds Gate",
+      "type": "portal",
+      "position": { "x": 20, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "lycan-wilds", "destinationPoi": "howlmoor-pass", "bidirectional": true }
+    },
+    {
+      "id": "warrens-descent",
+      "name": "Warrens Descent",
+      "type": "portal",
+      "position": { "x": 320, "z": 620 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "bloodfang-warrens", "destinationPoi": "howlmoor-ascent", "bidirectional": true }
+    },
+    {
+      "id": "packmoot-camp",
+      "name": "Packmoot Camp",
+      "type": "landmark",
+      "position": { "x": 200, "z": 320 },
+      "radius": 30,
+      "tags": ["safe-zone", "hub"]
+    },
+    {
+      "id": "pelt-traders-post",
+      "name": "Pelt-Trader's Post",
+      "type": "structure",
+      "position": { "x": 180, "z": 280 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 3, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "alpha-totem",
+      "name": "Alpha Totem",
+      "type": "structure",
+      "position": { "x": 220, "z": 360 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "shrine", "capacity": 2, "services": ["quest"], "npcs": ["quest-giver"] }
+    },
+    {
+      "id": "elder-cairn",
+      "name": "Elder Cairn",
+      "type": "structure",
+      "position": { "x": 140, "z": 420 },
+      "radius": 10,
+      "tags": [],
+      "structure": { "kind": "tower", "capacity": 2, "services": ["quest"], "npcs": ["lore-npc"] }
+    },
+    {
+      "id": "bloodmoon-heath",
+      "name": "Bloodmoon Heath",
+      "type": "spawn-point",
+      "position": { "x": 420, "z": 240 },
+      "radius": 38,
+      "tags": ["hostile", "dense"]
+    },
+    {
+      "id": "gnarled-thicket",
+      "name": "Gnarled Thicket",
+      "type": "spawn-point",
+      "position": { "x": 460, "z": 440 },
+      "radius": 34,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "alphas-clearing",
+      "name": "Alpha's Clearing",
+      "type": "landmark",
+      "position": { "x": 520, "z": 140 },
+      "radius": 30,
+      "tags": ["hostile", "boss-area"]
+    },
+    {
+      "id": "moor-junction",
+      "name": "Moor Junction",
+      "type": "road-node",
+      "position": { "x": 320, "z": 320 },
+      "radius": 10,
+      "tags": []
+    }
+  ],
+  "roads": [
+    {
+      "id": "howl-road",
+      "name": "Howl Road",
+      "nodes": ["wilds-gate", "packmoot-camp", "moor-junction", "bloodmoon-heath"]
+    },
+    {
+      "id": "clearing-trail",
+      "name": "Clearing Trail",
+      "nodes": ["moor-junction", "gnarled-thicket", "alphas-clearing", "warrens-descent"]
+    }
+  ]
+}

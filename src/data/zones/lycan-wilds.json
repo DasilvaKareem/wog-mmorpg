@@ -33,6 +33,19 @@
       }
     },
     {
+      "id": "howlmoor-pass",
+      "name": "Howlmoor Pass",
+      "type": "portal",
+      "position": { "x": 620, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "lycan-howlmoor",
+        "destinationPoi": "wilds-gate",
+        "bidirectional": true
+      }
+    },
+    {
       "id": "moonlit-ridge",
       "name": "Moonlit Ridge",
       "type": "landmark",
