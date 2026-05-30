@@ -4,7 +4,7 @@
  */
 
 import { getAgentConfig, patchAgentConfig, autoPatchAgentConfig, USER_PINNED_FOCUSES, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
-import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
+import { resolveRegionId, getRegionCenter, getZoneConnections, findWalkableNextHop, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import {
   getEntity as getWorldEntity,
   getOrCreateZone,
@@ -2314,8 +2314,8 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
       return actionCompleted(`Arrived at ${ctx.currentRegion}`);
     }
 
-    const center = getRegionCenter(targetZone);
-    if (!center) {
+    const finalCenter = getRegionCenter(targetZone);
+    if (!finalCenter) {
       console.log(`[agent:${ctx.walletTag}] Unknown region: ${targetZone}`);
       await autoPatchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
       return actionBlocked(`Unknown region: ${targetZone}`, {
@@ -2330,11 +2330,70 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
         failureKey: `travel:entity:${ctx.entityId}`,
       });
     }
-    entity.order = { action: "move", x: center.x, y: center.z };
+
+    // ── Hop-by-hop routing over WORLD-SPACE edge adjacency ──────────────
+    // Walk toward the next contiguous zone, not the final zone's center —
+    // beelining across non-adjacent zones cuts through the void between them
+    // and the world tick clamps us back forever. A null next hop means there
+    // is no walkable land route (another continent — e.g. Nocturnia, reached
+    // by boat), so fail fast instead of burning LLM ticks against a wall.
+    const nextHop = findWalkableNextHop(ctx.currentRegion, targetZone);
+    if (!nextHop) {
+      console.log(`[agent:${ctx.walletTag}] No walkable route ${ctx.currentRegion} → ${targetZone}`);
+      void ctx.logActivity(`Can't walk to ${targetZone.replace(/-/g, " ")} — it's across the sea. Need a boat.`);
+      entity.travelBestDist = undefined;
+      entity.travelStallTicks = undefined;
+      await autoPatchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
+      ctx.setScript(null);
+      return actionBlocked(`No walkable route to ${targetZone} (requires a boat/portal)`, {
+        failureKey: `travel:unreachable:${targetZone}`,
+        targetName: targetZone,
+        category: "strategic",
+      });
+    }
+
+    // ── Progress watchdog ───────────────────────────────────────────────
+    // Track the best (smallest) world-space distance to the destination. If
+    // we go TRAVEL_STALL_LIMIT consecutive ticks without beating it by at
+    // least TRAVEL_PROGRESS_EPS units, we're stuck (clamped at void / wedged
+    // on collision) — block so the circuit breaker escalates instead of the
+    // agent looping the LLM in place. Reset when the destination changes.
+    const TRAVEL_STALL_LIMIT = 8;
+    const TRAVEL_PROGRESS_EPS = 2;
+    const distToTarget = Math.hypot(finalCenter.x - entity.x, finalCenter.z - entity.y);
+    if (entity.travelTargetZone !== targetZone) {
+      entity.travelBestDist = undefined;
+      entity.travelStallTicks = undefined;
+    }
+    if (entity.travelBestDist == null || distToTarget < entity.travelBestDist - TRAVEL_PROGRESS_EPS) {
+      entity.travelBestDist = distToTarget;
+      entity.travelStallTicks = 0;
+    } else {
+      entity.travelStallTicks = (entity.travelStallTicks ?? 0) + 1;
+      if (entity.travelStallTicks >= TRAVEL_STALL_LIMIT) {
+        console.log(`[agent:${ctx.walletTag}] Travel STALLED ${ctx.currentRegion} → ${targetZone} (no progress ${TRAVEL_STALL_LIMIT}x, dist ${Math.round(distToTarget)})`);
+        void ctx.logActivity(`Stuck trying to reach ${targetZone.replace(/-/g, " ")} — giving up`);
+        entity.travelTargetZone = undefined;
+        entity.gotoMode = false;
+        entity.travelBestDist = undefined;
+        entity.travelStallTicks = undefined;
+        await autoPatchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
+        ctx.setScript(null);
+        return actionBlocked(`Travel to ${targetZone} stalled — no progress`, {
+          failureKey: `travel:stalled:${targetZone}`,
+          targetName: targetZone,
+          category: "strategic",
+        });
+      }
+    }
+
+    const hopCenter = getRegionCenter(nextHop) ?? finalCenter;
+    entity.order = { action: "move", x: hopCenter.x, y: hopCenter.z };
     entity.travelTargetZone = targetZone;
     entity.gotoMode = true;
-    console.log(`[agent:${ctx.walletTag}] Traveling ${ctx.currentRegion} → ${targetZone} (${center.x},${center.z})`);
-    void ctx.logActivity(`Traveling ${ctx.currentRegion} → ${targetZone}`);
+    const via = nextHop === targetZone ? "" : ` via ${nextHop}`;
+    console.log(`[agent:${ctx.walletTag}] Traveling ${ctx.currentRegion} → ${targetZone}${via} (hop ${hopCenter.x},${hopCenter.z})`);
+    void ctx.logActivity(`Traveling ${ctx.currentRegion} → ${targetZone}${via}`);
     return actionProgressed(`Traveling to ${targetZone}`);
   } catch (err: any) {
     const reason = formatAgentError(err);

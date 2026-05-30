@@ -19,7 +19,12 @@
     "test:chain-ops": "tsx tests/chainOperationStoreRecovery.test.ts",
     "test:chain-recovery": "tsx tests/chainReconciliationRecovery.test.ts",
     "test:blockchain-writes": "tsx tests/blockchainWriteProcessorRecovery.test.ts",
-    "test:quest-audit": "tsx tests/questNpcAudit.test.ts"
+    "test:quest-audit": "tsx tests/questNpcAudit.test.ts",
+    "test:circuit-breaker": "tsx tests/circuitBreaker.test.ts",
+    "test:ttl-map": "tsx tests/ttlMap.test.ts",
+    "test:target-commitment": "tsx tests/targetCommitment.test.ts",
+    "test:action-queue": "tsx tests/actionQueue.test.ts",
+    "test:agent-units": "tsx tests/circuitBreaker.test.ts && tsx tests/ttlMap.test.ts && tsx tests/targetCommitment.test.ts && tsx tests/actionQueue.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.77.0",

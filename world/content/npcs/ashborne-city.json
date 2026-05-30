@@ -1,0 +1,136 @@
+{
+  "zoneId": "ashborne-city",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Quartermaster Brennick - General Goods",
+      "aliases": ["Brennick"],
+      "x": 340,
+      "y": 300,
+      "hp": 999,
+      "shopItems": [0, 1, 2, 4, 6, 7, 8, 10, 12, 13, 14, 15, 16, 27, 41, 76, 227]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Grand Auctioneer Halvar",
+      "aliases": ["Halvar"],
+      "x": 480,
+      "y": 300,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Bazaar Trader Yvona - Wares & Curios",
+      "aliases": ["Yvona"],
+      "x": 420,
+      "y": 440,
+      "hp": 999,
+      "shopItems": [3, 5, 9, 11, 17, 18, 19, 20, 28, 42, 77, 120, 121]
+    },
+    {
+      "type": "merchant",
+      "name": "Master Smith Doran - Weapons & Armor",
+      "aliases": ["Doran"],
+      "x": 320,
+      "y": 960,
+      "hp": 999,
+      "shopItems": [21, 22, 23, 24, 25, 26, 29, 30, 31, 43, 44, 45]
+    },
+    {
+      "type": "merchant",
+      "name": "Apothecary Sable - Potions & Reagents",
+      "aliases": ["Sable"],
+      "x": 940,
+      "y": 320,
+      "hp": 999,
+      "shopItems": [6, 7, 8, 32, 33, 34, 35, 78, 79, 80]
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Chancellor Vey",
+      "aliases": ["Vey"],
+      "x": 900,
+      "y": 920,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Lord-Mayor Aldric",
+      "aliases": ["Aldric", "Mayor"],
+      "x": 640,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "City Chronicler Esme",
+      "aliases": ["Esme", "Chronicler"],
+      "x": 640,
+      "y": 1080,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Undercity Cutthroat",
+      "x": 1040,
+      "y": 1060,
+      "hp": 640,
+      "level": 20,
+      "xpReward": 220
+    },
+    {
+      "type": "mob",
+      "name": "Undercity Cutthroat",
+      "x": 1090,
+      "y": 1100,
+      "hp": 640,
+      "level": 21,
+      "xpReward": 235
+    },
+    {
+      "type": "mob",
+      "name": "Ash Cultist",
+      "x": 1080,
+      "y": 1020,
+      "hp": 700,
+      "level": 21,
+      "xpReward": 240
+    },
+    {
+      "type": "mob",
+      "name": "Ash Cultist",
+      "x": 1020,
+      "y": 1110,
+      "hp": 700,
+      "level": 22,
+      "xpReward": 255
+    },
+    {
+      "type": "mob",
+      "name": "Sewer Skulker",
+      "x": 200,
+      "y": 1070,
+      "hp": 600,
+      "level": 20,
+      "xpReward": 215
+    },
+    {
+      "type": "mob",
+      "name": "Sewer Skulker",
+      "x": 250,
+      "y": 1100,
+      "hp": 600,
+      "level": 20,
+      "xpReward": 215
+    },
+    {
+      "type": "mob",
+      "name": "Gargoyle Sentinel",
+      "x": 230,
+      "y": 1040,
+      "hp": 880,
+      "level": 23,
+      "xpReward": 285
+    }
+  ]
+}

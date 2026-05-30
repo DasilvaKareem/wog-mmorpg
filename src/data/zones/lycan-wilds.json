@@ -20,6 +20,19 @@
       }
     },
     {
+      "id": "moonhaven-pass",
+      "name": "Moonhaven Pass",
+      "type": "portal",
+      "position": { "x": 320, "z": 20 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "moonhaven",
+        "destinationPoi": "wilds-gate",
+        "bidirectional": true
+      }
+    },
+    {
       "id": "moonlit-ridge",
       "name": "Moonlit Ridge",
       "type": "landmark",

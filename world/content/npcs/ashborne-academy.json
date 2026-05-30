@@ -1,0 +1,100 @@
+{
+  "zoneId": "ashborne-academy",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Quartermaster Ferro - Academy Supplies",
+      "aliases": ["Ferro"],
+      "x": 400,
+      "y": 240,
+      "hp": 999,
+      "shopItems": [0, 1, 2, 6, 7, 8, 32, 33, 34, 78, 79]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Bursar Adelle",
+      "aliases": ["Adelle"],
+      "x": 400,
+      "y": 400,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Dean Corvane",
+      "aliases": ["Corvane", "Dean"],
+      "x": 240,
+      "y": 400,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Headmaster Pyralis",
+      "aliases": ["Pyralis", "Headmaster"],
+      "x": 240,
+      "y": 240,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Loremaster Vael",
+      "aliases": ["Vael", "Loremaster"],
+      "x": 320,
+      "y": 160,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Golem",
+      "x": 240,
+      "y": 520,
+      "hp": 760,
+      "level": 22,
+      "xpReward": 250
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Golem",
+      "x": 200,
+      "y": 540,
+      "hp": 760,
+      "level": 22,
+      "xpReward": 250
+    },
+    {
+      "type": "mob",
+      "name": "Wild Essence Wisp",
+      "x": 280,
+      "y": 500,
+      "hp": 620,
+      "level": 23,
+      "xpReward": 265
+    },
+    {
+      "type": "mob",
+      "name": "Feral Familiar",
+      "x": 480,
+      "y": 520,
+      "hp": 700,
+      "level": 23,
+      "xpReward": 270
+    },
+    {
+      "type": "mob",
+      "name": "Feral Familiar",
+      "x": 500,
+      "y": 540,
+      "hp": 700,
+      "level": 24,
+      "xpReward": 285
+    },
+    {
+      "type": "boss",
+      "name": "The Unbound Phoenix",
+      "x": 540,
+      "y": 120,
+      "hp": 1700,
+      "level": 26,
+      "xpReward": 820
+    }
+  ]
+}

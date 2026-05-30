@@ -1,0 +1,224 @@
+{
+  "id": "ashborne-city",
+  "name": "Ashborne City",
+  "continentId": "nocturnia",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 1280, "z": 1280 } },
+  "mapTint": "rgba(120,60,150,0.12)",
+  "budget": { "maxPopulation": 40, "maxThreat": 70 },
+  "pois": [
+    {
+      "id": "ashborne-gate",
+      "name": "Ashborne Harbor Gate",
+      "type": "portal",
+      "position": { "x": 40, "z": 640 },
+      "radius": 14,
+      "tags": [],
+      "portal": { "destinationZone": "duskhaven", "destinationPoi": "ashborne-road", "bidirectional": true }
+    },
+    {
+      "id": "academy-gate",
+      "name": "Academy Gate",
+      "type": "portal",
+      "position": { "x": 1240, "z": 400 },
+      "radius": 14,
+      "tags": [],
+      "portal": { "destinationZone": "ashborne-academy", "destinationPoi": "city-gate", "bidirectional": true }
+    },
+    {
+      "id": "moon-gate",
+      "name": "Moonward Gate",
+      "type": "portal",
+      "position": { "x": 1240, "z": 880 },
+      "radius": 14,
+      "tags": [],
+      "portal": { "destinationZone": "moonhaven", "destinationPoi": "city-gate", "bidirectional": true }
+    },
+    {
+      "id": "grand-plaza",
+      "name": "Grand Plaza of Ashborne",
+      "type": "landmark",
+      "position": { "x": 640, "z": 640 },
+      "radius": 60,
+      "tags": ["safe-zone", "hub"]
+    },
+    {
+      "id": "trade-district",
+      "name": "Trade District",
+      "type": "landmark",
+      "position": { "x": 420, "z": 360 },
+      "radius": 90,
+      "tags": ["safe-zone", "commerce"]
+    },
+    {
+      "id": "merchant-exchange",
+      "name": "Merchant Exchange",
+      "type": "structure",
+      "position": { "x": 340, "z": 300 },
+      "radius": 12,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "grand-auction-house",
+      "name": "Grand Auction House",
+      "type": "structure",
+      "position": { "x": 480, "z": 300 },
+      "radius": 12,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["auction"], "npcs": ["auctioneer"] }
+    },
+    {
+      "id": "grand-bazaar",
+      "name": "Grand Bazaar",
+      "type": "structure",
+      "position": { "x": 420, "z": 440 },
+      "radius": 12,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "forge-quarter",
+      "name": "Forge Quarter",
+      "type": "landmark",
+      "position": { "x": 320, "z": 940 },
+      "radius": 80,
+      "tags": ["safe-zone", "crafting"]
+    },
+    {
+      "id": "ashborne-smithy",
+      "name": "Ashborne Smithy",
+      "type": "structure",
+      "position": { "x": 320, "z": 960 },
+      "radius": 12,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 4, "services": ["buy", "sell", "craft"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "alchemy-row",
+      "name": "Alchemy Row",
+      "type": "landmark",
+      "position": { "x": 920, "z": 320 },
+      "radius": 70,
+      "tags": ["safe-zone", "crafting"]
+    },
+    {
+      "id": "ashborne-apothecary",
+      "name": "Ashborne Apothecary",
+      "type": "structure",
+      "position": { "x": 940, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "structure": { "kind": "shop", "capacity": 4, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "guild-hall",
+      "name": "Ashborne Guild Hall",
+      "type": "structure",
+      "position": { "x": 900, "z": 920 },
+      "radius": 14,
+      "tags": [],
+      "structure": { "kind": "house", "capacity": 4, "services": ["guild"], "npcs": ["guild-registrar"] }
+    },
+    {
+      "id": "magistrates-keep",
+      "name": "Magistrate's Keep",
+      "type": "structure",
+      "position": { "x": 640, "z": 220 },
+      "radius": 16,
+      "tags": [],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest"], "npcs": ["quest-giver"] }
+    },
+    {
+      "id": "crimson-cathedral",
+      "name": "Crimson Cathedral",
+      "type": "structure",
+      "position": { "x": 640, "z": 1080 },
+      "radius": 20,
+      "tags": [],
+      "structure": { "kind": "shrine", "capacity": 3, "services": ["quest"], "npcs": ["lore-npc"] }
+    },
+    {
+      "id": "residential-district",
+      "name": "Residential District",
+      "type": "landmark",
+      "position": { "x": 200, "z": 640 },
+      "radius": 80,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "harbor-docks",
+      "name": "Ashborne Docks",
+      "type": "landmark",
+      "position": { "x": 140, "z": 640 },
+      "radius": 50,
+      "tags": []
+    },
+    {
+      "id": "phoenix-coliseum",
+      "name": "Phoenix Coliseum",
+      "type": "landmark",
+      "position": { "x": 1040, "z": 640 },
+      "radius": 60,
+      "tags": ["arena"]
+    },
+    {
+      "id": "the-undercity",
+      "name": "The Undercity",
+      "type": "spawn-point",
+      "position": { "x": 1060, "z": 1080 },
+      "radius": 70,
+      "tags": ["hostile", "dense"]
+    },
+    {
+      "id": "sewer-warrens",
+      "name": "Sewer Warrens",
+      "type": "spawn-point",
+      "position": { "x": 220, "z": 1080 },
+      "radius": 50,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "plaza-cross",
+      "name": "Plaza Crossing",
+      "type": "road-node",
+      "position": { "x": 640, "z": 460 },
+      "radius": 10,
+      "tags": []
+    },
+    {
+      "id": "south-cross",
+      "name": "South Crossing",
+      "type": "road-node",
+      "position": { "x": 640, "z": 860 },
+      "radius": 10,
+      "tags": []
+    }
+  ],
+  "roads": [
+    {
+      "id": "grand-concourse",
+      "name": "Grand Concourse",
+      "nodes": ["ashborne-gate", "residential-district", "grand-plaza", "phoenix-coliseum"]
+    },
+    {
+      "id": "merchant-way",
+      "name": "Merchant Way",
+      "nodes": ["trade-district", "plaza-cross", "grand-plaza", "alchemy-row"]
+    },
+    {
+      "id": "kings-road",
+      "name": "King's Road",
+      "nodes": ["magistrates-keep", "grand-plaza", "south-cross", "crimson-cathedral"]
+    },
+    {
+      "id": "artisan-loop",
+      "name": "Artisan Loop",
+      "nodes": ["forge-quarter", "south-cross", "guild-hall"]
+    },
+    {
+      "id": "academy-causeway",
+      "name": "Academy Causeway",
+      "nodes": ["grand-plaza", "academy-gate", "moon-gate"]
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "zoneId": "moonhaven",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Moonlit Trader Selene - Silver Goods",
+      "aliases": ["Selene"],
+      "x": 260,
+      "y": 260,
+      "hp": 999,
+      "shopItems": [0, 1, 2, 4, 6, 7, 8, 35, 80, 121, 227]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Tideglass Auctioneer Lun",
+      "aliases": ["Lun"],
+      "x": 380,
+      "y": 260,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Keeper Orin",
+      "aliases": ["Orin"],
+      "x": 260,
+      "y": 380,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Priestess Maren",
+      "aliases": ["Maren", "Priestess"],
+      "x": 380,
+      "y": 380,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "The Star-Reader",
+      "aliases": ["Star-Reader"],
+      "x": 320,
+      "y": 180,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Moonlit Shade",
+      "x": 200,
+      "y": 480,
+      "hp": 820,
+      "level": 25,
+      "xpReward": 290
+    },
+    {
+      "type": "mob",
+      "name": "Moonlit Shade",
+      "x": 170,
+      "y": 500,
+      "hp": 820,
+      "level": 25,
+      "xpReward": 290
+    },
+    {
+      "type": "mob",
+      "name": "Lunar Wisp",
+      "x": 230,
+      "y": 460,
+      "hp": 700,
+      "level": 26,
+      "xpReward": 305
+    },
+    {
+      "type": "mob",
+      "name": "Tideborn Lurker",
+      "x": 460,
+      "y": 460,
+      "hp": 900,
+      "level": 27,
+      "xpReward": 330
+    },
+    {
+      "type": "mob",
+      "name": "Tideborn Lurker",
+      "x": 480,
+      "y": 440,
+      "hp": 900,
+      "level": 27,
+      "xpReward": 330
+    },
+    {
+      "type": "boss",
+      "name": "Selene's Wrath, the Selenite Colossus",
+      "x": 500,
+      "y": 180,
+      "hp": 1850,
+      "level": 29,
+      "xpReward": 880
+    }
+  ]
+}

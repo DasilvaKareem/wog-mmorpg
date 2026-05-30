@@ -2236,6 +2236,13 @@ export class EntityManager {
         };
         const sfxId = GATHER_SFX[gatherType];
         if (sfxId) playSoundEffect(sfxId);
+        // Floating "+Iron Ore" pop so spectators see what was gathered
+        if (obj) {
+          const itemName = (ev.data.itemName as string | undefined) ?? "item";
+          const bonus = ev.data.bonusYield as number | undefined;
+          const label = bonus && bonus > 0 ? `+${itemName} x${1 + bonus}` : `+${itemName}`;
+          this.spawnFloating(obj, label, "xp", { startY: 2.2, riseAmount: 1.8, lifetime: 1.8 });
+        }
       }
       if (ev.type === "loot" && ev.entityId && ev.data?.craftType) {
         const obj = this.entities.get(ev.entityId);
@@ -2268,6 +2275,24 @@ export class EntityManager {
               startY: 2.1, riseAmount: 1.6, lifetime: 1.8, offsetX: 0,
             });
           }
+        }
+      }
+
+      // ── Item pickup: "+Iron Ore x2" pop when loot drops from a mob kill ──
+      if (ev.type === "loot" && ev.entityId && ev.data?.pickup) {
+        const obj = this.entities.get(ev.entityId);
+        if (obj) {
+          const items = (ev.data.items as Array<{ name: string; quantity: number }> | undefined) ?? [];
+          const labels = items.length > 0
+            ? items.map((it) => (it.quantity > 1 ? `+${it.name} x${it.quantity}` : `+${it.name}`))
+            : ["+item"];
+          // Stack multiple drops downward so they don't overlap
+          labels.forEach((label, i) => {
+            this.spawnFloating(obj, label, "xp", {
+              startY: 2.2 - i * 0.35, riseAmount: 1.8, lifetime: 1.9,
+            });
+          });
+          playSoundEffect("ui_item_pickup");
         }
       }
 

@@ -33,6 +33,19 @@
       }
     },
     {
+      "id": "ashborne-road",
+      "name": "Ashborne Road",
+      "type": "portal",
+      "position": { "x": 320, "z": 20 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "ashborne-city",
+        "destinationPoi": "ashborne-gate",
+        "bidirectional": true
+      }
+    },
+    {
       "id": "town-square",
       "name": "Duskhaven Square",
       "type": "landmark",

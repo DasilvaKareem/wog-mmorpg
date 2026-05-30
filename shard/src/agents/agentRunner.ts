@@ -83,6 +83,9 @@ import {
   type FailureMemoryEntry,
 } from "./agentUtils.js";
 import { detectTrigger, type TriggerState } from "./agentTriggers.js";
+import { CircuitBreaker } from "./circuitBreaker.js";
+import { TargetCommitment } from "./targetCommitment.js";
+import { ActionQueue } from "./actionQueue.js";
 import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.js";
 import * as behaviors from "./agentBehaviors.js";
 import { emitAgentChat, getAgentOrigin, maybeReactToChat, pickLine } from "./agentDialogue.js";
@@ -248,10 +251,12 @@ export class AgentRunner {
   private homeZone: string | null = null;
   /** Mirror of config.ignoreWeakMobs — refreshed each loop from Redis config. */
   private ignoreWeakMobsFlag = true;
-  /** Quests flagged as stuck — key=questId, value=epoch ms when it unsticks (5 min TTL). */
-  private stuckQuests = new Map<string, number>();
-  /** Gather nodes blacklisted due to "skill too low" — key=nodeId, value=epoch ms when retry allowed (5 min TTL). */
-  private gatherNodeBlacklist = new Map<string, number>();
+  /**
+   * Failure-tracking state machine: stuck quests, gather-node blacklist,
+   * per-zone death loops, rescue-ladder counters, and the failure-memory map.
+   * Owns its own TTLs and invariants — see circuitBreaker.ts.
+   */
+  private readonly breaker = new CircuitBreaker();
   /**
    * Recent learnProfession failures, keyed by professionId. When a learn
    * attempt fails for an unrecoverable reason (insufficient gold, no
@@ -260,22 +265,10 @@ export class AgentRunner {
    * tick and callers can return actionBlocked instead of actionProgressed.
    */
   private lastLearnFailure = new Map<string, { reason: string; category: "strategic" | "transient"; until: number }>();
-  /** Recent death timestamps per zone — used to detect death loops (mob too strong,
-   *  agent keeps respawning and walking back to die again). */
-  private recentDeathsByZone = new Map<string, number[]>();
-  /** When set, circuit-breaker / auto-progress enqueues are suppressed until
-   *  this epoch ms — the user just gave an explicit directive and we don't want
-   *  autonomous logic to wipe their queue. */
-  private userQueueLockUntil = 0;
-  /** Zone → epoch ms of the most recent circuit-breaker rescue attempt.
-   *  If a rescue fires for the same zone twice within 30s, the rescue itself
-   *  isn't working — escalate to the user instead of flailing again. */
-  private lastRescueByZone = new Map<string, number>();
-  /** Zone → cumulative rescue attempt count. Drives the rescue ladder
-   *  (relax strategy → zone change → gather fallback → idle) so we don't
-   *  jump straight to idle when one path is exhausted. Reset when the
-   *  agent successfully changes zone or after ~5 min idle. */
-  private rescueAttemptByZone = new Map<string, number>();
+  /** Pending user/auto-directed scripts + the user-directive lock that keeps
+   *  the circuit breaker / auto-progress from wiping a fresh directive. Pure
+   *  state — see actionQueue.ts. Redis persistence stays in the runner. */
+  private readonly queue = new ActionQueue();
   /** Human-readable messages queued for the agent chat panel. Drained by
    *  /agent/status so the client can surface them proactively. */
   private proactiveMessages: string[] = [];
@@ -307,67 +300,46 @@ export class AgentRunner {
     );
   }
 
-  /** Monotonic tick counter — used by commitTarget to measure commitment TTL in ticks. */
+  /** Monotonic tick counter — used to measure commitment TTL in ticks. */
   private tickCounter = 0;
-  /** Current target commitment. Cleared when the target dies, leaves the zone, or TTL expires. */
-  private committedTarget: { targetId: string; expiresAtTick: number } | null = null;
+  /** Sticky combat target so the agent doesn't thrash between mobs each tick.
+   *  Cleared when the target dies, leaves the zone, or its TTL expires. */
+  private readonly commitment = new TargetCommitment();
 
   private getCommittedTargetId(): string | null {
-    if (!this.committedTarget) return null;
-    if (this.tickCounter >= this.committedTarget.expiresAtTick) {
-      this.committedTarget = null;
-      return null;
-    }
-    return this.committedTarget.targetId;
+    return this.commitment.currentId(this.tickCounter);
   }
 
   private commitTarget(targetId: string, ttlTicks = 8): void {
-    const prev = this.committedTarget?.targetId;
-    this.committedTarget = { targetId, expiresAtTick: this.tickCounter + ttlTicks };
-    if (prev !== targetId) {
+    if (this.commitment.commit(targetId, this.tickCounter, ttlTicks)) {
       console.log(`[agent:${this.walletTag}] Commit target ${targetId} for ${ttlTicks} ticks`);
     }
   }
 
   private clearCommittedTarget(): void {
-    if (this.committedTarget) {
-      console.log(`[agent:${this.walletTag}] Released target commitment (${this.committedTarget.targetId})`);
+    const released = this.commitment.clear();
+    if (released) {
+      console.log(`[agent:${this.walletTag}] Released target commitment (${released})`);
     }
-    this.committedTarget = null;
   }
 
   private isQuestStuck(questId: string): boolean {
-    const until = this.stuckQuests.get(questId);
-    if (!until) return false;
-    if (Date.now() >= until) {
-      this.stuckQuests.delete(questId);
-      return false;
-    }
-    return true;
+    return this.breaker.isQuestStuck(questId);
   }
 
   private markQuestStuck(questId: string, reason: string): void {
-    const until = Date.now() + 5 * 60_000;
-    const wasStuck = this.stuckQuests.has(questId);
-    this.stuckQuests.set(questId, until);
-    if (!wasStuck) {
+    if (this.breaker.markQuestStuck(questId)) {
       console.log(`[agent:${this.walletTag}] Quest ${questId} flagged stuck for 5 min: ${reason}`);
       void this.logActivity(`Quest "${questId}" is stuck — skipping for 5 min (${reason})`);
     }
   }
 
   private isGatherNodeBlacklisted(nodeId: string): boolean {
-    const until = this.gatherNodeBlacklist.get(nodeId);
-    if (!until) return false;
-    if (Date.now() >= until) {
-      this.gatherNodeBlacklist.delete(nodeId);
-      return false;
-    }
-    return true;
+    return this.breaker.isGatherNodeBlacklisted(nodeId);
   }
 
   private markGatherNodeBlacklisted(nodeId: string): void {
-    this.gatherNodeBlacklist.set(nodeId, Date.now() + 5 * 60_000);
+    this.breaker.markGatherNodeBlacklisted(nodeId);
   }
   private combatFallbackCount = 0;
   public currentActivity = "Idle";
@@ -412,7 +384,6 @@ export class AgentRunner {
   private moveToLastLogAt = 0;
   private interactionCooldowns = new Map<string, number>();
   private pendingQuestionId: string | null = null;
-  private failureMemory = new Map<string, FailureMemoryEntry>();
   private telemetry = {
     loop: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
     walletBalance: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
@@ -490,7 +461,7 @@ export class AgentRunner {
       // If queue has items (e.g. user-directive enqueue), pop one immediately so
       // the next tick can't race ahead and overwrite currentScript before the
       // queue gets a turn. Otherwise force re-evaluation on next tick.
-      if (this.actionQueue.length > 0) {
+      if (!this.queue.isEmpty) {
         this.dequeueNext();
       } else {
         this.ticksSinceLastDecision = MAX_STALE_TICKS;
@@ -550,13 +521,10 @@ export class AgentRunner {
 
   // ── Action Queue ────────────────────────────────────────────────────────────
 
-  private actionQueue: BotScript[] = [];
-
   /** Push one or more scripts to the back of the queue */
   public enqueueActions(scripts: BotScript[], clearExisting = false): Promise<void> {
     return this.withGate(async () => {
       if (clearExisting) {
-        this.actionQueue = [];
         // Clear currentScript too. Otherwise the next tick re-runs the same
         // handler that just enqueued these actions (e.g. doQuesting →
         // doCraftQuest → learnProfession), and it re-enqueues the chain
@@ -564,32 +532,31 @@ export class AgentRunner {
         this.currentScript = null;
         this.ticksOnCurrentScript = 0;
       }
-      this.actionQueue.push(...scripts);
-      if (this.actionQueue.length > 10) this.actionQueue = this.actionQueue.slice(0, 10);
-      await setActionQueue(this.userWallet, this.actionQueue);
+      this.queue.push(scripts, clearExisting);
+      await setActionQueue(this.userWallet, this.queue.snapshot());
       // Start executing immediately if idle
-      if (!this.currentScript && this.actionQueue.length > 0) {
+      if (!this.currentScript && !this.queue.isEmpty) {
         this.dequeueNext();
       }
-      console.log(`[agent:${this.walletTag}] Queue now has ${this.actionQueue.length} items`);
+      console.log(`[agent:${this.walletTag}] Queue now has ${this.queue.size} items`);
     });
   }
 
   /** Like enqueueActions but flags the queue as user-driven for 60s — circuit
    *  breaker and auto-progress will not wipe these scripts during that window. */
   public enqueueUserActions(scripts: BotScript[], clearExisting = true): Promise<void> {
-    this.userQueueLockUntil = Date.now() + 60_000;
+    this.queue.lockForUser(60_000);
     return this.enqueueActions(scripts, clearExisting);
   }
 
   private isUserQueueLocked(): boolean {
-    return Date.now() < this.userQueueLockUntil;
+    return this.queue.isUserLocked;
   }
 
   /** Clear all queued actions */
   public clearQueue(): Promise<void> {
     return this.withGate(async () => {
-      this.actionQueue = [];
+      this.queue.clear();
       await clearActionQueue(this.userWallet);
       console.log(`[agent:${this.walletTag}] Queue cleared`);
     });
@@ -597,24 +564,24 @@ export class AgentRunner {
 
   /** View current queue */
   public getQueue(): BotScript[] {
-    return [...this.actionQueue];
+    return this.queue.snapshot();
   }
 
   /** Whether the queue is driving behavior (suppresses autonomous triggers) */
   public get queueActive(): boolean {
-    return this.actionQueue.length > 0;
+    return !this.queue.isEmpty;
   }
 
   /** Dequeue the next action and set it as current script */
   private dequeueNext(): void {
-    if (this.actionQueue.length === 0) return;
-    const next = this.actionQueue.shift()!;
+    const next = this.queue.shift();
+    if (!next) return;
     this.currentScript = next;
     this.ticksOnCurrentScript = 0;
     this.ticksSinceLastDecision = 0;
-    void setActionQueue(this.userWallet, this.actionQueue);
-    void this.logActivity(`[queue] ${next.type}: ${next.reason ?? "queued action"} (${this.actionQueue.length} remaining)`);
-    console.log(`[agent:${this.walletTag}] Dequeued: ${next.type} (${this.actionQueue.length} left)`);
+    void setActionQueue(this.userWallet, this.queue.snapshot());
+    void this.logActivity(`[queue] ${next.type}: ${next.reason ?? "queued action"} (${this.queue.size} remaining)`);
+    console.log(`[agent:${this.walletTag}] Dequeued: ${next.type} (${this.queue.size} left)`);
   }
 
   public getSnapshot() {
@@ -1281,11 +1248,7 @@ export class AgentRunner {
   }
 
   private getRecentFailures(limit = 6): FailureMemoryEntry[] {
-    return [...this.failureMemory.values()]
-      .filter((entry) => entry.consecutive > 0)
-      .sort((a, b) => b.lastAt - a.lastAt)
-      .slice(0, limit)
-      .map((entry) => ({ ...entry }));
+    return this.breaker.getRecentFailures(limit);
   }
 
   private topCountEntries(source: Record<string, number>, limit = 5): Array<{ name: string; count: number }> {
@@ -1425,14 +1388,7 @@ export class AgentRunner {
   }
 
   private clearFailure(key: string | undefined): void {
-    if (!key) return;
-    const existing = this.failureMemory.get(key);
-    if (!existing) return;
-    this.failureMemory.set(key, {
-      ...existing,
-      consecutive: 0,
-      lastAt: Date.now(),
-    });
+    this.breaker.clearFailure(key);
   }
 
   private recordFailure(args: {
@@ -1444,22 +1400,8 @@ export class AgentRunner {
     targetName?: string;
     category?: FailureCategory;
   }): FailureMemoryEntry {
-    const now = Date.now();
-    const existing = this.failureMemory.get(args.key);
-    const next: FailureMemoryEntry = {
-      key: args.key,
-      reason: args.reason,
-      count: (existing?.count ?? 0) + 1,
-      consecutive: (existing?.consecutive ?? 0) + 1,
-      firstAt: existing?.firstAt ?? now,
-      lastAt: now,
-      scriptType: args.scriptType ?? existing?.scriptType,
-      endpoint: args.endpoint ?? existing?.endpoint,
-      targetId: args.targetId ?? existing?.targetId,
-      targetName: args.targetName ?? existing?.targetName,
-      category: args.category ?? existing?.category,
-    };
-    this.failureMemory.set(args.key, next);
+    const next = this.breaker.recordFailure(args);
+    // Telemetry is the runner's concern — derive it from the updated entry.
     this.telemetry.failures.total += 1;
     if (next.consecutive > 1) this.telemetry.failures.repeated += 1;
     if (next.endpoint) {
@@ -1519,9 +1461,7 @@ export class AgentRunner {
       || failure.key.startsWith("combat:no-safe-targets")
       || failure.key.startsWith("combat:level-mismatch");
 
-    const attempts = this.rescueAttemptByZone.get(zone) ?? 0;
-    this.rescueAttemptByZone.set(zone, attempts + 1);
-    this.lastRescueByZone.set(zone, Date.now());
+    const attempts = this.breaker.recordRescueAttempt(zone);
 
     const emitChat = (event: Parameters<typeof emitAgentChat>[0]["event"], chatDetail: string) => {
       if (!this.entityId || !entity) return;
@@ -1637,7 +1577,7 @@ export class AgentRunner {
     void autoPatchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
     this.currentScript = { type: "idle", reason: `Circuit breaker exhausted in ${zone}` };
     this.ticksOnCurrentScript = 0;
-    this.rescueAttemptByZone.delete(zone);
+    this.breaker.resetRescues(zone);
     return true;
   }
 
@@ -1710,7 +1650,7 @@ export class AgentRunner {
     }
 
     if (!script?.type) return;
-    for (const entry of this.failureMemory.values()) {
+    for (const entry of this.breaker.failures()) {
       if (entry.scriptType === script.type) {
         this.clearFailure(entry.key);
       }
@@ -1818,20 +1758,16 @@ export class AgentRunner {
       // the last 5 minutes, the mob is too strong — force idle and clear
       // travel/quest focus so the agent stops walking back to its grave.
       const zone = this.currentRegion;
-      const now = Date.now();
-      const window = 5 * 60_000;
-      const deaths = (this.recentDeathsByZone.get(zone) ?? []).filter((t) => now - t < window);
-      deaths.push(now);
-      this.recentDeathsByZone.set(zone, deaths);
-      if (deaths.length >= 3) {
-        console.warn(`[agent:${this.walletTag}] Death loop in ${zone} (${deaths.length} deaths in 5min) — going idle`);
-        void this.logActivity(`Died ${deaths.length}x in ${zone} — pausing. Tell me where to go next.`);
+      const deathCount = this.breaker.recordDeath(zone);
+      if (deathCount >= 3) {
+        console.warn(`[agent:${this.walletTag}] Death loop in ${zone} (${deathCount} deaths in 5min) — going idle`);
+        void this.logActivity(`Died ${deathCount}x in ${zone} — pausing. Tell me where to go next.`);
         void autoPatchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
         this.currentScript = { type: "idle", reason: `Death loop in ${zone}` };
         this.ticksOnCurrentScript = 0;
         // Drop the threshold for the next deadly cycle — once unstuck the user
         // will choose where to go.
-        this.recentDeathsByZone.delete(zone);
+        this.breaker.clearDeaths(zone);
         return null;
       }
 
@@ -2219,10 +2155,10 @@ export class AgentRunner {
     }
 
     // ── Action queue: dequeue next if idle ──
-    if (!this.currentScript && this.actionQueue.length > 0) {
+    if (!this.currentScript && this.queue.size > 0) {
       this.recordUtilityQueueAbstain("queue_dequeue");
       console.log(
-        `[agent:${this.walletTag}] Utility abstain :: ${formatUtilityQueueAbstain(this.actionQueue.length, this.currentScript)}`
+        `[agent:${this.walletTag}] Utility abstain :: ${formatUtilityQueueAbstain(this.queue.size, this.currentScript)}`
       );
       this.dequeueNext();
       return; // let the new script execute on the next tick
@@ -2269,13 +2205,13 @@ export class AgentRunner {
 
     // When the queue is active, suppress triggers that would override user's plan.
     // Only "blocked" triggers (repeated failures) can interrupt a queued action.
-    if (trigger && this.actionQueue.length > 0) {
+    if (trigger && this.queue.size > 0) {
       if (trigger.type === "zone_arrived" || trigger.type === "periodic" || trigger.type === "no_script") {
         this.recordUtilityQueueAbstain(trigger.type);
         console.log(
-          `[agent:${this.walletTag}] Utility abstain [${trigger.type}] :: ${formatUtilityQueueAbstain(this.actionQueue.length, this.currentScript)}`
+          `[agent:${this.walletTag}] Utility abstain [${trigger.type}] :: ${formatUtilityQueueAbstain(this.queue.size, this.currentScript)}`
         );
-        console.log(`[agent:${this.walletTag}] Suppressed ${trigger.type} trigger — queue active (${this.actionQueue.length} items)`);
+        console.log(`[agent:${this.walletTag}] Suppressed ${trigger.type} trigger — queue active (${this.queue.size} items)`);
         trigger = null;
       }
     }
@@ -2334,8 +2270,8 @@ export class AgentRunner {
             currentRegion: this.currentRegion,
             currentScript: this.currentScript,
             currentScriptProgressing: false,
-            queueActive: this.actionQueue.length > 0,
-            queuedActionCount: this.actionQueue.length,
+            queueActive: this.queue.size > 0,
+            queuedActionCount: this.queue.size,
             userFocus: config.focus,
             strategy,
             copper: walletGoldCopper,
@@ -2435,8 +2371,8 @@ export class AgentRunner {
             currentRegion: this.currentRegion,
             currentScript: this.currentScript,
             currentScriptProgressing: this.lastActionResult?.status === "progressed" || this.lastActionResult?.status === "completed",
-            queueActive: this.actionQueue.length > 0,
-            queuedActionCount: this.actionQueue.length,
+            queueActive: this.queue.size > 0,
+            queuedActionCount: this.queue.size,
             userFocus: config.focus,
             strategy,
             copper: walletGoldCopper,
@@ -2569,9 +2505,9 @@ export class AgentRunner {
   async start(waitForFirstTick = false): Promise<void> {
     this.running = true;
     await this.restoreRuntimeSnapshot();
-    this.actionQueue = await getActionQueue(this.userWallet);
-    if (this.actionQueue.length > 0) {
-      console.log(`[agent:${this.walletTag}] Restored ${this.actionQueue.length} queued actions`);
+    this.queue.replace(await getActionQueue(this.userWallet));
+    if (this.queue.size > 0) {
+      console.log(`[agent:${this.walletTag}] Restored ${this.queue.size} queued actions`);
     }
     console.log(`[agent:${this.walletTag}] Loop starting`);
 
@@ -2650,7 +2586,7 @@ export class AgentRunner {
         void this.logActivity(`Region transition: ${this.currentRegion} -> ${newRegion}`);
         // Successfully changed zone → the prior zone's rescue attempts are
         // resolved; reset so re-entry doesn't carry old idle escalation state.
-        this.rescueAttemptByZone.delete(this.currentRegion);
+        this.breaker.resetRescues(this.currentRegion);
       }
       this.currentRegion = newRegion;
       await setAgentEntityRef(this.userWallet, {
@@ -2730,8 +2666,8 @@ export class AgentRunner {
 
         // Auto-release target commitment if the mob has died or left the zone.
         // Commitment TTL expiry is handled lazily by getCommittedTargetId().
-        if (this.committedTarget) {
-          const committed = getWorldEntity(this.committedTarget.targetId);
+        if (this.commitment.active) {
+          const committed = getWorldEntity(this.commitment.targetId!);
           if (!committed || committed.hp <= 0) {
             this.clearCommittedTarget();
           }

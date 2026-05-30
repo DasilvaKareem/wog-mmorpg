@@ -33,7 +33,10 @@
     "westmarch-ridge",
     "duskhaven",
     "sanguine-hollow",
-    "lycan-wilds"
+    "lycan-wilds",
+    "ashborne-city",
+    "ashborne-academy",
+    "moonhaven"
   ],
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
@@ -81,7 +84,11 @@
     { "from": "emberglow-estate", "to": "starfall-ranch", "portal": "starfall-path" },
     { "from": "emerald-woods", "to": "duskhaven", "portal": "twilight-rift" },
     { "from": "duskhaven", "to": "sanguine-hollow", "portal": "hollow-gate" },
-    { "from": "sanguine-hollow", "to": "lycan-wilds", "portal": "wilds-pass" }
+    { "from": "sanguine-hollow", "to": "lycan-wilds", "portal": "wilds-pass" },
+    { "from": "duskhaven", "to": "ashborne-city", "portal": "ashborne-road" },
+    { "from": "ashborne-city", "to": "ashborne-academy", "portal": "academy-gate" },
+    { "from": "ashborne-city", "to": "moonhaven", "portal": "moon-gate" },
+    { "from": "moonhaven", "to": "lycan-wilds", "portal": "wilds-gate" }
   ],
   "worldOffsets": {
     "village-square": { "x": 0, "z": 0 },
@@ -117,7 +124,10 @@
     "westmarch-ridge": { "x": -640, "z": 0 },
     "duskhaven": { "x": 0, "z": -3200 },
     "sanguine-hollow": { "x": 640, "z": -3200 },
-    "lycan-wilds": { "x": 1280, "z": -3200 }
+    "lycan-wilds": { "x": 1280, "z": -3200 },
+    "ashborne-city": { "x": 0, "z": -4480 },
+    "ashborne-academy": { "x": 1280, "z": -4480 },
+    "moonhaven": { "x": 1280, "z": -3840 }
   },
   "continents": [
     {

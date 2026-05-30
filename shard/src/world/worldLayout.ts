@@ -82,6 +82,9 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "duskhaven": 20,
   "sanguine-hollow": 27,
   "lycan-wilds": 33,
+  "ashborne-city": 20,
+  "ashborne-academy": 22,
+  "moonhaven": 25,
 };
 
 /** Farmland zones — used for farming/crops only, not questing or combat.
@@ -102,6 +105,7 @@ export const QUEST_ZONES: ReadonlySet<string> = new Set([
   "moondancer-glade", "felsrock-citadel", "lake-lumina",
   "azurshard-chasm", "sunflower-fields",
   "duskhaven", "sanguine-hollow", "lycan-wilds",
+  "ashborne-city", "ashborne-academy", "moonhaven",
 ]);
 
 // ── Connection graph (loaded from world.json) ───────────────────────
@@ -191,6 +195,57 @@ export function getSharedEdge(
   if (dz === from.size.height && dx === 0) return "south";
 
   return null; // corner-only or not adjacent
+}
+
+// ── Walkable routing (world-space edge adjacency) ────────────────────
+//
+// The connection GRAPH (world.json) includes "portal" links between zones
+// that are NOT contiguous in world-space (e.g. emerald-woods → duskhaven,
+// a different continent reached by boat). Since travel is now plain walking
+// across shared edges, routing must follow world-space edge adjacency, not
+// the connection graph — otherwise an agent beelines into the void between
+// zones and gets clamped back forever. Zones with no walkable land path
+// (Nocturnia) correctly resolve to `null` so the caller can fail fast.
+
+let walkableNeighborCache: Map<string, string[]> | null = null;
+
+/** Zones that share a full edge with `zoneId` in world-space (walkable). */
+export function getWalkableNeighbors(zoneId: string): string[] {
+  if (!walkableNeighborCache) {
+    const layout = loadLayout();
+    const ids = Object.keys(layout.zones);
+    walkableNeighborCache = new Map();
+    for (const from of ids) {
+      const neighbors = ids.filter((to) => to !== from && getSharedEdge(from, to) !== null);
+      walkableNeighborCache.set(from, neighbors);
+    }
+  }
+  return walkableNeighborCache.get(zoneId) ?? [];
+}
+
+/**
+ * BFS over world-space edge adjacency for the first hop from `fromZone`
+ * toward `targetZone`. Returns the adjacent zone to walk into next, the
+ * target itself if directly adjacent, or `null` if there is no walkable
+ * land route (target is on another continent / unreachable on foot).
+ */
+export function findWalkableNextHop(fromZone: string, targetZone: string): string | null {
+  if (fromZone === targetZone) return null;
+  const direct = getWalkableNeighbors(fromZone);
+  if (direct.includes(targetZone)) return targetZone;
+
+  const queue: Array<{ zone: string; firstHop: string }> = direct.map((zone) => ({ zone, firstHop: zone }));
+  const visited = new Set<string>([fromZone, ...direct]);
+  while (queue.length > 0) {
+    const { zone, firstHop } = queue.shift()!;
+    for (const neighbor of getWalkableNeighbors(zone)) {
+      if (visited.has(neighbor)) continue;
+      if (neighbor === targetZone) return firstHop;
+      visited.add(neighbor);
+      queue.push({ zone: neighbor, firstHop });
+    }
+  }
+  return null;
 }
 
 // ── Load layout from data files at startup ───────────────────────────

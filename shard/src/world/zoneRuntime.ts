@@ -238,6 +238,11 @@ export interface Entity {
   isRunning?: boolean;
   /** Travel command: zone the entity is walking toward (for portal-based transitions). */
   travelTargetZone?: string;
+  /** doTravel progress watchdog: best (smallest) world-space distance to the travel
+   *  target seen so far, and how many consecutive ticks we've failed to beat it.
+   *  Lets the agent give up on a stalled/clamped walk instead of looping the LLM. */
+  travelBestDist?: number;
+  travelStallTicks?: number;
   /** Mob spawn origin — used for leash/de-aggro (mobs/bosses only). */
   spawnX?: number;
   spawnY?: number;
@@ -1411,13 +1416,35 @@ export function handleMobDeath(
       console.log(
         `[loot] ${killer.name} (${killer.walletAddress}) auto-looted ${autoDrops.length} recyclable item drops from ${mob.name}`
       );
-      // Advance gather/craft quests for looted items
-      if (killer.type === "player" && killer.activeQuests?.length) {
-        for (const drop of autoDrops) {
-          const itemDef = getItemByTokenId(drop.tokenId);
-          if (itemDef?.name) advanceGatherQuests(killer, itemDef.name);
+      // Build a readable pickup list + advance gather/craft quests for looted items
+      const pickups: Array<{ name: string; quantity: number; tokenId: string }> = [];
+      for (const drop of autoDrops) {
+        const itemDef = getItemByTokenId(drop.tokenId);
+        const itemName = itemDef?.name ?? `Item #${drop.tokenId}`;
+        pickups.push({ name: itemName, quantity: drop.quantity, tokenId: drop.tokenId.toString() });
+        if (killer.type === "player" && killer.activeQuests?.length && itemDef?.name) {
+          advanceGatherQuests(killer, itemDef.name);
         }
       }
+      // Surface item pickups to spectators (chat log + floating "picked up X" pop)
+      const pickupLabel = pickups
+        .map((p) => (p.quantity > 1 ? `${p.name} x${p.quantity}` : p.name))
+        .join(", ");
+      logZoneEvent({
+        zoneId: zone.zoneId,
+        type: "loot",
+        tick: zone.tick,
+        message: `${killer.name} picked up ${pickupLabel}.`,
+        entityId: killer.id,
+        entityName: killer.name,
+        targetId: mob.id,
+        targetName: mob.name,
+        data: {
+          pickup: true,
+          items: pickups,
+          mobName: mob.name,
+        },
+      });
     }
   }
 
